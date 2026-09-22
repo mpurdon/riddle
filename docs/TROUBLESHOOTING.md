@@ -43,6 +43,10 @@ write.
 newest first and reconciles labels against its expected projection,
 reporting differences in Activity instead of overwriting.
 
+**Connecting a mailbox.** `docs/GMAIL_SETUP.md` covers the Google Cloud
+console steps, the Internal-vs-External choice and the sign-in failures worth
+recognising.
+
 **Workspace administrator blocks Riddle.** The OAuth error is
 `admin_policy_enforced`. Ask the administrator to allow the app's client id
 for the `gmail.modify` scope, or use a personal account.

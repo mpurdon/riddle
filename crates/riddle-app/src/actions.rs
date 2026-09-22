@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use riddle_actions::{meta, Action, ActionContext, ActionResult, Preview};
 use riddle_core::*;
 use riddle_errors::{Result, RiddleError};
+use riddle_observability::{rinfo, rwarn, Category};
 use riddle_store::repo;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -311,6 +312,7 @@ pub fn actions() -> Vec<Arc<dyn Action>> {
         Arc::new(ImportMeshes),
         Arc::new(Unsubscribe),
         Arc::new(SiftClassify),
+        Arc::new(ConnectGmail),
     ]
 }
 
@@ -389,6 +391,175 @@ impl Action for SiftClassify {
         )
         .with_affected(restored))
     }
+}
+
+/// Connect a Gmail account (§16). Returns as soon as the consent URL exists
+/// so no IPC call is left hanging while the user is in the browser; the rest
+/// — the loopback callback, the token exchange, reading the address, creating
+/// the Dig and starting its first sync — runs on a task and reports through
+/// events. The client id comes from settings; it is not a secret (desktop
+/// clients are public and use PKCE), which is why only an id is asked for.
+pub struct ConnectGmail;
+
+#[async_trait]
+impl Action for ConnectGmail {
+    fn meta(&self) -> ActionMeta {
+        meta("connect_gmail", "Connect a Gmail account")
+            .mutating()
+            .external()
+            .risk(Risk::High)
+            .autonomy(Autonomy::Trusted)
+            .build()
+    }
+
+    async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
+        let settings = ctx
+            .services
+            .require::<riddle_settings::SettingsStore>()?
+            .settings();
+        let client_id = settings.gmail.client_id.trim().to_string();
+        if client_id.is_empty() {
+            return Err(RiddleError::invalid(
+                "no Gmail OAuth client id yet — see docs/GMAIL_SETUP.md, then paste the id into Settings → Providers",
+            ));
+        }
+        let credentials = ctx.services.require::<riddle_credentials::Credentials>()?;
+        let config = riddle_gmail::GmailOAuthConfig::new(client_id, None);
+        let flow =
+            riddle_gmail::AuthFlow::begin(config, args.get("loginHint").and_then(|v| v.as_str()))
+                .await?;
+        let auth_url = flow.auth_url().to_string();
+
+        let dig_id = DigId::new();
+        let name: String = args
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Gmail")
+            .to_string();
+        let group: Option<String> = args
+            .get("group")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let privacy: PrivacyMode = args
+            .get("privacy")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or(settings.privacy_default);
+        let projection: ProjectionMode = args
+            .get("projection")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or(settings.projection_default);
+
+        let services = ctx.services.clone();
+        let id = dig_id.clone();
+        tokio::spawn(async move {
+            let http = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_default();
+            let outcome = finish_gmail_connect(
+                &services,
+                flow,
+                &http,
+                &credentials,
+                &id,
+                name,
+                group,
+                privacy,
+                projection,
+            )
+            .await;
+            match outcome {
+                Ok(email) => {
+                    rinfo!(Category::Credentials, "gmail dig {} connected", id);
+                    services.emit(RiddleEvent::Notify {
+                        title: "Gmail connected".into(),
+                        body: format!("{email} is syncing now."),
+                        find_id: None,
+                    });
+                    services.emit(RiddleEvent::SummaryChanged);
+                }
+                Err(e) => {
+                    rwarn!(
+                        Category::Credentials,
+                        "gmail sign-in failed for {}: {}",
+                        id,
+                        e.kind.as_str()
+                    );
+                    // Leave nothing half-created behind.
+                    let index = services.stores.index();
+                    let _ = repo::digs::remove(&index, &id);
+                    let _ = credentials.delete(&riddle_credentials::gmail_refresh_token_key(&id));
+                    services.emit(RiddleEvent::Notify {
+                        title: "Gmail sign-in failed".into(),
+                        body: e.message.clone(),
+                        find_id: None,
+                    });
+                }
+            }
+        });
+
+        let mut r = ActionResult::ok(
+            json!({ "digId": dig_id, "authUrl": auth_url }),
+            "Started a Gmail sign-in",
+        )
+        .with_inputs(json!({ "digId": dig_id }));
+        r.undo = UndoInfo::NotUndoable {
+            reason: "nothing is connected until Google returns; remove the Dig in Settings to disconnect".into(),
+        };
+        Ok(r)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn finish_gmail_connect(
+    services: &std::sync::Arc<riddle_actions::Services>,
+    flow: riddle_gmail::AuthFlow,
+    http: &reqwest::Client,
+    credentials: &std::sync::Arc<riddle_credentials::Credentials>,
+    dig_id: &DigId,
+    name: String,
+    group: Option<String>,
+    privacy: PrivacyMode,
+    projection: ProjectionMode,
+) -> Result<String> {
+    flow.complete(http, credentials, dig_id).await?;
+    let domains = services.require::<crate::domains::Domains>()?;
+    // The address comes from Google, not from the user typing it.
+    let mut dig = Dig {
+        id: dig_id.clone(),
+        name,
+        email: String::new(),
+        provider: ProviderKind::Gmail,
+        group,
+        privacy,
+        projection,
+        status: DigStatus::NotConnected,
+        shadow_started_at: None,
+        created_at: chrono::Utc::now(),
+    };
+    let provider = domains.providers.provider_for(&dig)?;
+    let profile = provider.profile().await?;
+    dig.email = profile.email.clone();
+    repo::digs::upsert(&services.stores.index(), &dig)?;
+    services.emit(RiddleEvent::DigStatusChanged {
+        dig_id: dig_id.clone(),
+        status: DigStatus::CatchingUp {
+            remaining: 0,
+            total: 0,
+        },
+    });
+    if let Some(ops) = services.get::<crate::ops::Ops>() {
+        let _ = ops.queue.enqueue(
+            riddle_jobs::JobSpec::new(
+                JobKind::InitialSync,
+                format!("First sync of {}", profile.email),
+            )
+            .dig(dig_id.clone()),
+        );
+    }
+    Ok(profile.email)
 }
 
 #[cfg(test)]

@@ -14,6 +14,7 @@ import type { ProjectionMode } from '@/bindings/ProjectionMode'
 import type { UserProfile } from '@/bindings/UserProfile'
 import { privacyStatement, probeJudge, probeLlm, probeProvider, qk, updatePreview } from '@/lib/api'
 import { fmtRelative, fmtUsd } from '@/lib/format'
+import { isTauri } from '@/lib/ipc'
 import { useDigGroups, useDigs, useProfile, useSettings } from '@/lib/queries'
 import { digStatusChip } from '@/lib/selectors'
 import type { ProbeResult, Settings } from '@/lib/types'
@@ -86,9 +87,7 @@ export default function SettingsPage() {
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <AddFixtureDig />
-            <Button icon={<Plug />} disabledReason="Waiting for an OAuth client id: the Google Cloud project, consent screen and gmail.modify scope are set up by you. Until then every Dig is a Fixture Dig.">
-              Connect Gmail
-            </Button>
+            <ConnectGmail clientId={s.gmail.clientId} />
           </div>
         </Section>
 
@@ -191,6 +190,48 @@ export default function SettingsPage() {
       </div>
       {tourForce ? <Tour force onDone={() => setTourForce(false)} /> : null}
     </div>
+  )
+}
+
+/**
+ * Connecting a mailbox happens in the browser, so the Action returns the
+ * consent URL and finishes on its own; the notification when Google comes
+ * back arrives as an event. docs/GMAIL_SETUP.md has the console steps that
+ * produce the client id.
+ */
+function ConnectGmail({ clientId }: { clientId: string }) {
+  const { run } = useAction()
+  const [waiting, setWaiting] = useState(false)
+  if (!clientId.trim()) {
+    return (
+      <Button
+        icon={<Plug />}
+        disabledReason="No Gmail OAuth client id yet. docs/GMAIL_SETUP.md walks through the Google Cloud project and consent screen; paste the id into Providers below. Until then every Dig is a Fixture Dig."
+      >
+        Connect Gmail
+      </Button>
+    )
+  }
+  return (
+    <Button
+      icon={<Plug />}
+      disabled={waiting}
+      onClick={async () => {
+        setWaiting(true)
+        try {
+          const out = await run<{ authUrl: string }>('connect_gmail', {}, { successToast: 'Finish the sign-in in your browser' })
+          const url = out?.result?.authUrl
+          if (url) {
+            if (isTauri) await import('@tauri-apps/plugin-opener').then((m) => m.openUrl(url))
+            else window.open(url, '_blank', 'noopener')
+          }
+        } finally {
+          setWaiting(false)
+        }
+      }}
+    >
+      {waiting ? 'Waiting for Google…' : 'Connect Gmail'}
+    </Button>
   )
 }
 

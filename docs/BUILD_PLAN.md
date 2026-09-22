@@ -55,7 +55,10 @@ escalation, so Finds, Unresolved, Activity and traces are populated.
 ## Known gaps after the first build
 
 - Gmail is unit-tested against recorded responses only; the live OAuth
-  flow, sync and projection against a real mailbox are unexercised.
+  flow, sync and projection against a real mailbox are unexercised. The
+  consent URL `connect_gmail` builds was checked by hand (endpoint, scope,
+  PKCE S256, loopback redirect, `access_type=offline`), but no real token
+  has ever been exchanged.
 - The native Tauri window was verified before the screen locked (shell,
   DEV badge, build stamp, close-to-hide); every later UI check ran
   headless through the bridge. Tray menu and Dock reopen are written but
@@ -75,10 +78,12 @@ escalation, so Finds, Unresolved, Activity and traces are populated.
 
 Things that need input, a secret, or a decision that is theirs:
 
-- Gmail OAuth client id (and secret if a Web client type is used): the
-  Google Cloud project, consent screen and `gmail.modify` scope. Until then
-  every Dig is a `Fixture` Dig; `riddle-gmail` is built and unit-tested
-  against recorded responses.
+- Gmail OAuth client id: the Google Cloud project, consent screen and
+  `gmail.modify` scope. `docs/GMAIL_SETUP.md` has the console steps and the
+  Internal-vs-External decision. Until then every Dig is a `Fixture` Dig;
+  `riddle-gmail` is built and unit-tested against recorded responses, and
+  `connect_gmail` wires the flow to a Dig but has never run against a real
+  client id.
 - Google Workspace test account for the dev OAuth client (§59).
 - Updater signing key, Developer ID certificate, notarization credentials
   (§6). The release workflow is written but not exercised.
