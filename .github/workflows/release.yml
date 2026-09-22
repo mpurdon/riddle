@@ -1,0 +1,85 @@
+# Tag-driven release (ARCHITECTURE.md §6). Signing, notarization and the
+# updater key are gated on secrets the owner adds; until they exist the job
+# stops after the build with an explicit message rather than shipping an
+# unsigned artifact.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          scripts/version-check.sh "$TAG"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: apps/desktop
+      - name: Tests
+        run: cargo test --workspace --exclude riddle-desktop
+      - name: Signing identity
+        id: signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ] || [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::APPLE_CERTIFICATE or TAURI_SIGNING_PRIVATE_KEY missing; building unsigned and stopping before release."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build
+        working-directory: apps/desktop
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --target aarch64-apple-darwin
+      - name: Hard gate (signed and notarized or refuse)
+        if: steps.signing.outputs.ready == 'true'
+        run: |
+          APP=$(ls -d target/aarch64-apple-darwin/release/bundle/macos/*.app | head -1)
+          codesign --verify --deep --strict "$APP"
+          xcrun stapler validate "$APP"
+          spctl --assess --type execute "$APP"
+      - name: Stop here when unsigned
+        if: steps.signing.outputs.ready != 'true'
+        run: |
+          echo "Unsigned build produced; not releasing. Add the signing secrets and re-tag."
+          exit 0
+      - name: Release
+        if: steps.signing.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DMG=$(ls target/aarch64-apple-darwin/release/bundle/dmg/*.dmg | head -1)
+          cp "$DMG" Riddle-macos-arm64.dmg
+          gh release create "$GITHUB_REF_NAME" --title "Riddle $GITHUB_REF_NAME" --notes-file CHANGELOG.md 2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" Riddle-macos-arm64.dmg --clobber
+          gh release upload "$GITHUB_REF_NAME" "$DMG" --clobber
+      # Homebrew cask bump: add once the tap exists (deferred).
