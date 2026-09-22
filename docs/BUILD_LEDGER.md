@@ -32,3 +32,4 @@ the estimate applied.
 | 15 | feat(app): domain assembly, judge attachment, the processing engine, end-to-end and live tests | 19 | 72263 | 58337102 | 120 | 2 |
 | 16 | feat(ops): settings with compatibility tests, durable job queue and scheduler, Activity ledger and the undo engine | 1 | 1356 | 2289398 | 4 | 1 |
 | 17 | feat(app): settings, job runner and undo wired; boot sequence; headless serve; desktop boots the core | 10 | 33215 | 21280270 | 36 | 1 |
+| 18 | feat(ui): the React client — every product and Developer surface against runtime-faithful mocks | 0 | 276 | 586095 | 1 | 0 |
