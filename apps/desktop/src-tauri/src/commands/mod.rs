@@ -6,7 +6,8 @@ pub mod dev;
 pub mod more;
 pub mod reads;
 
-pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static
+{
     tauri::generate_handler![
         dev::dev_info,
         dev::ui_log,

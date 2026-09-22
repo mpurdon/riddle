@@ -22,7 +22,11 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn bootstrap(handle: tauri::AppHandle, dirs: AppDirs, profile: Profile) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn bootstrap(
+        handle: tauri::AppHandle,
+        dirs: AppDirs,
+        profile: Profile,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let build = BuildStamp::from_env_vars(
             env!("CARGO_PKG_VERSION"),
             option_env!("RIDDLE_GIT_SHA"),
@@ -37,14 +41,30 @@ impl AppState {
             build: build.clone(),
             keychain_service: profile.keychain_service(),
         })?;
-        Ok(Self { app, handle, dirs, profile, build, started_at: Instant::now(), in_flight: Mutex::new(HashMap::new()) })
+        Ok(Self {
+            app,
+            handle,
+            dirs,
+            profile,
+            build,
+            started_at: Instant::now(),
+            in_flight: Mutex::new(HashMap::new()),
+        })
     }
 
-    pub fn stores(&self) -> Arc<Stores> { self.app.stores() }
+    pub fn stores(&self) -> Arc<Stores> {
+        self.app.stores()
+    }
 
     /// Close-to-hide from settings; on until settings are loaded.
     pub fn close_to_hide(&self) -> bool {
-        self.app.services.get::<riddle_settings::SettingsStore>().map(|s| s.settings().close_to_hide).unwrap_or(true)
+        self.app
+            .services
+            .get::<riddle_settings::SettingsStore>()
+            .map(|s| s.settings().close_to_hide)
+            .unwrap_or(true)
     }
-    pub fn runtime(&self) -> Arc<riddle_actions::Runtime> { self.app.runtime.clone() }
+    pub fn runtime(&self) -> Arc<riddle_actions::Runtime> {
+        self.app.runtime.clone()
+    }
 }

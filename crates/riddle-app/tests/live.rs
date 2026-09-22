@@ -14,28 +14,51 @@ use serde_json::json;
 #[tokio::test]
 #[ignore]
 async fn live_jev_sifts_the_fixture_and_records_usage() {
-    let app = App::open(AppConfig::in_memory(BuildStamp::from_env_vars("0", None, None, None, "live"))).unwrap();
+    let app = App::open(AppConfig::in_memory(BuildStamp::from_env_vars(
+        "0", None, None, None, "live",
+    )))
+    .unwrap();
     app.attach_domains(None).unwrap();
-    let identity = app.attach_judge(&JudgeConfig::default()).await.expect("judge attached from SSM");
+    let identity = app
+        .attach_judge(&JudgeConfig::default())
+        .await
+        .expect("judge attached from SSM");
     assert!(identity.starts_with("jev:"));
     app.runtime.arm(true);
-    let out = app.runtime.invoke_as_user("add_fixture_dig", json!({ "name": "Work", "email": "matt@example.com", "seed": 11, "count": 40 })).await.unwrap();
+    let out = app
+        .runtime
+        .invoke_as_user(
+            "add_fixture_dig",
+            json!({ "name": "Work", "email": "matt@example.com", "seed": 11, "count": 40 }),
+        )
+        .await
+        .unwrap();
     let dig: Dig = serde_json::from_value(out.result).unwrap();
     let started = std::time::Instant::now();
-    let report = app.full_pass(&dig.id, 500, &CancelFlag::new()).await.unwrap();
+    let report = app
+        .full_pass(&dig.id, 500, &CancelFlag::new())
+        .await
+        .unwrap();
     let elapsed = started.elapsed();
     assert!(!report.sift.judge_unavailable, "judge stayed available");
     assert_eq!(report.sift.remaining, 0);
     let store = app.stores.dig(&dig.id).unwrap();
     let counts = repo::classifications::counts(&store, None, false).unwrap();
-    let usage = repo::usage::summary(&store, &(chrono::Utc::now() - chrono::Duration::hours(1))).unwrap();
-    let stats = repo::traces::stats(&store, &(chrono::Utc::now() - chrono::Duration::hours(1))).unwrap();
+    let usage =
+        repo::usage::summary(&store, &(chrono::Utc::now() - chrono::Duration::hours(1))).unwrap();
+    let stats =
+        repo::traces::stats(&store, &(chrono::Utc::now() - chrono::Duration::hours(1))).unwrap();
     println!("LIVE JEV: {} messages in {:.1}s; dispositions {:?}; judge calls {} ({} tokens, ${:.4}); avg judge {:.0} ms; fresh {} cached {}",
         report.sift.processed, elapsed.as_secs_f64(), counts, usage.calls, usage.input_tokens, usage.priced_usd, stats.avg_judge_ms, report.sift.fresh_signals, report.sift.cached_signals);
     assert!(usage.calls > 0);
     assert!(usage.priced_usd > 0.0, "Jev is priced");
     // Re-sifting the same messages is served from the cache: no new judge calls.
-    let ids = repo::messages::ids_since(&store, &(chrono::Utc::now() - chrono::Duration::days(365)), 5).unwrap();
+    let ids = repo::messages::ids_since(
+        &store,
+        &(chrono::Utc::now() - chrono::Duration::days(365)),
+        5,
+    )
+    .unwrap();
     let before = usage.calls;
     for id in ids {
         let m = repo::messages::get(&store, &dig.id, &id).unwrap().unwrap();
@@ -44,7 +67,9 @@ async fn live_jev_sifts_the_fixture_and_records_usage() {
         let outcome = sift.run(input).await.unwrap();
         assert_eq!(outcome.fresh, 0, "all Signals cached");
     }
-    let after = repo::usage::summary(&store, &(chrono::Utc::now() - chrono::Duration::hours(1))).unwrap().calls;
+    let after = repo::usage::summary(&store, &(chrono::Utc::now() - chrono::Duration::hours(1)))
+        .unwrap()
+        .calls;
     assert_eq!(after, before);
 }
 
@@ -54,10 +79,15 @@ async fn live_jev_sifts_the_fixture_and_records_usage() {
 #[tokio::test]
 #[ignore]
 async fn live_bedrock_escalation_refines_signals_and_is_traced() {
-    let app = App::open(AppConfig::in_memory(BuildStamp::from_env_vars("0", None, None, None, "live"))).unwrap();
+    let app = App::open(AppConfig::in_memory(BuildStamp::from_env_vars(
+        "0", None, None, None, "live",
+    )))
+    .unwrap();
     app.attach_domains(None).unwrap();
     app.attach_ai(&AiConfig::default());
-    app.attach_judge(&JudgeConfig::default()).await.expect("judge");
+    app.attach_judge(&JudgeConfig::default())
+        .await
+        .expect("judge");
     app.runtime.arm(true);
     let out = app.runtime.invoke_as_user("add_fixture_dig", json!({ "name": "Work", "email": "matt@example.com", "seed": 3, "count": 25, "privacy": "cloud_reasoning" })).await.unwrap();
     let mut dig: Dig = serde_json::from_value(out.result).unwrap();
@@ -65,18 +95,30 @@ async fn live_bedrock_escalation_refines_signals_and_is_traced() {
         dig.privacy = PrivacyMode::CloudReasoning;
         repo::digs::upsert(&app.stores.index(), &dig).unwrap();
     }
-    let report = app.full_pass(&dig.id, 500, &CancelFlag::new()).await.unwrap();
+    let report = app
+        .full_pass(&dig.id, 500, &CancelFlag::new())
+        .await
+        .unwrap();
     let store = app.stores.dig(&dig.id).unwrap();
     let traces = repo::traces::recent(&store, 200).unwrap();
     let escalated: Vec<&DecisionTrace> = traces.iter().filter(|t| t.escalation.is_some()).collect();
     let counts = repo::classifications::counts(&store, None, false).unwrap();
-    let usage = app.usage_summary(chrono::Utc::now() - chrono::Duration::hours(1)).unwrap();
+    let usage = app
+        .usage_summary(chrono::Utc::now() - chrono::Duration::hours(1))
+        .unwrap();
     println!("LIVE BEDROCK: {} sifted; {} escalated; dispositions {:?}; usage {} calls, priced ${:.4}, unpriced {}; by provider {:?}",
         report.sift.processed, escalated.len(), counts, usage.calls, usage.priced_usd, usage.unpriced_calls, usage.by_provider);
     assert!(!escalated.is_empty(), "at least one message escalated");
     for t in escalated.iter().take(3) {
         let e = t.escalation.as_ref().unwrap();
-        println!("ESCALATION model={} reason={:?} refined={} latency={}ms rationale={:?}", e.model_id, e.reason, e.refined.len(), e.latency_ms, e.rationale.chars().take(300).collect::<String>());
+        println!(
+            "ESCALATION model={} reason={:?} refined={} latency={}ms rationale={:?}",
+            e.model_id,
+            e.reason,
+            e.refined.len(),
+            e.latency_ms,
+            e.rationale.chars().take(300).collect::<String>()
+        );
     }
     for t in &escalated {
         let e = t.escalation.as_ref().unwrap();

@@ -92,7 +92,12 @@ impl App {
         let llm: Arc<dyn Llm> = match cfg.provider.as_str() {
             "bedrock" => Arc::new(
                 BedrockLlm::new(
-                    BedrockConfig { profile: cfg.profile.clone(), region: cfg.region.clone(), default_model: cfg.escalation_model.clone(), ..Default::default() },
+                    BedrockConfig {
+                        profile: cfg.profile.clone(),
+                        region: cfg.region.clone(),
+                        default_model: cfg.escalation_model.clone(),
+                        ..Default::default()
+                    },
                     catalog.clone(),
                 )
                 .with_recorder(recorder),
@@ -105,21 +110,37 @@ impl App {
         });
         // Escalation: one refiner per privacy mode that allows the LLM; Sift
         // picks by Dig. Cloud reasoning is the only mode that permits it.
-        let refiner: Arc<dyn SignalRefiner> = Arc::new(LlmRefiner::new(llm.clone(), prompts.clone(), Some(cfg.escalation_model.clone())).with_privacy(PrivacyMode::CloudReasoning));
+        let refiner: Arc<dyn SignalRefiner> = Arc::new(
+            LlmRefiner::new(
+                llm.clone(),
+                prompts.clone(),
+                Some(cfg.escalation_model.clone()),
+            )
+            .with_privacy(PrivacyMode::CloudReasoning),
+        );
         if cfg.provider != "null" {
             *self.services.refiner.write() = Some(refiner);
         }
         let reads: Arc<dyn riddle_agent::reads::DirectorReads> = Arc::new(AppReads(self.clone()));
-        self.services.insert(Arc::new(DirectorReadsHandle(reads.clone())));
+        self.services
+            .insert(Arc::new(DirectorReadsHandle(reads.clone())));
         let events: Arc<dyn riddle_core::EventSink> = self.events.clone();
-        let tool_loop = Arc::new(ToolLoop::new(llm.clone(), self.runtime.clone(), reads, events.clone()));
+        let tool_loop = Arc::new(ToolLoop::new(
+            llm.clone(),
+            self.runtime.clone(),
+            reads,
+            events.clone(),
+        ));
         let director = Arc::new(Director::new(
             tool_loop.clone(),
             self.stores.clone(),
             events.clone(),
             prompts.clone(),
             self.services.clock.clone(),
-            DirectorConfig { model_id: Some(cfg.director_model.clone()), ..Default::default() },
+            DirectorConfig {
+                model_id: Some(cfg.director_model.clone()),
+                ..Default::default()
+            },
         ));
         self.services.insert(director.clone());
         let expeditions = ExpeditionRunner::new(
@@ -128,14 +149,29 @@ impl App {
             events,
             prompts.clone(),
             self.services.clock.clone(),
-            ExpeditionConfig { model_id: Some(cfg.director_model.clone()), ..Default::default() },
+            ExpeditionConfig {
+                model_id: Some(cfg.director_model.clone()),
+                ..Default::default()
+            },
         );
         expeditions.register(&self.services);
         for a in riddle_expeditions::actions() {
             self.runtime.registry.write().register(a);
         }
-        rinfo!(Category::Llm, "ai attached: provider={} escalation={} director={}", cfg.provider, cfg.escalation_model, cfg.director_model);
-        let ai = Arc::new(AiServices { llm, catalog, prompts, director, expeditions });
+        rinfo!(
+            Category::Llm,
+            "ai attached: provider={} escalation={} director={}",
+            cfg.provider,
+            cfg.escalation_model,
+            cfg.director_model
+        );
+        let ai = Arc::new(AiServices {
+            llm,
+            catalog,
+            prompts,
+            director,
+            expeditions,
+        });
         self.services.insert(ai.clone());
         ai
     }

@@ -5,7 +5,10 @@ use riddle_errors::Result;
 use rusqlite::{params, OptionalExtension};
 
 pub fn get(store: &Store, key: &str) -> Result<Option<String>> {
-    store.read(|c| c.query_row("SELECT value FROM kv WHERE key = ?1", [key], |r| r.get(0)).optional())
+    store.read(|c| {
+        c.query_row("SELECT value FROM kv WHERE key = ?1", [key], |r| r.get(0))
+            .optional()
+    })
 }
 
 pub fn set(store: &Store, key: &str, value: &str) -> Result<()> {

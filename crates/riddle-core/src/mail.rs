@@ -17,7 +17,10 @@ pub struct Address {
 
 impl Address {
     pub fn new(email: impl Into<String>, name: Option<&str>) -> Self {
-        Self { email: email.into().to_lowercase(), name: name.map(|s| s.to_string()) }
+        Self {
+            email: email.into().to_lowercase(),
+            name: name.map(|s| s.to_string()),
+        }
     }
     pub fn domain(&self) -> &str {
         self.email.rsplit_once('@').map(|(_, d)| d).unwrap_or("")

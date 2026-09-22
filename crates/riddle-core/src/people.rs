@@ -61,16 +61,29 @@ impl ThreadState {
         let mut s = format!(
             "Thread of {} messages; last speaker: {}.",
             self.message_count,
-            match self.last_speaker { Speaker::Me => "me", Speaker::Them => "them", Speaker::Nobody => "nobody" }
+            match self.last_speaker {
+                Speaker::Me => "me",
+                Speaker::Them => "them",
+                Speaker::Nobody => "nobody",
+            }
         );
         if !self.open_asks_from_them.is_empty() {
-            s.push_str(&format!(" Open asks from them: {}.", self.open_asks_from_them.join("; ")));
+            s.push_str(&format!(
+                " Open asks from them: {}.",
+                self.open_asks_from_them.join("; ")
+            ));
         }
         if !self.open_asks_from_me.is_empty() {
-            s.push_str(&format!(" Open asks from me: {}.", self.open_asks_from_me.join("; ")));
+            s.push_str(&format!(
+                " Open asks from me: {}.",
+                self.open_asks_from_me.join("; ")
+            ));
         }
         if !self.my_commitments.is_empty() {
-            s.push_str(&format!(" My commitments: {}.", self.my_commitments.join("; ")));
+            s.push_str(&format!(
+                " My commitments: {}.",
+                self.my_commitments.join("; ")
+            ));
         }
         s
     }
@@ -97,23 +110,39 @@ pub struct UserProfile {
 impl UserProfile {
     pub fn is_me(&self, email: &str) -> bool {
         let e = email.to_lowercase();
-        self.addresses.iter().chain(self.aliases.iter()).any(|a| a.eq_ignore_ascii_case(&e))
+        self.addresses
+            .iter()
+            .chain(self.aliases.iter())
+            .any(|a| a.eq_ignore_ascii_case(&e))
     }
     pub fn is_never_hidden(&self, email: &str) -> bool {
         Self::list_matches(&self.never_hidden, email)
     }
-    pub fn is_vip(&self, email: &str) -> bool { Self::list_matches(&self.vips, email) }
-    pub fn is_family(&self, email: &str) -> bool { Self::list_matches(&self.family, email) }
+    pub fn is_vip(&self, email: &str) -> bool {
+        Self::list_matches(&self.vips, email)
+    }
+    pub fn is_family(&self, email: &str) -> bool {
+        Self::list_matches(&self.family, email)
+    }
     pub fn is_own_organisation(&self, email: &str) -> bool {
-        let domain = email.rsplit_once('@').map(|(_, d)| d.to_lowercase()).unwrap_or_default();
-        self.organisation_domains.iter().any(|d| d.eq_ignore_ascii_case(&domain))
+        let domain = email
+            .rsplit_once('@')
+            .map(|(_, d)| d.to_lowercase())
+            .unwrap_or_default();
+        self.organisation_domains
+            .iter()
+            .any(|d| d.eq_ignore_ascii_case(&domain))
     }
     fn list_matches(list: &[String], email: &str) -> bool {
         let e = email.to_lowercase();
         let domain = e.rsplit_once('@').map(|(_, d)| d).unwrap_or("");
         list.iter().any(|entry| {
             let entry = entry.to_lowercase();
-            if let Some(d) = entry.strip_prefix('@') { d == domain } else { entry == e }
+            if let Some(d) = entry.strip_prefix('@') {
+                d == domain
+            } else {
+                entry == e
+            }
         })
     }
 }

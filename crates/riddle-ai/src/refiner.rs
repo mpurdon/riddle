@@ -253,7 +253,12 @@ pub fn parse_refinement(text: &str, req: &RefineRequest) -> Result<Parsed> {
         };
         let version = o
             .get("version")
-            .and_then(|v| v.as_u64().map(|v| v as u32).or_else(|| v.as_str().and_then(|s| s.trim_start_matches('v').parse().ok())))
+            .and_then(|v| {
+                v.as_u64().map(|v| v as u32).or_else(|| {
+                    v.as_str()
+                        .and_then(|s| s.trim_start_matches('v').parse().ok())
+                })
+            })
             .or(key_version);
         // Match against the evaluations we were asked to refine: same name, same version when given.
         let Some(original) = req

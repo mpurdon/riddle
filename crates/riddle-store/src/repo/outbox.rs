@@ -16,7 +16,14 @@ pub struct OutboxRow<T> {
     pub idempotency_key: Option<String>,
 }
 
-pub fn enqueue<T: Serialize>(store: &Store, op: &str, thread_id: Option<&str>, message_id: Option<&str>, payload: &T, idempotency_key: Option<&str>) -> Result<i64> {
+pub fn enqueue<T: Serialize>(
+    store: &Store,
+    op: &str,
+    thread_id: Option<&str>,
+    message_id: Option<&str>,
+    payload: &T,
+    idempotency_key: Option<&str>,
+) -> Result<i64> {
     store.write(|c| {
         c.execute(
             "INSERT OR IGNORE INTO outbox (thread_id, message_id, op, json, idempotency_key, next_attempt_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
@@ -51,7 +58,13 @@ pub fn due<T: DeserializeOwned>(store: &Store, limit: u32) -> Result<Vec<OutboxR
 }
 
 pub fn mark_applied(store: &Store, id: i64) -> Result<()> {
-    store.write(|c| { c.execute("UPDATE outbox SET applied_at = ?2, error = NULL WHERE id = ?1", params![id, now_ts()])?; Ok(()) })
+    store.write(|c| {
+        c.execute(
+            "UPDATE outbox SET applied_at = ?2, error = NULL WHERE id = ?1",
+            params![id, now_ts()],
+        )?;
+        Ok(())
+    })
 }
 
 /// Record a failure and schedule the retry with exponential backoff, capped at an hour.
@@ -65,17 +78,33 @@ pub fn mark_failed(store: &Store, id: i64, error: &str) -> Result<()> {
 }
 
 pub fn pending_count(store: &Store) -> Result<u64> {
-    store.read(|c| c.query_row("SELECT count(*) FROM outbox WHERE applied_at IS NULL", [], |r| r.get::<_, i64>(0)).map(|n| n as u64))
+    store.read(|c| {
+        c.query_row(
+            "SELECT count(*) FROM outbox WHERE applied_at IS NULL",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n as u64)
+    })
 }
 
 /// Remove pending rows for a message (undo before projection ran).
 pub fn cancel_for_message(store: &Store, message_id: &str) -> Result<u64> {
-    store.write(|c| Ok(c.execute("DELETE FROM outbox WHERE applied_at IS NULL AND message_id = ?1", [message_id])? as u64))
+    store.write(|c| {
+        Ok(c.execute(
+            "DELETE FROM outbox WHERE applied_at IS NULL AND message_id = ?1",
+            [message_id],
+        )? as u64)
+    })
 }
 
 /// Rows applied within the last `since_ms` for a message: the projection
 /// echoes sync must not mistake for a human move (§15 attribution).
-pub fn recently_applied_for_message<T: DeserializeOwned>(store: &Store, message_id: &str, since_ms: i64) -> Result<Vec<OutboxRow<T>>> {
+pub fn recently_applied_for_message<T: DeserializeOwned>(
+    store: &Store,
+    message_id: &str,
+    since_ms: i64,
+) -> Result<Vec<OutboxRow<T>>> {
     store.read(|c| {
         let mut st = c.prepare(
             "SELECT id, thread_id, message_id, op, json, attempts, idempotency_key FROM outbox WHERE message_id = ?1 AND applied_at IS NOT NULL AND error IS NULL AND applied_at >= ?2 ORDER BY applied_at DESC",
@@ -96,7 +125,10 @@ pub fn recently_applied_for_message<T: DeserializeOwned>(store: &Store, message_
 }
 
 /// Pending rows for a message, oldest first (undo needs to know what is queued).
-pub fn pending_for_message<T: DeserializeOwned>(store: &Store, message_id: &str) -> Result<Vec<OutboxRow<T>>> {
+pub fn pending_for_message<T: DeserializeOwned>(
+    store: &Store,
+    message_id: &str,
+) -> Result<Vec<OutboxRow<T>>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT id, thread_id, message_id, op, json, attempts, idempotency_key FROM outbox WHERE message_id = ?1 AND applied_at IS NULL ORDER BY id")?;
         let rows = st.query_map([message_id], |r| {
@@ -117,7 +149,13 @@ pub fn pending_for_message<T: DeserializeOwned>(store: &Store, message_id: &str)
 /// Close a row without applying it, keeping the reason: a conflict where the
 /// provider changed underneath (§15), or an op made moot by a later one.
 pub fn mark_skipped(store: &Store, id: i64, reason: &str) -> Result<()> {
-    store.write(|c| { c.execute("UPDATE outbox SET applied_at = ?2, error = ?3 WHERE id = ?1", params![id, now_ts(), reason])?; Ok(()) })
+    store.write(|c| {
+        c.execute(
+            "UPDATE outbox SET applied_at = ?2, error = ?3 WHERE id = ?1",
+            params![id, now_ts(), reason],
+        )?;
+        Ok(())
+    })
 }
 
 /// Rows that failed permanently (skipped with a reason), newest first.

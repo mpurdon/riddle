@@ -19,15 +19,26 @@ pub fn upsert_in(c: &rusqlite::Connection, f: &Find) -> rusqlite::Result<()> {
             f.due_at.as_ref().map(ts), f.snoozed_until.as_ref().map(ts), to_json(f)?, ts(&f.created_at), ts(&f.updated_at)
         ],
     )?;
-    c.execute("DELETE FROM find_sources WHERE find_id = ?1", [f.id.as_str()])?;
+    c.execute(
+        "DELETE FROM find_sources WHERE find_id = ?1",
+        [f.id.as_str()],
+    )?;
     for s in &f.sources {
-        c.execute("INSERT OR IGNORE INTO find_sources (find_id, message_id, dig_id) VALUES (?1, ?2, ?3)", params![f.id.as_str(), s.message_id.as_str(), s.dig_id.as_str()])?;
+        c.execute(
+            "INSERT OR IGNORE INTO find_sources (find_id, message_id, dig_id) VALUES (?1, ?2, ?3)",
+            params![f.id.as_str(), s.message_id.as_str(), s.dig_id.as_str()],
+        )?;
     }
     Ok(())
 }
 
 pub fn get(store: &Store, id: &FindId) -> Result<Option<Find>> {
-    store.read(|c| c.query_row("SELECT json FROM finds WHERE id = ?1", [id.as_str()], |r| from_json(r.get::<_, String>(0)?)).optional())
+    store.read(|c| {
+        c.query_row("SELECT json FROM finds WHERE id = ?1", [id.as_str()], |r| {
+            from_json(r.get::<_, String>(0)?)
+        })
+        .optional()
+    })
 }
 
 pub fn by_identity(store: &Store, key: &str) -> Result<Option<Find>> {
@@ -61,25 +72,55 @@ pub fn list(store: &Store, filter: &FindFilter, page: &PageRequest) -> Result<Pa
     store.read(|c| {
         let mut sql = String::from("SELECT DISTINCT f.json, f.priority, f.created_at FROM finds f");
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if filter.dig_id.is_some() { sql.push_str(" JOIN find_sources s ON s.find_id = f.id"); }
+        if filter.dig_id.is_some() {
+            sql.push_str(" JOIN find_sources s ON s.find_id = f.id");
+        }
         sql.push_str(" WHERE 1=1");
-        if let Some(s) = filter.status { sql.push_str(" AND f.status = ?"); args.push(Box::new(s.as_str())); }
-        if let Some(t) = filter.find_type { sql.push_str(" AND f.find_type = ?"); args.push(Box::new(t.as_str())); }
-        if let Some(d) = &filter.dig_id { sql.push_str(" AND s.dig_id = ?"); args.push(Box::new(d.clone())); }
-        if let Some(p) = filter.min_priority { sql.push_str(" AND f.priority >= ?"); args.push(Box::new(p as i64)); }
+        if let Some(s) = filter.status {
+            sql.push_str(" AND f.status = ?");
+            args.push(Box::new(s.as_str()));
+        }
+        if let Some(t) = filter.find_type {
+            sql.push_str(" AND f.find_type = ?");
+            args.push(Box::new(t.as_str()));
+        }
+        if let Some(d) = &filter.dig_id {
+            sql.push_str(" AND s.dig_id = ?");
+            args.push(Box::new(d.clone()));
+        }
+        if let Some(p) = filter.min_priority {
+            sql.push_str(" AND f.priority >= ?");
+            args.push(Box::new(p as i64));
+        }
         let count_sql = format!("SELECT count(*) FROM ({sql})");
-        let total: i64 = c.query_row(&count_sql, rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), |r| r.get(0))?;
+        let total: i64 = c.query_row(
+            &count_sql,
+            rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())),
+            |r| r.get(0),
+        )?;
         sql.push_str(" ORDER BY f.priority DESC, f.created_at DESC LIMIT ? OFFSET ?");
         args.push(Box::new(limit));
         args.push(Box::new(offset));
         let mut st = c.prepare(&sql)?;
-        let items = st.query_map(rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), |r| from_json(r.get::<_, String>(0)?))?.collect::<rusqlite::Result<Vec<Find>>>()?;
+        let items = st
+            .query_map(
+                rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())),
+                |r| from_json(r.get::<_, String>(0)?),
+            )?
+            .collect::<rusqlite::Result<Vec<Find>>>()?;
         Ok(Page::from_offset(items, offset, limit, Some(total as u64)))
     })
 }
 
 pub fn count_open(store: &Store) -> Result<u64> {
-    store.read(|c| c.query_row("SELECT count(*) FROM finds WHERE status = 'open'", [], |r| r.get::<_, i64>(0)).map(|n| n as u64))
+    store.read(|c| {
+        c.query_row(
+            "SELECT count(*) FROM finds WHERE status = 'open'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n as u64)
+    })
 }
 
 /// Snoozed Finds whose snooze has ended, and dated Finds past their date.
@@ -95,14 +136,22 @@ pub fn due_for_temporal(store: &Store, now: &chrono::DateTime<chrono::Utc>) -> R
 
 pub fn open_by_thread(store: &Store, thread_provider_id: &str) -> Result<Vec<Find>> {
     store.read(|c| {
-        let mut st = c.prepare("SELECT json FROM finds WHERE status IN ('open','snoozed') AND identity_key = ?1")?;
-        let rows = st.query_map([thread_provider_id], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let mut st = c.prepare(
+            "SELECT json FROM finds WHERE status IN ('open','snoozed') AND identity_key = ?1",
+        )?;
+        let rows = st
+            .query_map([thread_provider_id], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }
 
 /// Every Find in a status, optionally of one type; Temporal Sift walks these.
-pub fn list_by_status(store: &Store, status: FindStatus, find_type: Option<FindType>) -> Result<Vec<Find>> {
+pub fn list_by_status(
+    store: &Store,
+    status: FindStatus,
+    find_type: Option<FindType>,
+) -> Result<Vec<Find>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT json FROM finds WHERE status = ?1 AND (?2 IS NULL OR find_type = ?2) ORDER BY created_at")?;
         let rows = st.query_map(params![status.as_str(), find_type.map(|t| t.as_str())], |r| from_json(r.get::<_, String>(0)?))?.collect();
@@ -114,8 +163,11 @@ pub fn list_by_status(store: &Store, status: FindStatus, find_type: Option<FindT
 /// that must not recreate a dismissed Follow Up read this.
 pub fn any_by_identity(store: &Store, key: &str) -> Result<Vec<Find>> {
     store.read(|c| {
-        let mut st = c.prepare("SELECT json FROM finds WHERE identity_key = ?1 ORDER BY created_at DESC")?;
-        let rows = st.query_map([key], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let mut st =
+            c.prepare("SELECT json FROM finds WHERE identity_key = ?1 ORDER BY created_at DESC")?;
+        let rows = st
+            .query_map([key], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }

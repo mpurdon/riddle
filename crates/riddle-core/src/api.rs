@@ -20,8 +20,15 @@ pub struct PageRequest {
 }
 
 impl PageRequest {
-    pub fn limit(&self) -> u32 { self.limit.unwrap_or(50).clamp(1, 500) }
-    pub fn offset(&self) -> u64 { self.cursor.as_deref().and_then(|c| c.parse().ok()).unwrap_or(0) }
+    pub fn limit(&self) -> u32 {
+        self.limit.unwrap_or(50).clamp(1, 500)
+    }
+    pub fn offset(&self) -> u64 {
+        self.cursor
+            .as_deref()
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -36,8 +43,16 @@ pub struct Page<T> {
 
 impl<T> Page<T> {
     pub fn from_offset(items: Vec<T>, offset: u64, limit: u32, total: Option<u64>) -> Self {
-        let next = if items.len() as u32 == limit { Some((offset + limit as u64).to_string()) } else { None };
-        Self { items, next_cursor: next, total }
+        let next = if items.len() as u32 == limit {
+            Some((offset + limit as u64).to_string())
+        } else {
+            None
+        };
+        Self {
+            items,
+            next_cursor: next,
+            total,
+        }
     }
 }
 
@@ -114,30 +129,80 @@ pub struct Explanation {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
 pub enum RiddleEvent {
-    JobChanged { job: Job },
-    JobProgress { job_id: JobId, done: u64, total: Option<u64>, step: String },
-    DigStatusChanged { dig_id: DigId, status: DigStatus },
-    FindCreated { find: Find },
-    FindChanged { find_id: FindId },
-    ActivityAppended { activity: Activity },
-    MessageClassified { message_id: MessageId, dig_id: DigId, disposition: Disposition, shadow: bool },
-    MessagesChanged { dig_id: DigId, count: u64 },
+    JobChanged {
+        job: Job,
+    },
+    JobProgress {
+        job_id: JobId,
+        done: u64,
+        total: Option<u64>,
+        step: String,
+    },
+    DigStatusChanged {
+        dig_id: DigId,
+        status: DigStatus,
+    },
+    FindCreated {
+        find: Find,
+    },
+    FindChanged {
+        find_id: FindId,
+    },
+    ActivityAppended {
+        activity: Activity,
+    },
+    MessageClassified {
+        message_id: MessageId,
+        dig_id: DigId,
+        disposition: Disposition,
+        shadow: bool,
+    },
+    MessagesChanged {
+        dig_id: DigId,
+        count: u64,
+    },
     SummaryChanged,
-    StoreFault { message: String },
+    StoreFault {
+        message: String,
+    },
     StoreFaultCleared,
-    Notify { title: String, body: String, find_id: Option<FindId> },
-    UpdateAvailable { version: String },
+    Notify {
+        title: String,
+        body: String,
+        find_id: Option<FindId>,
+    },
+    UpdateAvailable {
+        version: String,
+    },
     /// Developer overlay: a Sift stage completed for a message (Live Pipeline, §82).
-    PipelineStage { message_id: MessageId, stage: String, ms: u64 },
+    PipelineStage {
+        message_id: MessageId,
+        stage: String,
+        ms: u64,
+    },
     /// Director streaming: text as it arrives.
-    DirectorDelta { conversation_id: crate::ids::ConversationId, text: String },
+    DirectorDelta {
+        conversation_id: crate::ids::ConversationId,
+        text: String,
+    },
     /// Director invoked an Action.
-    DirectorToolCall { conversation_id: crate::ids::ConversationId, call: crate::conversation::ToolCall },
+    DirectorToolCall {
+        conversation_id: crate::ids::ConversationId,
+        call: crate::conversation::ToolCall,
+    },
     /// Director finished a turn (or failed with `error`).
-    DirectorDone { conversation_id: crate::ids::ConversationId, error: Option<String> },
+    DirectorDone {
+        conversation_id: crate::ids::ConversationId,
+        error: Option<String>,
+    },
     /// A Director proposal (Mesh, Signal, Never Hidden entry) awaits the user.
-    ProposalCreated { pending_id: String, summary: String },
-    ExpeditionChanged { expedition_id: crate::ids::ExpeditionId },
+    ProposalCreated {
+        pending_id: String,
+        summary: String,
+    },
+    ExpeditionChanged {
+        expedition_id: crate::ids::ExpeditionId,
+    },
     SettingsChanged,
 }
 

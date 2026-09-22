@@ -37,8 +37,16 @@ pub struct SignalInputs {
 }
 
 impl SignalInputs {
-    pub fn message_only() -> Self { Self { message: true, thread: false, context_slices: vec![] } }
-    pub fn is_context_dependent(&self) -> bool { self.thread || !self.context_slices.is_empty() }
+    pub fn message_only() -> Self {
+        Self {
+            message: true,
+            thread: false,
+            context_slices: vec![],
+        }
+    }
+    pub fn is_context_dependent(&self) -> bool {
+        self.thread || !self.context_slices.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -67,7 +75,9 @@ impl SignalStatus {
         }
     }
     /// Production Sift only reads Active Signals; Experimental ones run in test_signal.
-    pub fn is_production(self) -> bool { matches!(self, SignalStatus::Active) }
+    pub fn is_production(self) -> bool {
+        matches!(self, SignalStatus::Active)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -152,13 +162,20 @@ pub struct Signal {
 }
 
 impl Signal {
-    pub fn key(&self) -> String { format!("{}@v{}", self.name, self.version) }
+    pub fn key(&self) -> String {
+        format!("{}@v{}", self.name, self.version)
+    }
 
     /// The authoring rules of §23, checked before a Signal can be proposed.
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut problems = Vec::new();
         let d = self.definition.to_lowercase();
-        if !self.name.chars().all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit()) || self.name.is_empty() {
+        if !self
+            .name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit())
+            || self.name.is_empty()
+        {
             problems.push("name must be snake_case ascii".into());
         }
         if self.definition.trim().is_empty() {
@@ -167,11 +184,20 @@ impl Signal {
         if d.contains(" and/or ") || d.contains("and/or") {
             problems.push("definition uses and/or; one property per Signal".into());
         }
-        if d.contains(" not ") || d.starts_with("not ") || d.contains("n't ") || d.contains(" never ") {
+        if d.contains(" not ")
+            || d.starts_with("not ")
+            || d.contains("n't ")
+            || d.contains(" never ")
+        {
             problems.push("definition contains a negation; phrase the positive property".into());
         }
-        if d.contains("days ago") || d.contains("more than") || d.contains("less than") || d.contains("at least") {
-            problems.push("definition compares dates or counts; those are deterministic facts".into());
+        if d.contains("days ago")
+            || d.contains("more than")
+            || d.contains("less than")
+            || d.contains("at least")
+        {
+            problems
+                .push("definition compares dates or counts; those are deterministic facts".into());
         }
         match self.primitive {
             SignalPrimitive::Noul => {
@@ -191,7 +217,11 @@ impl Signal {
                 }
             }
         }
-        if problems.is_empty() { Ok(()) } else { Err(problems) }
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(problems)
+        }
     }
 
     pub fn noul(name: &str, definition: &str) -> Self {
@@ -202,8 +232,14 @@ impl Signal {
             primitive: SignalPrimitive::Noul,
             definition: definition.to_string(),
             choices: vec![
-                SignalChoice { name: "YES".into(), definition: "The property holds.".into() },
-                SignalChoice { name: "NO".into(), definition: "The property does not hold.".into() },
+                SignalChoice {
+                    name: "YES".into(),
+                    definition: "The property holds.".into(),
+                },
+                SignalChoice {
+                    name: "NO".into(),
+                    definition: "The property does not hold.".into(),
+                },
             ],
             inputs: SignalInputs::message_only(),
             language_scope: vec!["en".into()],
@@ -252,7 +288,13 @@ impl SignalEvaluation {
     /// Calibrated probability of a choice (YES by default for noul Signals).
     pub fn score(&self, choice: Option<&str>) -> f64 {
         let c = choice.unwrap_or("YES");
-        self.calibrated.get(c).or_else(|| self.distribution.get(c)).copied().unwrap_or(0.0)
+        self.calibrated
+            .get(c)
+            .or_else(|| self.distribution.get(c))
+            .copied()
+            .unwrap_or(0.0)
     }
-    pub fn key(&self) -> String { format!("{}@v{}", self.signal_name, self.signal_version) }
+    pub fn key(&self) -> String {
+        format!("{}@v{}", self.signal_name, self.signal_version)
+    }
 }

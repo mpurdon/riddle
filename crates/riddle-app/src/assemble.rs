@@ -19,10 +19,24 @@ impl App {
         let services = Arc::new(Services::new(stores.clone(), sink, config.build.clone()));
         let mut builder = RuntimeBuilder::new(services.clone());
         builder = builder.registry(riddle_actions::actions::register_all);
-        let mut policy = riddle_actions::policy::AutonomyPolicy { dev: config.dev, ..Default::default() };
-        policy.default = if config.dev { riddle_core::Autonomy::Observe } else { riddle_core::Autonomy::Suggest };
+        let mut policy = riddle_actions::policy::AutonomyPolicy {
+            dev: config.dev,
+            ..Default::default()
+        };
+        policy.default = if config.dev {
+            riddle_core::Autonomy::Observe
+        } else {
+            riddle_core::Autonomy::Suggest
+        };
         let runtime = builder.policy(policy).build();
-        let app = Arc::new(App { config, started_at: std::time::Instant::now(), stores, services, runtime, events });
+        let app = Arc::new(App {
+            config,
+            started_at: std::time::Instant::now(),
+            stores,
+            services,
+            runtime,
+            events,
+        });
         Ok(app)
     }
 }
@@ -34,8 +48,13 @@ mod tests {
 
     #[test]
     fn an_empty_app_reports_an_honest_summary() {
-        let app = App::open(AppConfig::in_memory(BuildStamp::from_env_vars("0", None, None, None, "test"))).unwrap();
-        let s = app.summary(chrono::Utc::now() - chrono::Duration::days(1)).unwrap();
+        let app = App::open(AppConfig::in_memory(BuildStamp::from_env_vars(
+            "0", None, None, None, "test",
+        )))
+        .unwrap();
+        let s = app
+            .summary(chrono::Utc::now() - chrono::Duration::days(1))
+            .unwrap();
         assert_eq!(s.dig_count, 0);
         assert!(s.caught_up);
         assert_eq!(s.finds_open, 0);

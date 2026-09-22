@@ -680,8 +680,8 @@ impl Action for InjectFixtureMessage {
             o.insert("digId".into(), json!(dig.id));
         }
         let mut r = ActionResult::ok(value, format!("Injected a {template} message"))
-        .with_affected(vec![EntityRef::new(EntityKind::Message, &message.id)])
-        .with_inputs(json!({"digId": dig.id, "template": template}));
+            .with_affected(vec![EntityRef::new(EntityKind::Message, &message.id)])
+            .with_inputs(json!({"digId": dig.id, "template": template}));
         r.undo = UndoInfo::NotUndoable {
             reason: "a delivered message stays delivered; archive it instead".into(),
         };

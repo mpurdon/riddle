@@ -22,12 +22,23 @@ pub struct BridgeInfo {
 }
 
 /// Start the bridge and return its port and token. `port` 0 picks a free one.
-pub async fn start(app: Arc<App>, port: u16, token_file: Option<std::path::PathBuf>) -> std::io::Result<BridgeInfo> {
+pub async fn start(
+    app: Arc<App>,
+    port: u16,
+    token_file: Option<std::path::PathBuf>,
+) -> std::io::Result<BridgeInfo> {
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     let port = listener.local_addr()?.port();
-    let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    let token = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
     if let Some(path) = &token_file {
-        write_private(path, &format!("{{\"port\":{port},\"token\":\"{token}\"}}\n"))?;
+        write_private(
+            path,
+            &format!("{{\"port\":{port},\"token\":\"{token}\"}}\n"),
+        )?;
     }
     rinfo!(Category::App, "dev bridge listening on 127.0.0.1:{port}");
     let tok = token.clone();
@@ -60,7 +71,11 @@ fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> 
     }
     let tmp = path.with_extension("tmp");
     {
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(&tmp)?;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -103,14 +118,26 @@ async fn handle(stream: TcpStream, app: Arc<App>, token: String) -> std::io::Res
         }
     }
     if method == "OPTIONS" {
-        wr.write_all(format!("HTTP/1.1 204 No Content\r\n{CORS}Content-Length: 0\r\n\r\n").as_bytes()).await?;
+        wr.write_all(
+            format!("HTTP/1.1 204 No Content\r\n{CORS}Content-Length: 0\r\n\r\n").as_bytes(),
+        )
+        .await?;
         return Ok(());
     }
     let path_only = path.split('?').next().unwrap_or("/");
-    let query_token = path.split('?').nth(1).and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("token=").map(|s| s.to_string())));
-    let presented = auth.strip_prefix("Bearer ").map(|s| s.to_string()).or(query_token);
+    let query_token = path.split('?').nth(1).and_then(|q| {
+        q.split('&')
+            .find_map(|kv| kv.strip_prefix("token=").map(|s| s.to_string()))
+    });
+    let presented = auth
+        .strip_prefix("Bearer ")
+        .map(|s| s.to_string())
+        .or(query_token);
     if presented.as_deref() != Some(token.as_str()) {
-        wr.write_all(format!("HTTP/1.1 401 Unauthorized\r\n{CORS}Content-Length: 0\r\n\r\n").as_bytes()).await?;
+        wr.write_all(
+            format!("HTTP/1.1 401 Unauthorized\r\n{CORS}Content-Length: 0\r\n\r\n").as_bytes(),
+        )
+        .await?;
         return Ok(());
     }
     match (method.as_str(), path_only) {
@@ -118,7 +145,11 @@ async fn handle(stream: TcpStream, app: Arc<App>, token: String) -> std::io::Res
             let mut body = vec![0u8; content_length.min(16 * 1024 * 1024)];
             reader.read_exact(&mut body).await?;
             let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
-            let command = req.get("command").and_then(|c| c.as_str()).unwrap_or("").to_string();
+            let command = req
+                .get("command")
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string();
             let args = req.get("args").cloned().unwrap_or(json!({}));
             let (status, payload) = match dispatch::call(&app, &command, args).await {
                 Ok(v) => ("200 OK", json!({ "ok": true, "result": v })),
@@ -154,7 +185,10 @@ async fn handle(stream: TcpStream, app: Arc<App>, token: String) -> std::io::Res
             wr.write_all(&bytes).await?;
         }
         _ => {
-            wr.write_all(format!("HTTP/1.1 404 Not Found\r\n{CORS}Content-Length: 0\r\n\r\n").as_bytes()).await?;
+            wr.write_all(
+                format!("HTTP/1.1 404 Not Found\r\n{CORS}Content-Length: 0\r\n\r\n").as_bytes(),
+            )
+            .await?;
         }
     }
     wr.flush().await?;
@@ -178,7 +212,10 @@ mod tests {
 
     #[tokio::test]
     async fn the_bridge_answers_a_command_and_rejects_a_bad_token() {
-        let app = App::open(AppConfig::in_memory(BuildStamp::from_env_vars("0", None, None, None, "test"))).unwrap();
+        let app = App::open(AppConfig::in_memory(BuildStamp::from_env_vars(
+            "0", None, None, None, "test",
+        )))
+        .unwrap();
         let info = start(app, 0, None).await.unwrap();
         let ok = post(info.port, &info.token, r#"{"command":"summary","args":{}}"#).await;
         assert!(ok.contains("200 OK") && ok.contains("caughtUp"));

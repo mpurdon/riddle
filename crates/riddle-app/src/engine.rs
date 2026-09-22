@@ -58,12 +58,21 @@ pub struct SyncSummary {
 
 impl From<&SyncReport> for SyncSummary {
     fn from(r: &SyncReport) -> Self {
-        Self { kind: format!("{:?}", r.kind).to_lowercase(), added: r.added, updated: r.updated, deleted: r.deleted, external_moves: r.external_moves.len() as u64, complete: r.complete }
+        Self {
+            kind: format!("{:?}", r.kind).to_lowercase(),
+            added: r.added,
+            updated: r.updated,
+            deleted: r.deleted,
+            external_moves: r.external_moves.len() as u64,
+            complete: r.complete,
+        }
     }
 }
 
 impl App {
-    fn domains(&self) -> Result<Arc<Domains>> { self.services.require::<Domains>() }
+    fn domains(&self) -> Result<Arc<Domains>> {
+        self.services.require::<Domains>()
+    }
 
     /// Build the full Sift input for a stored message: normalized text,
     /// People facts, Thread State, Context slices (§44: retrieved, not stuffed).
@@ -80,7 +89,8 @@ impl App {
         let thread_state = repo::thread_state::get(&store, &message.thread_id)?;
         let has_calendar_part = riddle_mail::normalize::has_calendar_part(&message);
         let has_structured_receipt = riddle_mail::normalize::has_structured_receipt(&message);
-        let mut input = SiftInput::simple(message.clone(), profile, people, DigContext::from_dig(dig));
+        let mut input =
+            SiftInput::simple(message.clone(), profile, people, DigContext::from_dig(dig));
         input.normalized_text = normalized.text;
         input.language = normalized.language;
         input.thread_state = thread_state;
@@ -95,8 +105,17 @@ impl App {
     }
 
     /// Sift the backlog of one Dig, newest first, up to `limit` messages.
-    pub async fn sift_pass(&self, dig: &Dig, limit: u32, cancel: Option<&CancelFlag>) -> Result<SiftPassReport> {
-        let _t = Timed::start(Category::Sift, format!("sift pass {}", dig.id), Duration::from_secs(120));
+    pub async fn sift_pass(
+        &self,
+        dig: &Dig,
+        limit: u32,
+        cancel: Option<&CancelFlag>,
+    ) -> Result<SiftPassReport> {
+        let _t = Timed::start(
+            Category::Sift,
+            format!("sift pass {}", dig.id),
+            Duration::from_secs(120),
+        );
         let domains = self.domains()?;
         let store = self.stores.dig(&dig.id)?;
         let sift = Sift::from_services(&self.services);
@@ -106,21 +125,33 @@ impl App {
             if cancel.is_some_and(|c| c.is_cancelled()) {
                 break;
             }
-            let Some(message) = repo::messages::get(&store, &dig.id, &id)? else { continue };
+            let Some(message) = repo::messages::get(&store, &dig.id, &id)? else {
+                continue;
+            };
             let input = match self.sift_input(dig, message) {
                 Ok(i) => i,
                 Err(e) => {
-                    rwarn!(Category::Sift, "input for {} failed: {}", id, e.kind.as_str());
+                    rwarn!(
+                        Category::Sift,
+                        "input for {} failed: {}",
+                        id,
+                        e.kind.as_str()
+                    );
                     report.failed += 1;
                     continue;
                 }
             };
-            match crate::ai::CURRENT_DIG.scope(dig.id.clone(), sift.run_and_persist(input)).await {
+            match crate::ai::CURRENT_DIG
+                .scope(dig.id.clone(), sift.run_and_persist(input))
+                .await
+            {
                 Ok(outcome) => {
                     report.processed += 1;
                     report.cached_signals += outcome.cached as u64;
                     report.fresh_signals += outcome.fresh as u64;
-                    if outcome.judge_unavailable { report.judge_unavailable = true; }
+                    if outcome.judge_unavailable {
+                        report.judge_unavailable = true;
+                    }
                     match outcome.classification.disposition {
                         Disposition::Unresolved => report.unresolved += 1,
                         ref d if d.hides() => report.hidden += 1,
@@ -128,12 +159,29 @@ impl App {
                     }
                     if let Some(update) = &outcome.thread_state_update {
                         let profile = repo::user_profile::get(&self.stores.index())?;
-                        let _ = riddle_context::update_thread_state(&store, &dig.id, &update.thread_id, &profile, self.services.clock.now());
+                        let _ = riddle_context::update_thread_state(
+                            &store,
+                            &dig.id,
+                            &update.thread_id,
+                            &profile,
+                            self.services.clock.now(),
+                        );
                     }
                     if let Some(proposal) = outcome.find.as_ref().filter(|_| !outcome.shadow) {
                         match domains.finds.apply_proposal(proposal) {
-                            Ok((_, joined)) => if joined { report.finds_joined += 1 } else { report.finds_created += 1 },
-                            Err(e) => rwarn!(Category::Sift, "find proposal for {} failed: {}", id, e.kind.as_str()),
+                            Ok((_, joined)) => {
+                                if joined {
+                                    report.finds_joined += 1
+                                } else {
+                                    report.finds_created += 1
+                                }
+                            }
+                            Err(e) => rwarn!(
+                                Category::Sift,
+                                "find proposal for {} failed: {}",
+                                id,
+                                e.kind.as_str()
+                            ),
                         }
                     }
                 }
@@ -154,14 +202,31 @@ impl App {
     }
 
     /// One sync cycle for a Dig through its provider.
-    pub async fn sync_pass(&self, dig: &Dig, cancel: &CancelFlag, on_progress: &mut (dyn FnMut(SyncProgress) + Send)) -> Result<SyncReport> {
+    pub async fn sync_pass(
+        &self,
+        dig: &Dig,
+        cancel: &CancelFlag,
+        on_progress: &mut (dyn FnMut(SyncProgress) + Send),
+    ) -> Result<SyncReport> {
         let domains = self.domains()?;
         let provider = domains.providers.provider_for(dig)?;
-        let engine = SyncEngine::new(dig.clone(), provider, self.stores.clone(), self.events.clone());
+        let engine = SyncEngine::new(
+            dig.clone(),
+            provider,
+            self.stores.clone(),
+            self.events.clone(),
+        );
         let mut externals = Vec::new();
-        let report = engine.sync_once(on_progress, cancel, &mut |m| externals.push(m)).await?;
+        let report = engine
+            .sync_once(on_progress, cancel, &mut |m| externals.push(m))
+            .await?;
         if !externals.is_empty() {
-            rinfo!(Category::Sync, "{} external moves attributed on {}", externals.len(), dig.id);
+            rinfo!(
+                Category::Sync,
+                "{} external moves attributed on {}",
+                externals.len(),
+                dig.id
+            );
         }
         let _ = engine.fetch_bodies(200, on_progress, cancel).await;
         Ok(report)
@@ -175,7 +240,12 @@ impl App {
         let domains = self.domains()?;
         let r = domains.outbox.drain(dig, 5).await?;
         if !r.conflicts.is_empty() {
-            rwarn!(Category::Projection, "{} projection conflicts on {}", r.conflicts.len(), dig.id);
+            rwarn!(
+                Category::Projection,
+                "{} projection conflicts on {}",
+                r.conflicts.len(),
+                dig.id
+            );
         }
         Ok((r.applied, r.conflicts.len() as u64))
     }
@@ -192,23 +262,48 @@ impl App {
 
     /// The whole pass for one Dig. `sift_limit` bounds one cycle so the
     /// runner can checkpoint and yield.
-    pub async fn full_pass(&self, dig_id: &DigId, sift_limit: u32, cancel: &CancelFlag) -> Result<PassReport> {
+    pub async fn full_pass(
+        &self,
+        dig_id: &DigId,
+        sift_limit: u32,
+        cancel: &CancelFlag,
+    ) -> Result<PassReport> {
         let dig = self.dig(dig_id)?;
-        let mut report = PassReport { dig_id: dig_id.to_string(), ..Default::default() };
+        let mut report = PassReport {
+            dig_id: dig_id.to_string(),
+            ..Default::default()
+        };
         let mut progress = |p: SyncProgress| {
-            rdebug!(Category::Sync, "{} {:?} {}/{}", p.dig_id, p.phase, p.done, p.total.unwrap_or(0));
+            rdebug!(
+                Category::Sync,
+                "{} {:?} {}/{}",
+                p.dig_id,
+                p.phase,
+                p.done,
+                p.total.unwrap_or(0)
+            );
         };
         match self.sync_pass(&dig, cancel, &mut progress).await {
             Ok(r) => report.sync = Some(SyncSummary::from(&r)),
             Err(e) if e.kind.is_transient() || e.kind == riddle_errors::ErrorKind::ProviderAuth => {
-                rwarn!(Category::Sync, "sync of {} deferred: {}", dig.id, e.kind.as_str());
+                rwarn!(
+                    Category::Sync,
+                    "sync of {} deferred: {}",
+                    dig.id,
+                    e.kind.as_str()
+                );
             }
             Err(e) => return Err(e),
         }
         let dig = self.dig(dig_id)?;
         report.sift = self.sift_pass(&dig, sift_limit, Some(cancel)).await?;
         let (applied, conflicts) = self.projection_pass(&dig).await.unwrap_or_else(|e| {
-            rwarn!(Category::Projection, "projection on {} deferred: {}", dig.id, e.kind.as_str());
+            rwarn!(
+                Category::Projection,
+                "projection on {} deferred: {}",
+                dig.id,
+                e.kind.as_str()
+            );
             (0, 0)
         });
         report.projected = applied;
@@ -218,12 +313,21 @@ impl App {
     }
 
     /// A pass over every Dig.
-    pub async fn full_pass_all(&self, sift_limit: u32, cancel: &CancelFlag) -> Result<Vec<PassReport>> {
+    pub async fn full_pass_all(
+        &self,
+        sift_limit: u32,
+        cancel: &CancelFlag,
+    ) -> Result<Vec<PassReport>> {
         let mut out = Vec::new();
         for dig in self.list_digs()? {
             match self.full_pass(&dig.id, sift_limit, cancel).await {
                 Ok(r) => out.push(r),
-                Err(e) => return Err(RiddleError::new(e.kind, format!("dig {}: {}", dig.name, e.message))),
+                Err(e) => {
+                    return Err(RiddleError::new(
+                        e.kind,
+                        format!("dig {}: {}", dig.name, e.message),
+                    ))
+                }
             }
         }
         Ok(out)
@@ -234,5 +338,7 @@ trait EmitSummary {
     fn emit_summary(&self);
 }
 impl EmitSummary for Arc<crate::events::Broadcast> {
-    fn emit_summary(&self) { self.emit(RiddleEvent::SummaryChanged); }
+    fn emit_summary(&self) {
+        self.emit(RiddleEvent::SummaryChanged);
+    }
 }

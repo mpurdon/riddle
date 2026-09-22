@@ -98,42 +98,82 @@ pub struct RiddleError {
 
 impl RiddleError {
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
-        Self { kind, message: message.into(), detail: None }
+        Self {
+            kind,
+            message: message.into(),
+            detail: None,
+        }
     }
     pub fn with_detail(mut self, detail: impl Serialize) -> Self {
         self.detail = serde_json::to_value(detail).ok();
         self
     }
-    pub fn provider_auth(m: impl Into<String>) -> Self { Self::new(ErrorKind::ProviderAuth, m) }
-    pub fn provider(m: impl Into<String>) -> Self { Self::new(ErrorKind::Provider, m) }
-    pub fn rate_limited(m: impl Into<String>) -> Self { Self::new(ErrorKind::ProviderRateLimited, m) }
-    pub fn history_expired(m: impl Into<String>) -> Self { Self::new(ErrorKind::ProviderHistoryExpired, m) }
-    pub fn judge_unavailable(m: impl Into<String>) -> Self { Self::new(ErrorKind::JudgeUnavailable, m) }
-    pub fn llm_unavailable(m: impl Into<String>) -> Self { Self::new(ErrorKind::LlmUnavailable, m) }
-    pub fn budget_exhausted(m: impl Into<String>) -> Self { Self::new(ErrorKind::BudgetExhausted, m) }
-    pub fn policy_denied(m: impl Into<String>) -> Self { Self::new(ErrorKind::PolicyDenied, m) }
-    pub fn needs_confirmation(m: impl Into<String>) -> Self { Self::new(ErrorKind::NeedsConfirmation, m) }
-    pub fn conflict(m: impl Into<String>) -> Self { Self::new(ErrorKind::Conflict, m) }
-    pub fn not_found(m: impl Into<String>) -> Self { Self::new(ErrorKind::NotFound, m) }
-    pub fn invalid(m: impl Into<String>) -> Self { Self::new(ErrorKind::Invalid, m) }
-    pub fn store(m: impl Into<String>) -> Self { Self::new(ErrorKind::Store, m) }
-    pub fn internal(m: impl std::fmt::Display) -> Self { Self::new(ErrorKind::Internal, m.to_string()) }
+    pub fn provider_auth(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::ProviderAuth, m)
+    }
+    pub fn provider(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Provider, m)
+    }
+    pub fn rate_limited(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::ProviderRateLimited, m)
+    }
+    pub fn history_expired(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::ProviderHistoryExpired, m)
+    }
+    pub fn judge_unavailable(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::JudgeUnavailable, m)
+    }
+    pub fn llm_unavailable(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::LlmUnavailable, m)
+    }
+    pub fn budget_exhausted(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::BudgetExhausted, m)
+    }
+    pub fn policy_denied(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::PolicyDenied, m)
+    }
+    pub fn needs_confirmation(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::NeedsConfirmation, m)
+    }
+    pub fn conflict(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Conflict, m)
+    }
+    pub fn not_found(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::NotFound, m)
+    }
+    pub fn invalid(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Invalid, m)
+    }
+    pub fn store(m: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Store, m)
+    }
+    pub fn internal(m: impl std::fmt::Display) -> Self {
+        Self::new(ErrorKind::Internal, m.to_string())
+    }
 }
 
 pub type Result<T> = std::result::Result<T, RiddleError>;
 
 impl From<std::io::Error> for RiddleError {
-    fn from(e: std::io::Error) -> Self { RiddleError::internal(e) }
+    fn from(e: std::io::Error) -> Self {
+        RiddleError::internal(e)
+    }
 }
 impl From<serde_json::Error> for RiddleError {
-    fn from(e: serde_json::Error) -> Self { RiddleError::invalid(format!("invalid JSON: {e}")) }
+    fn from(e: serde_json::Error) -> Self {
+        RiddleError::invalid(format!("invalid JSON: {e}"))
+    }
 }
 impl From<std::fmt::Error> for RiddleError {
-    fn from(e: std::fmt::Error) -> Self { RiddleError::internal(e) }
+    fn from(e: std::fmt::Error) -> Self {
+        RiddleError::internal(e)
+    }
 }
 
 /// Convenience for `map_err(internal)`.
-pub fn internal(e: impl std::fmt::Display) -> RiddleError { RiddleError::internal(e) }
+pub fn internal(e: impl std::fmt::Display) -> RiddleError {
+    RiddleError::internal(e)
+}
 
 #[cfg(test)]
 mod tests {
@@ -141,7 +181,8 @@ mod tests {
 
     #[test]
     fn an_error_serializes_to_kind_message_and_optional_detail() {
-        let e = RiddleError::needs_confirmation("confirm send").with_detail(serde_json::json!({"pending": 1}));
+        let e = RiddleError::needs_confirmation("confirm send")
+            .with_detail(serde_json::json!({"pending": 1}));
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["kind"], "needs_confirmation");
         assert_eq!(v["message"], "confirm send");

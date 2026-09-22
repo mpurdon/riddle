@@ -11,27 +11,50 @@ pub fn upsert(store: &Store, d: &Draft) -> Result<()> {
 }
 
 pub fn get(store: &Store, id: &str) -> Result<Option<Draft>> {
-    store.read(|c| c.query_row("SELECT json FROM drafts WHERE id = ?1", [id], |r| from_json(r.get::<_, String>(0)?)).optional())
+    store.read(|c| {
+        c.query_row("SELECT json FROM drafts WHERE id = ?1", [id], |r| {
+            from_json(r.get::<_, String>(0)?)
+        })
+        .optional()
+    })
 }
 
 pub fn list(store: &Store) -> Result<Vec<Draft>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT json FROM drafts ORDER BY updated_at DESC")?;
-        let rows = st.query_map([], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let rows = st
+            .query_map([], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }
 
 pub fn remove(store: &Store, id: &str) -> Result<()> {
-    store.write(|c| { c.execute("DELETE FROM drafts WHERE id = ?1", [id])?; Ok(()) })
+    store.write(|c| {
+        c.execute("DELETE FROM drafts WHERE id = ?1", [id])?;
+        Ok(())
+    })
 }
 
-pub fn snooze(store: &Store, message_id: &str, until: &chrono::DateTime<chrono::Utc>) -> Result<()> {
-    store.write(|c| { c.execute("INSERT OR REPLACE INTO snoozes (message_id, until) VALUES (?1, ?2)", params![message_id, crate::ts(until)])?; Ok(()) })
+pub fn snooze(
+    store: &Store,
+    message_id: &str,
+    until: &chrono::DateTime<chrono::Utc>,
+) -> Result<()> {
+    store.write(|c| {
+        c.execute(
+            "INSERT OR REPLACE INTO snoozes (message_id, until) VALUES (?1, ?2)",
+            params![message_id, crate::ts(until)],
+        )?;
+        Ok(())
+    })
 }
 
 pub fn unsnooze(store: &Store, message_id: &str) -> Result<()> {
-    store.write(|c| { c.execute("DELETE FROM snoozes WHERE message_id = ?1", [message_id])?; Ok(()) })
+    store.write(|c| {
+        c.execute("DELETE FROM snoozes WHERE message_id = ?1", [message_id])?;
+        Ok(())
+    })
 }
 
 pub fn snoozes_due(store: &Store, now: &chrono::DateTime<chrono::Utc>) -> Result<Vec<String>> {
@@ -42,6 +65,17 @@ pub fn snoozes_due(store: &Store, now: &chrono::DateTime<chrono::Utc>) -> Result
     })
 }
 
-pub fn snoozed_until(store: &Store, message_id: &str) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
-    store.read(|c| c.query_row("SELECT until FROM snoozes WHERE message_id = ?1", [message_id], |r| r.get::<_, i64>(0)).optional().map(|o| o.map(crate::from_ts)))
+pub fn snoozed_until(
+    store: &Store,
+    message_id: &str,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+    store.read(|c| {
+        c.query_row(
+            "SELECT until FROM snoozes WHERE message_id = ?1",
+            [message_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()
+        .map(|o| o.map(crate::from_ts))
+    })
 }

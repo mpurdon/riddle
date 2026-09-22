@@ -2,7 +2,10 @@
 //! lazily; list rows never load them.
 
 use crate::{from_json, from_ts, now_ts, to_json, ts, Store};
-use riddle_core::{Address, AttachmentMeta, DigId, Message, MessageHeaders, MessageId, MessageSummary, Page, PageRequest, ThreadId};
+use riddle_core::{
+    Address, AttachmentMeta, DigId, Message, MessageHeaders, MessageId, MessageSummary, Page,
+    PageRequest, ThreadId,
+};
 use riddle_errors::Result;
 use rusqlite::{params, OptionalExtension, Row};
 
@@ -13,7 +16,10 @@ fn row_to_message(r: &Row<'_>, dig_id: &DigId) -> rusqlite::Result<Message> {
         thread_id: ThreadId(r.get("thread_id")?),
         provider_id: r.get("provider_id")?,
         subject: r.get("subject")?,
-        from: Address { email: r.get("from_email")?, name: r.get("from_name")? },
+        from: Address {
+            email: r.get("from_email")?,
+            name: r.get("from_name")?,
+        },
         to: from_json(r.get("to_json")?)?,
         cc: from_json(r.get("cc_json")?)?,
         bcc: from_json(r.get("bcc_json")?)?,
@@ -24,7 +30,8 @@ fn row_to_message(r: &Row<'_>, dig_id: &DigId) -> rusqlite::Result<Message> {
         attachments: from_json::<Vec<AttachmentMeta>>(r.get("attachments_json")?)?,
         size_bytes: r.get::<_, i64>("size_bytes")? as u64,
         is_sent: r.get::<_, i64>("is_sent")? != 0,
-        has_body: r.get::<_, Option<String>>("body_text")?.is_some() || r.get::<_, Option<String>>("body_html")?.is_some(),
+        has_body: r.get::<_, Option<String>>("body_text")?.is_some()
+            || r.get::<_, Option<String>>("body_html")?.is_some(),
         body_text: r.get("body_text")?,
         body_html: r.get("body_html")?,
         synced_at: from_ts(r.get("synced_at")?),
@@ -69,56 +76,104 @@ pub fn upsert_in(c: &rusqlite::Connection, m: &Message) -> rusqlite::Result<()> 
 
 pub fn get(store: &Store, dig_id: &DigId, id: &MessageId) -> Result<Option<Message>> {
     store.read(|c| {
-        c.query_row(&format!("SELECT {COLS} FROM messages WHERE id = ?1 AND deleted_at IS NULL"), [id.as_str()], |r| row_to_message(r, dig_id)).optional()
+        c.query_row(
+            &format!("SELECT {COLS} FROM messages WHERE id = ?1 AND deleted_at IS NULL"),
+            [id.as_str()],
+            |r| row_to_message(r, dig_id),
+        )
+        .optional()
     })
 }
 
 pub fn get_many(store: &Store, dig_id: &DigId, ids: &[MessageId]) -> Result<Vec<Message>> {
     let mut out = Vec::with_capacity(ids.len());
     for id in ids {
-        if let Some(m) = get(store, dig_id, id)? { out.push(m); }
+        if let Some(m) = get(store, dig_id, id)? {
+            out.push(m);
+        }
     }
     Ok(out)
 }
 
-pub fn set_body(store: &Store, id: &MessageId, text: Option<&str>, html: Option<&str>) -> Result<()> {
+pub fn set_body(
+    store: &Store,
+    id: &MessageId,
+    text: Option<&str>,
+    html: Option<&str>,
+) -> Result<()> {
     store.write(|c| {
-        c.execute("UPDATE messages SET body_text = ?2, body_html = ?3 WHERE id = ?1", params![id.as_str(), text, html])?;
+        c.execute(
+            "UPDATE messages SET body_text = ?2, body_html = ?3 WHERE id = ?1",
+            params![id.as_str(), text, html],
+        )?;
         Ok(())
     })
 }
 
 pub fn set_labels(store: &Store, id: &MessageId, labels: &[String]) -> Result<()> {
     store.write(|c| {
-        c.execute("UPDATE messages SET labels_json = ?2 WHERE id = ?1", params![id.as_str(), to_json(&labels)?])?;
+        c.execute(
+            "UPDATE messages SET labels_json = ?2 WHERE id = ?1",
+            params![id.as_str(), to_json(&labels)?],
+        )?;
         Ok(())
     })
 }
 
 pub fn mark_deleted(store: &Store, id: &MessageId) -> Result<()> {
-    store.write(|c| { c.execute("UPDATE messages SET deleted_at = ?2 WHERE id = ?1", params![id.as_str(), now_ts()])?; Ok(()) })
+    store.write(|c| {
+        c.execute(
+            "UPDATE messages SET deleted_at = ?2 WHERE id = ?1",
+            params![id.as_str(), now_ts()],
+        )?;
+        Ok(())
+    })
 }
 
 pub fn labels_of(store: &Store, id: &MessageId) -> Result<Vec<String>> {
     store.read(|c| {
-        Ok(c.query_row("SELECT labels_json FROM messages WHERE id = ?1", [id.as_str()], |r| from_json::<Vec<String>>(r.get(0)?)).optional()?.unwrap_or_default())
+        Ok(c.query_row(
+            "SELECT labels_json FROM messages WHERE id = ?1",
+            [id.as_str()],
+            |r| from_json::<Vec<String>>(r.get(0)?),
+        )
+        .optional()?
+        .unwrap_or_default())
     })
 }
 
 pub fn thread_messages(store: &Store, dig_id: &DigId, thread: &ThreadId) -> Result<Vec<Message>> {
     store.read(|c| {
-        let mut st = c.prepare(&format!("SELECT {COLS} FROM messages WHERE thread_id = ?1 AND deleted_at IS NULL ORDER BY date"))?;
-        let rows = st.query_map([thread.as_str()], |r| row_to_message(r, dig_id))?.collect();
+        let mut st = c.prepare(&format!(
+            "SELECT {COLS} FROM messages WHERE thread_id = ?1 AND deleted_at IS NULL ORDER BY date"
+        ))?;
+        let rows = st
+            .query_map([thread.as_str()], |r| row_to_message(r, dig_id))?
+            .collect();
         rows
     })
 }
 
 pub fn count(store: &Store) -> Result<u64> {
-    store.read(|c| c.query_row("SELECT count(*) FROM messages WHERE deleted_at IS NULL", [], |r| r.get::<_, i64>(0)).map(|n| n as u64))
+    store.read(|c| {
+        c.query_row(
+            "SELECT count(*) FROM messages WHERE deleted_at IS NULL",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n as u64)
+    })
 }
 
 pub fn count_since(store: &Store, since: &chrono::DateTime<chrono::Utc>) -> Result<u64> {
-    store.read(|c| c.query_row("SELECT count(*) FROM messages WHERE deleted_at IS NULL AND date >= ?1", [ts(since)], |r| r.get::<_, i64>(0)).map(|n| n as u64))
+    store.read(|c| {
+        c.query_row(
+            "SELECT count(*) FROM messages WHERE deleted_at IS NULL AND date >= ?1",
+            [ts(since)],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n as u64)
+    })
 }
 
 /// Message ids with no current classification, newest first: the Sift backlog.
@@ -161,7 +216,12 @@ pub struct MessageFilter {
     pub stratum: Option<String>,
 }
 
-pub fn list(store: &Store, dig_id: &DigId, filter: &MessageFilter, page: &PageRequest) -> Result<Page<MessageSummary>> {
+pub fn list(
+    store: &Store,
+    dig_id: &DigId,
+    filter: &MessageFilter,
+    page: &PageRequest,
+) -> Result<Page<MessageSummary>> {
     search(store, dig_id, filter, &SearchExtras::default(), page)
 }
 
@@ -181,7 +241,13 @@ pub struct SearchExtras {
     pub exclude_from: Vec<String>,
 }
 
-pub fn search(store: &Store, dig_id: &DigId, filter: &MessageFilter, extras: &SearchExtras, page: &PageRequest) -> Result<Page<MessageSummary>> {
+pub fn search(
+    store: &Store,
+    dig_id: &DigId,
+    filter: &MessageFilter,
+    extras: &SearchExtras,
+    page: &PageRequest,
+) -> Result<Page<MessageSummary>> {
     let limit = page.limit();
     let offset = page.offset();
     store.read(|c| {
@@ -296,7 +362,13 @@ pub fn fts_query(q: &str) -> String {
     terms
         .into_iter()
         .enumerate()
-        .map(|(i, t)| if i + 1 == n { format!("\"{t}\"*") } else { format!("\"{t}\"") })
+        .map(|(i, t)| {
+            if i + 1 == n {
+                format!("\"{t}\"*")
+            } else {
+                format!("\"{t}\"")
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -304,11 +376,15 @@ pub fn fts_query(q: &str) -> String {
 /// Distinct sender addresses the user has replied to, for facts.
 pub fn replied_to_senders(store: &Store) -> Result<std::collections::HashSet<String>> {
     store.read(|c| {
-        let mut st = c.prepare("SELECT DISTINCT to_json FROM messages WHERE is_sent = 1 AND deleted_at IS NULL")?;
+        let mut st = c.prepare(
+            "SELECT DISTINCT to_json FROM messages WHERE is_sent = 1 AND deleted_at IS NULL",
+        )?;
         let rows = st.query_map([], |r| from_json::<Vec<Address>>(r.get(0)?))?;
         let mut set = std::collections::HashSet::new();
         for row in rows {
-            for a in row? { set.insert(a.email.to_lowercase()); }
+            for a in row? {
+                set.insert(a.email.to_lowercase());
+            }
         }
         Ok(set)
     })
@@ -316,9 +392,15 @@ pub fn replied_to_senders(store: &Store) -> Result<std::collections::HashSet<Str
 
 pub fn set_strata(store: &Store, id: &MessageId, strata: &[String]) -> Result<()> {
     store.write(|c| {
-        c.execute("DELETE FROM message_strata WHERE message_id = ?1", [id.as_str()])?;
+        c.execute(
+            "DELETE FROM message_strata WHERE message_id = ?1",
+            [id.as_str()],
+        )?;
         for s in strata {
-            c.execute("INSERT OR IGNORE INTO message_strata (message_id, stratum) VALUES (?1, ?2)", params![id.as_str(), s])?;
+            c.execute(
+                "INSERT OR IGNORE INTO message_strata (message_id, stratum) VALUES (?1, ?2)",
+                params![id.as_str(), s],
+            )?;
         }
         Ok(())
     })
@@ -326,14 +408,22 @@ pub fn set_strata(store: &Store, id: &MessageId, strata: &[String]) -> Result<()
 
 pub fn stratum_counts(store: &Store) -> Result<Vec<(String, u64)>> {
     store.read(|c| {
-        let mut st = c.prepare("SELECT stratum, count(*) FROM message_strata GROUP BY stratum ORDER BY 2 DESC")?;
-        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?.collect();
+        let mut st = c.prepare(
+            "SELECT stratum, count(*) FROM message_strata GROUP BY stratum ORDER BY 2 DESC",
+        )?;
+        let rows = st
+            .query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?
+            .collect();
         rows
     })
 }
 
 /// Ids in a date window, newest first, for simulation and replay.
-pub fn ids_since(store: &Store, since: &chrono::DateTime<chrono::Utc>, limit: u32) -> Result<Vec<MessageId>> {
+pub fn ids_since(
+    store: &Store,
+    since: &chrono::DateTime<chrono::Utc>,
+    limit: u32,
+) -> Result<Vec<MessageId>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT id FROM messages WHERE deleted_at IS NULL AND date >= ?1 ORDER BY date DESC LIMIT ?2")?;
         let rows = st.query_map(params![ts(since), limit], |r| Ok(MessageId(r.get(0)?)))?.collect();
@@ -341,10 +431,14 @@ pub fn ids_since(store: &Store, since: &chrono::DateTime<chrono::Utc>, limit: u3
     })
 }
 
-
 /// Full rows without bodies, newest first, for aggregation passes (People,
 /// resync reconciliation) that must not load 100k bodies.
-pub fn page_headers(store: &Store, dig_id: &DigId, offset: u64, limit: u32) -> Result<Vec<Message>> {
+pub fn page_headers(
+    store: &Store,
+    dig_id: &DigId,
+    offset: u64,
+    limit: u32,
+) -> Result<Vec<Message>> {
     store.read(|c| {
         let mut st = c.prepare(
             "SELECT id, provider_id, thread_id, subject, from_email, from_name, to_json, cc_json, bcc_json, date, snippet, labels_json, headers_json, attachments_json, size_bytes, is_sent, NULL AS body_text, NULL AS body_html, synced_at
@@ -371,7 +465,9 @@ pub fn count_without_body(store: &Store) -> Result<u64> {
 /// Every distinct sender address (received mail only).
 pub fn distinct_senders(store: &Store) -> Result<Vec<String>> {
     store.read(|c| {
-        let mut st = c.prepare("SELECT DISTINCT from_email FROM messages WHERE deleted_at IS NULL AND is_sent = 0")?;
+        let mut st = c.prepare(
+            "SELECT DISTINCT from_email FROM messages WHERE deleted_at IS NULL AND is_sent = 0",
+        )?;
         let rows = st.query_map([], |r| r.get(0))?.collect();
         rows
     })
@@ -379,7 +475,10 @@ pub fn distinct_senders(store: &Store) -> Result<Vec<String>> {
 
 /// Sender addresses in a set of threads, plus recipients of the user's sent
 /// mail in them, for incremental People updates.
-pub fn addresses_in_threads(store: &Store, threads: &[ThreadId]) -> Result<std::collections::HashSet<String>> {
+pub fn addresses_in_threads(
+    store: &Store,
+    threads: &[ThreadId],
+) -> Result<std::collections::HashSet<String>> {
     let mut set = std::collections::HashSet::new();
     for t in threads {
         store.read(|c| {
@@ -470,7 +569,10 @@ pub fn address_stats(store: &Store, email: &str) -> Result<AddressStats> {
 
 /// Provider ids and current labels for every live message dated on or after
 /// `since`, for resync reconciliation (§15) without loading rows.
-pub fn provider_labels_since(store: &Store, since: &chrono::DateTime<chrono::Utc>) -> Result<Vec<(String, MessageId, Vec<String>)>> {
+pub fn provider_labels_since(
+    store: &Store,
+    since: &chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<(String, MessageId, Vec<String>)>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT provider_id, id, labels_json FROM messages WHERE deleted_at IS NULL AND date >= ?1")?;
         let rows = st.query_map([ts(since)], |r| Ok((r.get(0)?, MessageId(r.get(1)?), from_json::<Vec<String>>(r.get(2)?)?)))?.collect();
@@ -478,9 +580,18 @@ pub fn provider_labels_since(store: &Store, since: &chrono::DateTime<chrono::Utc
     })
 }
 
-pub fn get_by_provider_id(store: &Store, dig_id: &DigId, provider_id: &str) -> Result<Option<Message>> {
+pub fn get_by_provider_id(
+    store: &Store,
+    dig_id: &DigId,
+    provider_id: &str,
+) -> Result<Option<Message>> {
     store.read(|c| {
-        c.query_row(&format!("SELECT {COLS} FROM messages WHERE provider_id = ?1 AND deleted_at IS NULL"), [provider_id], |r| row_to_message(r, dig_id)).optional()
+        c.query_row(
+            &format!("SELECT {COLS} FROM messages WHERE provider_id = ?1 AND deleted_at IS NULL"),
+            [provider_id],
+            |r| row_to_message(r, dig_id),
+        )
+        .optional()
     })
 }
 
@@ -494,7 +605,9 @@ pub fn summaries_for_ids(store: &Store, dig_id: &DigId, ids: &[MessageId]) -> Re
                 [id.as_str()], |r| row_to_message(r, dig_id),
             ).optional()
         })?;
-        if let Some(m) = m { out.push(m); }
+        if let Some(m) = m {
+            out.push(m);
+        }
     }
     Ok(out)
 }

@@ -37,7 +37,12 @@ pub fn upsert(store: &Store, j: &Job) -> Result<()> {
 }
 
 pub fn get(store: &Store, id: &JobId) -> Result<Option<Job>> {
-    store.read(|c| c.query_row("SELECT json FROM jobs WHERE id = ?1", [id.as_str()], |r| from_json(r.get::<_, String>(0)?)).optional())
+    store.read(|c| {
+        c.query_row("SELECT json FROM jobs WHERE id = ?1", [id.as_str()], |r| {
+            from_json(r.get::<_, String>(0)?)
+        })
+        .optional()
+    })
 }
 
 /// Non-terminal jobs, highest priority first, oldest first within a class.
@@ -52,7 +57,9 @@ pub fn active(store: &Store) -> Result<Vec<Job>> {
 pub fn recent(store: &Store, limit: u32) -> Result<Vec<Job>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT json FROM jobs ORDER BY updated_at DESC LIMIT ?1")?;
-        let rows = st.query_map([limit], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let rows = st
+            .query_map([limit], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }
@@ -62,7 +69,9 @@ pub fn recent(store: &Store, limit: u32) -> Result<Vec<Job>> {
 pub fn requeue_orphans(store: &Store) -> Result<u64> {
     let running = store.read(|c| {
         let mut st = c.prepare("SELECT json FROM jobs WHERE status = 'running'")?;
-        let rows = st.query_map([], |r| from_json::<Job>(r.get::<_, String>(0)?))?.collect::<rusqlite::Result<Vec<_>>>();
+        let rows = st
+            .query_map([], |r| from_json::<Job>(r.get::<_, String>(0)?))?
+            .collect::<rusqlite::Result<Vec<_>>>();
         rows
     })?;
     let n = running.len() as u64;

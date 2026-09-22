@@ -47,24 +47,46 @@ impl ActionResult {
             summary: summary.into(),
             why: None,
             affected: vec![],
-            undo: UndoInfo::NotUndoable { reason: "read-only".into() },
+            undo: UndoInfo::NotUndoable {
+                reason: "read-only".into(),
+            },
             provenance: None,
             result: ActivityResult::Ok,
             inputs: Value::Null,
             undoes: None,
         }
     }
-    pub fn with_undoes(mut self, undoes: riddle_core::ActivityId) -> Self { self.undoes = Some(undoes); self }
-    pub fn with_affected(mut self, affected: Vec<EntityRef>) -> Self { self.affected = affected; self }
-    pub fn with_undo(mut self, restore: Value, label: impl Into<String>) -> Self {
-        self.undo = UndoInfo::Undoable { restore, label: label.into() };
+    pub fn with_undoes(mut self, undoes: riddle_core::ActivityId) -> Self {
+        self.undoes = Some(undoes);
         self
     }
-    pub fn with_provenance(mut self, p: Provenance) -> Self { self.provenance = Some(p); self }
-    pub fn with_inputs(mut self, inputs: Value) -> Self { self.inputs = inputs; self }
-    pub fn with_why(mut self, why: impl Into<String>) -> Self { self.why = Some(why.into()); self }
+    pub fn with_affected(mut self, affected: Vec<EntityRef>) -> Self {
+        self.affected = affected;
+        self
+    }
+    pub fn with_undo(mut self, restore: Value, label: impl Into<String>) -> Self {
+        self.undo = UndoInfo::Undoable {
+            restore,
+            label: label.into(),
+        };
+        self
+    }
+    pub fn with_provenance(mut self, p: Provenance) -> Self {
+        self.provenance = Some(p);
+        self
+    }
+    pub fn with_inputs(mut self, inputs: Value) -> Self {
+        self.inputs = inputs;
+        self
+    }
+    pub fn with_why(mut self, why: impl Into<String>) -> Self {
+        self.why = Some(why.into());
+        self
+    }
     pub fn partial(mut self, skipped: Vec<riddle_core::SkippedEntity>) -> Self {
-        if !skipped.is_empty() { self.result = ActivityResult::Partial { skipped }; }
+        if !skipped.is_empty() {
+            self.result = ActivityResult::Partial { skipped };
+        }
         self
     }
 }
@@ -94,15 +116,27 @@ pub trait Action: Send + Sync {
     /// static policy in `meta()`; an Action whose risk depends on its input
     /// (`save_settings` is PressHold only when it raises a Dig to Trusted)
     /// overrides it. The runtime consults this before deciding.
-    fn confirmation_for(&self, _ctx: &ActionContext, _args: &Value) -> riddle_core::ConfirmationPolicy { self.meta().confirmation }
+    fn confirmation_for(
+        &self,
+        _ctx: &ActionContext,
+        _args: &Value,
+    ) -> riddle_core::ConfirmationPolicy {
+        self.meta().confirmation
+    }
     /// Validate and describe what would really happen, for confirmation.
     async fn preview(&self, _ctx: &ActionContext, args: &Value) -> Result<Preview> {
-        Ok(Preview { summary: self.meta().description, real_arguments: args.clone() })
+        Ok(Preview {
+            summary: self.meta().description,
+            real_arguments: args.clone(),
+        })
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult>;
     /// Reverse a previous execution from its restoration data.
     async fn undo(&self, _ctx: &ActionContext, _restore: Value) -> Result<ActionResult> {
-        Err(riddle_errors::RiddleError::invalid(format!("{} cannot be undone", self.meta().name)))
+        Err(riddle_errors::RiddleError::invalid(format!(
+            "{} cannot be undone",
+            self.meta().name
+        )))
     }
 }
 
@@ -112,18 +146,26 @@ pub struct Registry {
 }
 
 impl Registry {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
     pub fn register(&mut self, action: Arc<dyn Action>) {
         let name = action.meta().name;
         self.actions.insert(name, action);
     }
-    pub fn get(&self, name: &str) -> Option<Arc<dyn Action>> { self.actions.get(name).cloned() }
+    pub fn get(&self, name: &str) -> Option<Arc<dyn Action>> {
+        self.actions.get(name).cloned()
+    }
     pub fn list(&self) -> Vec<ActionMeta> {
         let mut v: Vec<ActionMeta> = self.actions.values().map(|a| a.meta()).collect();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         v
     }
-    pub fn names(&self) -> Vec<String> { let mut v: Vec<String> = self.actions.keys().cloned().collect(); v.sort(); v }
+    pub fn names(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.actions.keys().cloned().collect();
+        v.sort();
+        v
+    }
 }
 
 /// Helper for declaring metadata tersely in action modules.
@@ -144,12 +186,36 @@ pub fn meta(name: &str, description: &str) -> ActionMetaBuilder {
 
 pub struct ActionMetaBuilder(ActionMeta);
 impl ActionMetaBuilder {
-    pub fn mutating(mut self) -> Self { self.0.mutating = true; self.0.read_only = false; self }
-    pub fn reversible(mut self) -> Self { self.0.reversible = true; self }
-    pub fn external(mut self) -> Self { self.0.external_side_effect = true; self }
-    pub fn risk(mut self, r: riddle_core::Risk) -> Self { self.0.risk = r; self }
-    pub fn confirm(mut self, c: riddle_core::ConfirmationPolicy) -> Self { self.0.confirmation = c; self }
-    pub fn autonomy(mut self, a: riddle_core::Autonomy) -> Self { self.0.minimum_autonomy = a; self }
-    pub fn egress(mut self) -> Self { self.0.egress = true; self }
-    pub fn build(self) -> ActionMeta { self.0 }
+    pub fn mutating(mut self) -> Self {
+        self.0.mutating = true;
+        self.0.read_only = false;
+        self
+    }
+    pub fn reversible(mut self) -> Self {
+        self.0.reversible = true;
+        self
+    }
+    pub fn external(mut self) -> Self {
+        self.0.external_side_effect = true;
+        self
+    }
+    pub fn risk(mut self, r: riddle_core::Risk) -> Self {
+        self.0.risk = r;
+        self
+    }
+    pub fn confirm(mut self, c: riddle_core::ConfirmationPolicy) -> Self {
+        self.0.confirmation = c;
+        self
+    }
+    pub fn autonomy(mut self, a: riddle_core::Autonomy) -> Self {
+        self.0.minimum_autonomy = a;
+        self
+    }
+    pub fn egress(mut self) -> Self {
+        self.0.egress = true;
+        self
+    }
+    pub fn build(self) -> ActionMeta {
+        self.0
+    }
 }

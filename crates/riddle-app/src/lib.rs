@@ -14,9 +14,9 @@ pub mod director_reads;
 pub mod dispatch;
 pub mod domains;
 pub mod engine;
+pub mod events;
 pub mod ops;
 pub mod paths;
-pub mod events;
 pub mod reads;
 
 use riddle_actions::{Runtime, Services};
@@ -36,7 +36,13 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn in_memory(build: BuildStamp) -> Self {
-        Self { data_dir: None, config_dir: None, dev: true, build, keychain_service: "dev.codenaked.riddle.test".into() }
+        Self {
+            data_dir: None,
+            config_dir: None,
+            dev: true,
+            build,
+            keychain_service: "dev.codenaked.riddle.test".into(),
+        }
     }
 }
 
@@ -50,5 +56,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn stores(&self) -> Arc<Stores> { self.stores.clone() }
+    pub fn stores(&self) -> Arc<Stores> {
+        self.stores.clone()
+    }
 }

@@ -45,12 +45,24 @@ pub enum ProjectionMode {
 #[ts(export)]
 pub enum DigStatus {
     Synced,
-    CatchingUp { remaining: u64, total: u64 },
-    Sifting { remaining: u64 },
-    Projection { pending: u64 },
-    Degraded { reason: String },
+    CatchingUp {
+        remaining: u64,
+        total: u64,
+    },
+    Sifting {
+        remaining: u64,
+    },
+    Projection {
+        pending: u64,
+    },
+    Degraded {
+        reason: String,
+    },
     /// The Shadow Period is running; proposals are recorded, nothing is hidden.
-    Shadow { day: u32, of: u32 },
+    Shadow {
+        day: u32,
+        of: u32,
+    },
     NotConnected,
 }
 

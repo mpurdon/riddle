@@ -70,7 +70,13 @@ pub struct BuildStamp {
 
 impl BuildStamp {
     /// Values injected by `build.rs` in the desktop crate; the CLI uses the same.
-    pub fn from_env_vars(version: &str, git_sha: Option<&str>, dirty: Option<&str>, built_at: Option<&str>, profile: &str) -> Self {
+    pub fn from_env_vars(
+        version: &str,
+        git_sha: Option<&str>,
+        dirty: Option<&str>,
+        built_at: Option<&str>,
+        profile: &str,
+    ) -> Self {
         Self {
             version: version.to_string(),
             git_sha: git_sha.unwrap_or("unknown").to_string(),

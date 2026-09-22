@@ -89,25 +89,62 @@ impl Facts {
             "urgency_language_present" => Bool(self.urgency_language_present),
             "asks_for_payment_or_credentials" => Bool(self.asks_for_payment_or_credentials),
             "has_deadline" => Bool(!self.deadlines.is_empty()),
-            "deadline_days" => Number(self.deadlines.iter().map(|d| d.days_from_now).min().unwrap_or(i64::MAX) as f64),
+            "deadline_days" => Number(
+                self.deadlines
+                    .iter()
+                    .map(|d| d.days_from_now)
+                    .min()
+                    .unwrap_or(i64::MAX) as f64,
+            ),
             "is_sent" => Bool(self.is_sent),
             "lookalike_domain" => Bool(self.lookalike_domain),
             "sender_in_never_hidden" => Bool(self.sender_in_never_hidden),
             "sender_is_vip" => Bool(self.sender_is_vip),
-            "automated_sender" => Bool(self.mailing_list || self.precedence_bulk || self.auto_submitted || self.list_unsubscribe),
+            "automated_sender" => Bool(
+                self.mailing_list
+                    || self.precedence_bulk
+                    || self.auto_submitted
+                    || self.list_unsubscribe,
+            ),
             "known_sender" => Bool(self.sender_in_contacts || self.sender_replied_to_before),
             _ => return None,
         })
     }
 
     pub const NAMES: &'static [&'static str] = &[
-        "sender_domain", "sender_in_contacts", "sender_replied_to_before", "first_time_sender",
-        "same_organisation", "mailing_list", "list_unsubscribe", "precedence_bulk", "auto_submitted",
-        "spf_pass", "dkim_pass", "dmarc_pass", "reply_to_mismatch", "gmail_category", "gmail_important",
-        "gmail_spam", "directly_addressed", "cc_only", "thread_length", "has_calendar_part",
-        "has_structured_receipt", "has_attachments", "language", "urgency_language_present",
-        "asks_for_payment_or_credentials", "has_deadline", "deadline_days", "is_sent", "lookalike_domain",
-        "sender_in_never_hidden", "sender_is_vip", "automated_sender", "known_sender",
+        "sender_domain",
+        "sender_in_contacts",
+        "sender_replied_to_before",
+        "first_time_sender",
+        "same_organisation",
+        "mailing_list",
+        "list_unsubscribe",
+        "precedence_bulk",
+        "auto_submitted",
+        "spf_pass",
+        "dkim_pass",
+        "dmarc_pass",
+        "reply_to_mismatch",
+        "gmail_category",
+        "gmail_important",
+        "gmail_spam",
+        "directly_addressed",
+        "cc_only",
+        "thread_length",
+        "has_calendar_part",
+        "has_structured_receipt",
+        "has_attachments",
+        "language",
+        "urgency_language_present",
+        "asks_for_payment_or_credentials",
+        "has_deadline",
+        "deadline_days",
+        "is_sent",
+        "lookalike_domain",
+        "sender_in_never_hidden",
+        "sender_is_vip",
+        "automated_sender",
+        "known_sender",
     ];
 }
 

@@ -15,7 +15,10 @@ pub fn upsert(store: &Store, dig: &Dig) -> Result<()> {
 
 pub fn get(store: &Store, id: &DigId) -> Result<Option<Dig>> {
     store.read(|c| {
-        c.query_row("SELECT json FROM digs WHERE id = ?1", [id.as_str()], |r| from_json(r.get::<_, String>(0)?)).optional()
+        c.query_row("SELECT json FROM digs WHERE id = ?1", [id.as_str()], |r| {
+            from_json(r.get::<_, String>(0)?)
+        })
+        .optional()
     })
 }
 
@@ -28,7 +31,10 @@ pub fn list(store: &Store) -> Result<Vec<Dig>> {
 }
 
 pub fn remove(store: &Store, id: &DigId) -> Result<()> {
-    store.write(|c| { c.execute("DELETE FROM digs WHERE id = ?1", [id.as_str()])?; Ok(()) })
+    store.write(|c| {
+        c.execute("DELETE FROM digs WHERE id = ?1", [id.as_str()])?;
+        Ok(())
+    })
 }
 
 pub fn upsert_group(store: &Store, g: &DigGroup) -> Result<()> {
@@ -47,5 +53,8 @@ pub fn list_groups(store: &Store) -> Result<Vec<DigGroup>> {
 }
 
 pub fn remove_group(store: &Store, name: &str) -> Result<()> {
-    store.write(|c| { c.execute("DELETE FROM dig_groups WHERE name = ?1", [name])?; Ok(()) })
+    store.write(|c| {
+        c.execute("DELETE FROM dig_groups WHERE name = ?1", [name])?;
+        Ok(())
+    })
 }

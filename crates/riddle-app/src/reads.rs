@@ -9,10 +9,13 @@ use riddle_store::repo::messages::MessageFilter;
 use std::collections::HashMap;
 
 impl App {
-    pub fn list_digs(&self) -> Result<Vec<Dig>> { repo::digs::list(&self.stores.index()) }
+    pub fn list_digs(&self) -> Result<Vec<Dig>> {
+        repo::digs::list(&self.stores.index())
+    }
 
     pub fn dig(&self, id: &DigId) -> Result<Dig> {
-        repo::digs::get(&self.stores.index(), id)?.ok_or_else(|| RiddleError::not_found(format!("dig {id}")))
+        repo::digs::get(&self.stores.index(), id)?
+            .ok_or_else(|| RiddleError::not_found(format!("dig {id}")))
     }
 
     /// The morning summary (README "The Core Experience"). Honest: `caught_up`
@@ -51,14 +54,31 @@ impl App {
                 }
             }
             if let DigStatus::Shadow { day, of } = &dig.status {
-                let s = shadow.get_or_insert(ShadowSummary { day: *day, of: *of, would_spoil: 0, would_find: 0, disagreements: 0 });
-                s.would_spoil += shadow_counts.get(&DispositionKind::Spoil).copied().unwrap_or(0);
-                s.would_find += shadow_counts.get(&DispositionKind::Find).copied().unwrap_or(0);
+                let s = shadow.get_or_insert(ShadowSummary {
+                    day: *day,
+                    of: *of,
+                    would_spoil: 0,
+                    would_find: 0,
+                    disagreements: 0,
+                });
+                s.would_spoil += shadow_counts
+                    .get(&DispositionKind::Spoil)
+                    .copied()
+                    .unwrap_or(0);
+                s.would_find += shadow_counts
+                    .get(&DispositionKind::Find)
+                    .copied()
+                    .unwrap_or(0);
                 s.disagreements += repo::corrections::active(&store, 10_000)?.len() as u64;
             }
         }
         let finds_open = repo::finds::count_open(&index)?;
-        let running_catch_up = repo::jobs::active(&index)?.iter().any(|j| matches!(j.kind, JobKind::CatchUp | JobKind::InitialSync | JobKind::Sift) && matches!(j.status, JobStatus::Running | JobStatus::Queued));
+        let running_catch_up = repo::jobs::active(&index)?.iter().any(|j| {
+            matches!(
+                j.kind,
+                JobKind::CatchUp | JobKind::InitialSync | JobKind::Sift
+            ) && matches!(j.status, JobStatus::Running | JobStatus::Queued)
+        });
         Ok(Summary {
             as_of: chrono::Utc::now(),
             caught_up: remaining == 0 && !running_catch_up && degraded.is_empty(),
@@ -66,10 +86,16 @@ impl App {
             arrived,
             dig_count: digs.len() as u32,
             finds_open,
-            unresolved: counts.get(&DispositionKind::Unresolved).copied().unwrap_or(0),
+            unresolved: counts
+                .get(&DispositionKind::Unresolved)
+                .copied()
+                .unwrap_or(0),
             filed: counts.get(&DispositionKind::Filed).copied().unwrap_or(0),
             spoil: counts.get(&DispositionKind::Spoil).copied().unwrap_or(0),
-            contamination: counts.get(&DispositionKind::Contamination).copied().unwrap_or(0),
+            contamination: counts
+                .get(&DispositionKind::Contamination)
+                .copied()
+                .unwrap_or(0),
             remaining_to_sift: remaining,
             total_to_sift,
             director_note: None,
@@ -83,7 +109,12 @@ impl App {
     /// Messages across Digs (or one Dig), merged newest first. Cross-Dig
     /// paging uses one offset applied per Dig, which over-fetches by the
     /// number of Digs; acceptable for a desktop list.
-    pub fn list_messages(&self, dig_id: Option<&DigId>, filter: &MessageFilter, page: &PageRequest) -> Result<Page<MessageSummary>> {
+    pub fn list_messages(
+        &self,
+        dig_id: Option<&DigId>,
+        filter: &MessageFilter,
+        page: &PageRequest,
+    ) -> Result<Page<MessageSummary>> {
         let digs = match dig_id {
             Some(d) => vec![self.dig(d)?],
             None => self.list_digs()?,
@@ -103,12 +134,18 @@ impl App {
         items.sort_by_key(|m| std::cmp::Reverse(m.date));
         let limit = page.limit() as usize;
         items.truncate(limit);
-        Ok(Page::from_offset(items, page.offset(), page.limit(), Some(total)))
+        Ok(Page::from_offset(
+            items,
+            page.offset(),
+            page.limit(),
+            Some(total),
+        ))
     }
 
     pub fn get_message(&self, dig_id: &DigId, id: &MessageId) -> Result<Message> {
         let store = self.stores.dig(dig_id)?;
-        repo::messages::get(&store, dig_id, id)?.ok_or_else(|| RiddleError::not_found(format!("message {id}")))
+        repo::messages::get(&store, dig_id, id)?
+            .ok_or_else(|| RiddleError::not_found(format!("message {id}")))
     }
 
     pub fn get_thread(&self, dig_id: &DigId, thread: &ThreadId) -> Result<Thread> {
@@ -117,7 +154,13 @@ impl App {
         if messages.is_empty() {
             return Err(RiddleError::not_found(format!("thread {thread}")));
         }
-        Ok(Thread { id: thread.clone(), dig_id: dig_id.clone(), provider_id: thread.provider_id().to_string(), subject: messages[0].subject.clone(), messages })
+        Ok(Thread {
+            id: thread.clone(),
+            dig_id: dig_id.clone(),
+            provider_id: thread.provider_id().to_string(),
+            subject: messages[0].subject.clone(),
+            messages,
+        })
     }
 
     /// The answer to "Why?" from the stored trace (§37, §93).
@@ -129,7 +172,16 @@ impl App {
         let trace = repo::traces::get(&store, &class.trace_id)?;
         let (signals, gate, escalated, rationale) = match &trace {
             Some(t) => (
-                t.signals.iter().map(|s| SignalLine { name: s.signal_name.clone(), version: s.signal_version, score: s.score(None), selected: s.selected.clone(), cached: s.cached }).collect(),
+                t.signals
+                    .iter()
+                    .map(|s| SignalLine {
+                        name: s.signal_name.clone(),
+                        version: s.signal_version,
+                        score: s.score(None),
+                        selected: s.selected.clone(),
+                        cached: s.cached,
+                    })
+                    .collect(),
                 t.gate.clone(),
                 t.escalation.is_some(),
                 t.escalation.as_ref().map(|e| e.rationale.clone()),
@@ -159,7 +211,10 @@ impl App {
     }
 
     pub fn recent_traces(&self, dig_id: Option<&DigId>, limit: u32) -> Result<Vec<DecisionTrace>> {
-        let digs = match dig_id { Some(d) => vec![self.dig(d)?], None => self.list_digs()? };
+        let digs = match dig_id {
+            Some(d) => vec![self.dig(d)?],
+            None => self.list_digs()?,
+        };
         let mut out = Vec::new();
         for d in digs {
             let store = self.stores.dig(&d.id)?;
@@ -171,7 +226,16 @@ impl App {
     }
 
     pub fn usage_summary(&self, since: chrono::DateTime<chrono::Utc>) -> Result<UsageSummary> {
-        let mut total = UsageSummary { since, calls: 0, input_tokens: 0, output_tokens: 0, priced_usd: 0.0, unpriced_calls: 0, by_task: vec![], by_provider: vec![] };
+        let mut total = UsageSummary {
+            since,
+            calls: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            priced_usd: 0.0,
+            unpriced_calls: 0,
+            by_task: vec![],
+            by_provider: vec![],
+        };
         let mut by_task: HashMap<String, (f64, u64)> = HashMap::new();
         let mut by_provider: HashMap<String, (f64, u64)> = HashMap::new();
         for d in self.list_digs()? {
@@ -182,24 +246,47 @@ impl App {
             total.output_tokens += s.output_tokens;
             total.priced_usd += s.priced_usd;
             total.unpriced_calls += s.unpriced_calls;
-            for (k, usd, n) in s.by_task { let e = by_task.entry(k).or_insert((0.0, 0)); e.0 += usd; e.1 += n; }
-            for (k, usd, n) in s.by_provider { let e = by_provider.entry(k).or_insert((0.0, 0)); e.0 += usd; e.1 += n; }
+            for (k, usd, n) in s.by_task {
+                let e = by_task.entry(k).or_insert((0.0, 0));
+                e.0 += usd;
+                e.1 += n;
+            }
+            for (k, usd, n) in s.by_provider {
+                let e = by_provider.entry(k).or_insert((0.0, 0));
+                e.0 += usd;
+                e.1 += n;
+            }
         }
         total.by_task = by_task.into_iter().map(|(k, (u, n))| (k, u, n)).collect();
-        total.by_provider = by_provider.into_iter().map(|(k, (u, n))| (k, u, n)).collect();
+        total.by_provider = by_provider
+            .into_iter()
+            .map(|(k, (u, n))| (k, u, n))
+            .collect();
         Ok(total)
     }
 
-    pub fn signal_evaluations(&self, dig_id: &DigId, id: &MessageId) -> Result<Vec<SignalEvaluation>> {
+    pub fn signal_evaluations(
+        &self,
+        dig_id: &DigId,
+        id: &MessageId,
+    ) -> Result<Vec<SignalEvaluation>> {
         let store = self.stores.dig(dig_id)?;
         repo::signals::evaluations_for(&store, id)
     }
 
-    pub fn list_finds(&self, filter: &repo::finds::FindFilter, page: &PageRequest) -> Result<Page<Find>> {
+    pub fn list_finds(
+        &self,
+        filter: &repo::finds::FindFilter,
+        page: &PageRequest,
+    ) -> Result<Page<Find>> {
         repo::finds::list(&self.stores.index(), filter, page)
     }
 
-    pub fn list_activity(&self, filter: &repo::activities::ActivityFilter, page: &PageRequest) -> Result<Page<Activity>> {
+    pub fn list_activity(
+        &self,
+        filter: &repo::activities::ActivityFilter,
+        page: &PageRequest,
+    ) -> Result<Page<Activity>> {
         repo::activities::list(&self.stores.index(), filter, page)
     }
 }

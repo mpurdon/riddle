@@ -29,11 +29,19 @@ pub fn summary(store: &Store, since: &chrono::DateTime<chrono::Utc>) -> Result<U
 
 /// Spend today in USD for one task class, for the daily budget.
 pub fn spent_today(store: &Store, tasks: &[UsageTask]) -> Result<f64> {
-    let start = chrono::Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+    let start = chrono::Utc::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc();
     store.read(|c| {
         let mut total = 0.0;
         for t in tasks {
-            let v: f64 = c.query_row("SELECT COALESCE(SUM(cost_usd),0) FROM usage WHERE at >= ?1 AND task = ?2", params![ts(&start), t.as_str()], |r| r.get(0))?;
+            let v: f64 = c.query_row(
+                "SELECT COALESCE(SUM(cost_usd),0) FROM usage WHERE at >= ?1 AND task = ?2",
+                params![ts(&start), t.as_str()],
+                |r| r.get(0),
+            )?;
             total += v;
         }
         Ok(total)
@@ -68,11 +76,19 @@ pub fn recent(store: &Store, limit: u32) -> Result<Vec<UsageRow>> {
 /// per-Dig daily budgets (§56): the judge and the LLM are budgeted separately
 /// whatever task used them.
 pub fn spent_today_by_provider(store: &Store, providers: &[&str]) -> Result<f64> {
-    let start = chrono::Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap_or_default().and_utc();
+    let start = chrono::Utc::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap_or_default()
+        .and_utc();
     store.read(|c| {
         let mut total = 0.0;
         for p in providers {
-            let v: f64 = c.query_row("SELECT COALESCE(SUM(cost_usd),0) FROM usage WHERE at >= ?1 AND provider = ?2", params![ts(&start), p], |r| r.get(0))?;
+            let v: f64 = c.query_row(
+                "SELECT COALESCE(SUM(cost_usd),0) FROM usage WHERE at >= ?1 AND provider = ?2",
+                params![ts(&start), p],
+                |r| r.get(0),
+            )?;
             total += v;
         }
         Ok(total)

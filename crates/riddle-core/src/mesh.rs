@@ -112,14 +112,33 @@ impl NamedList {
 #[ts(export)]
 pub enum Expr {
     /// `review_requested@v3 > .80`, optionally `signal@v3:CHOICE > .5`.
-    Signal { signal: String, version: u32, choice: Option<String>, op: CmpOp, threshold: f64 },
+    Signal {
+        signal: String,
+        version: u32,
+        choice: Option<String>,
+        op: CmpOp,
+        threshold: f64,
+    },
     /// `thread_length > 3`, `gmail_category = promotions`, `mailing_list` (bool shorthand).
-    Fact { fact: String, op: CmpOp, value: FactValue },
+    Fact {
+        fact: String,
+        op: CmpOp,
+        value: FactValue,
+    },
     /// `sender IN never_hidden`.
-    InList { subject: String, list: NamedList },
-    And { items: Vec<Expr> },
-    Or { items: Vec<Expr> },
-    Not { item: Box<Expr> },
+    InList {
+        subject: String,
+        list: NamedList,
+    },
+    And {
+        items: Vec<Expr>,
+    },
+    Or {
+        items: Vec<Expr>,
+    },
+    Not {
+        item: Box<Expr>,
+    },
     /// `ELSE`.
     Always,
 }
@@ -129,12 +148,16 @@ impl Expr {
     /// union over the Meshes in scope (§25).
     pub fn signal_refs(&self, out: &mut Vec<(String, u32)>) {
         match self {
-            Expr::Signal { signal, version, .. } => {
+            Expr::Signal {
+                signal, version, ..
+            } => {
                 if !out.iter().any(|(s, v)| s == signal && v == version) {
                     out.push((signal.clone(), *version));
                 }
             }
-            Expr::And { items } | Expr::Or { items } => items.iter().for_each(|e| e.signal_refs(out)),
+            Expr::And { items } | Expr::Or { items } => {
+                items.iter().for_each(|e| e.signal_refs(out))
+            }
             Expr::Not { item } => item.signal_refs(out),
             Expr::Fact { .. } | Expr::InList { .. } | Expr::Always => {}
         }
@@ -210,11 +233,17 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn key(&self) -> String { format!("{} v{}", self.name, self.version) }
+    pub fn key(&self) -> String {
+        format!("{} v{}", self.name, self.version)
+    }
     pub fn signal_refs(&self) -> Vec<(String, u32)> {
         let mut out = Vec::new();
-        for r in &self.routes { r.condition.signal_refs(&mut out); }
-        for g in &self.guards { g.condition.signal_refs(&mut out); }
+        for r in &self.routes {
+            r.condition.signal_refs(&mut out);
+        }
+        for g in &self.guards {
+            g.condition.signal_refs(&mut out);
+        }
         out
     }
 }

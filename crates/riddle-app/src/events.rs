@@ -9,7 +9,9 @@ pub struct Broadcast {
 }
 
 impl Default for Broadcast {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Broadcast {
@@ -17,7 +19,9 @@ impl Broadcast {
         let (tx, _rx) = broadcast::channel(1024);
         Self { tx }
     }
-    pub fn subscribe(&self) -> broadcast::Receiver<RiddleEvent> { self.tx.subscribe() }
+    pub fn subscribe(&self) -> broadcast::Receiver<RiddleEvent> {
+        self.tx.subscribe()
+    }
 }
 
 impl EventSink for Broadcast {

@@ -47,7 +47,11 @@ impl JobKind {
             JobKind::Sift | JobKind::IncrementalSync | JobKind::TemporalSift => Priority::Incoming,
             JobKind::CatchUp | JobKind::InitialSync => Priority::CatchUp,
             JobKind::Projection => Priority::Projection,
-            JobKind::HistoricalSift | JobKind::SignalBackfill | JobKind::Embeddings | JobKind::Maintenance | JobKind::Expedition => Priority::Backfill,
+            JobKind::HistoricalSift
+            | JobKind::SignalBackfill
+            | JobKind::Embeddings
+            | JobKind::Maintenance
+            | JobKind::Expedition => Priority::Backfill,
             JobKind::Replay | JobKind::ShadowEvaluation => Priority::Experiment,
         }
     }
@@ -79,15 +83,22 @@ pub enum JobStatus {
     Queued,
     Running,
     /// Paused with the reason shown in the Task Centre: sleep, offline, budget, rate limit, fault.
-    Paused { reason: String },
+    Paused {
+        reason: String,
+    },
     Completed,
-    Failed { error: String },
+    Failed {
+        error: String,
+    },
     Cancelled,
 }
 
 impl JobStatus {
     pub fn is_terminal(&self) -> bool {
-        matches!(self, JobStatus::Completed | JobStatus::Failed { .. } | JobStatus::Cancelled)
+        matches!(
+            self,
+            JobStatus::Completed | JobStatus::Failed { .. } | JobStatus::Cancelled
+        )
     }
 }
 

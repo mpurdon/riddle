@@ -18,20 +18,30 @@ pub fn upsert(store: &Store, s: &Signal) -> Result<()> {
 
 pub fn get(store: &Store, name: &str, version: u32) -> Result<Option<Signal>> {
     store.read(|c| {
-        c.query_row("SELECT json FROM signals WHERE name = ?1 AND version = ?2", params![name, version], |r| from_json(r.get::<_, String>(0)?)).optional()
+        c.query_row(
+            "SELECT json FROM signals WHERE name = ?1 AND version = ?2",
+            params![name, version],
+            |r| from_json(r.get::<_, String>(0)?),
+        )
+        .optional()
     })
 }
 
 /// The highest version of a Signal in one of the given statuses.
 pub fn latest(store: &Store, name: &str, statuses: &[SignalStatus]) -> Result<Option<Signal>> {
     let all = versions(store, name)?;
-    Ok(all.into_iter().filter(|s| statuses.is_empty() || statuses.contains(&s.status)).max_by_key(|s| s.version))
+    Ok(all
+        .into_iter()
+        .filter(|s| statuses.is_empty() || statuses.contains(&s.status))
+        .max_by_key(|s| s.version))
 }
 
 pub fn versions(store: &Store, name: &str) -> Result<Vec<Signal>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT json FROM signals WHERE name = ?1 ORDER BY version")?;
-        let rows = st.query_map([name], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let rows = st
+            .query_map([name], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }
@@ -39,14 +49,20 @@ pub fn versions(store: &Store, name: &str) -> Result<Vec<Signal>> {
 pub fn list(store: &Store) -> Result<Vec<Signal>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT json FROM signals ORDER BY name, version")?;
-        let rows = st.query_map([], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let rows = st
+            .query_map([], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }
 
 pub fn next_version(store: &Store, name: &str) -> Result<u32> {
     store.read(|c| {
-        let v: Option<u32> = c.query_row("SELECT MAX(version) FROM signals WHERE name = ?1", [name], |r| r.get(0))?;
+        let v: Option<u32> = c.query_row(
+            "SELECT MAX(version) FROM signals WHERE name = ?1",
+            [name],
+            |r| r.get(0),
+        )?;
         Ok(v.unwrap_or(0) + 1)
     })
 }
@@ -69,7 +85,14 @@ pub fn put_evaluation_in(c: &rusqlite::Connection, e: &SignalEvaluation) -> rusq
     Ok(())
 }
 
-pub fn get_evaluation(store: &Store, message: &MessageId, name: &str, version: u32, engine: &str, context_hash: &str) -> Result<Option<SignalEvaluation>> {
+pub fn get_evaluation(
+    store: &Store,
+    message: &MessageId,
+    name: &str,
+    version: u32,
+    engine: &str,
+    context_hash: &str,
+) -> Result<Option<SignalEvaluation>> {
     store.read(|c| {
         c.query_row(
             "SELECT json FROM signal_evaluations WHERE message_id = ?1 AND signal_name = ?2 AND signal_version = ?3 AND engine_identity = ?4 AND context_hash = ?5",
@@ -82,24 +105,42 @@ pub fn get_evaluation(store: &Store, message: &MessageId, name: &str, version: u
 /// Every cached evaluation for a message, any engine.
 pub fn evaluations_for(store: &Store, message: &MessageId) -> Result<Vec<SignalEvaluation>> {
     store.read(|c| {
-        let mut st = c.prepare("SELECT json FROM signal_evaluations WHERE message_id = ?1 ORDER BY evaluated_at DESC")?;
-        let rows = st.query_map([message.as_str()], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let mut st = c.prepare(
+            "SELECT json FROM signal_evaluations WHERE message_id = ?1 ORDER BY evaluated_at DESC",
+        )?;
+        let rows = st
+            .query_map([message.as_str()], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }
 
 pub fn evaluation_count(store: &Store) -> Result<u64> {
-    store.read(|c| c.query_row("SELECT count(*) FROM signal_evaluations", [], |r| r.get::<_, i64>(0)).map(|n| n as u64))
+    store.read(|c| {
+        c.query_row("SELECT count(*) FROM signal_evaluations", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .map(|n| n as u64)
+    })
 }
 
 /// Drop every cached evaluation for an engine identity (model change, §26).
 pub fn invalidate_engine(store: &Store, engine: &str) -> Result<u64> {
-    store.write(|c| Ok(c.execute("DELETE FROM signal_evaluations WHERE engine_identity = ?1", [engine])? as u64))
+    store.write(|c| {
+        Ok(c.execute(
+            "DELETE FROM signal_evaluations WHERE engine_identity = ?1",
+            [engine],
+        )? as u64)
+    })
 }
 
 /// Cached evaluations for one message restricted to one engine identity;
 /// simulation and the cache read this to avoid mixing engines.
-pub fn evaluations_for_engine(store: &Store, message: &MessageId, engine: &str) -> Result<Vec<SignalEvaluation>> {
+pub fn evaluations_for_engine(
+    store: &Store,
+    message: &MessageId,
+    engine: &str,
+) -> Result<Vec<SignalEvaluation>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT json FROM signal_evaluations WHERE message_id = ?1 AND engine_identity = ?2 ORDER BY evaluated_at DESC")?;
         let rows = st.query_map(params![message.as_str(), engine], |r| from_json(r.get::<_, String>(0)?))?.collect();
@@ -109,7 +150,12 @@ pub fn evaluations_for_engine(store: &Store, message: &MessageId, engine: &str) 
 
 /// Every evaluation of one Signal version in the Dig, for calibration and
 /// Signal testing.
-pub fn evaluations_of_signal(store: &Store, name: &str, version: u32, limit: u32) -> Result<Vec<SignalEvaluation>> {
+pub fn evaluations_of_signal(
+    store: &Store,
+    name: &str,
+    version: u32,
+    limit: u32,
+) -> Result<Vec<SignalEvaluation>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT json FROM signal_evaluations WHERE signal_name = ?1 AND signal_version = ?2 ORDER BY evaluated_at DESC LIMIT ?3")?;
         let rows = st.query_map(params![name, version, limit], |r| from_json(r.get::<_, String>(0)?))?.collect();

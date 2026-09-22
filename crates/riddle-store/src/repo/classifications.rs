@@ -17,7 +17,10 @@ pub fn record_in(c: &rusqlite::Connection, k: &Classification) -> rusqlite::Resu
         "UPDATE classifications SET superseded_at = ?2 WHERE message_id = ?1 AND shadow = ?3 AND superseded_at IS NULL",
         params![k.message_id.as_str(), ts(&k.created_at), k.shadow as i64],
     )?;
-    let find_type = match &k.disposition { Disposition::Find { find_type } => Some(find_type.as_str()), _ => None };
+    let find_type = match &k.disposition {
+        Disposition::Find { find_type } => Some(find_type.as_str()),
+        _ => None,
+    };
     c.execute(
         "INSERT INTO classifications (id, message_id, disposition_kind, find_type, mesh_id, mesh_version, json, shadow, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -27,9 +30,15 @@ pub fn record_in(c: &rusqlite::Connection, k: &Classification) -> rusqlite::Resu
         ],
     )?;
     if !k.shadow {
-        c.execute("DELETE FROM message_strata WHERE message_id = ?1", [k.message_id.as_str()])?;
+        c.execute(
+            "DELETE FROM message_strata WHERE message_id = ?1",
+            [k.message_id.as_str()],
+        )?;
         for s in &k.strata {
-            c.execute("INSERT OR IGNORE INTO message_strata (message_id, stratum) VALUES (?1, ?2)", params![k.message_id.as_str(), s])?;
+            c.execute(
+                "INSERT OR IGNORE INTO message_strata (message_id, stratum) VALUES (?1, ?2)",
+                params![k.message_id.as_str(), s],
+            )?;
         }
     }
     Ok(())
@@ -55,14 +64,22 @@ pub fn current_shadow(store: &Store, id: &MessageId) -> Result<Option<Classifica
 
 pub fn history(store: &Store, id: &MessageId) -> Result<Vec<Classification>> {
     store.read(|c| {
-        let mut st = c.prepare("SELECT json FROM classifications WHERE message_id = ?1 ORDER BY created_at DESC")?;
-        let rows = st.query_map([id.as_str()], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let mut st = c.prepare(
+            "SELECT json FROM classifications WHERE message_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = st
+            .query_map([id.as_str()], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }
 
 /// Counts of current dispositions, optionally within a window.
-pub fn counts(store: &Store, since: Option<&chrono::DateTime<chrono::Utc>>, shadow: bool) -> Result<HashMap<DispositionKind, u64>> {
+pub fn counts(
+    store: &Store,
+    since: Option<&chrono::DateTime<chrono::Utc>>,
+    shadow: bool,
+) -> Result<HashMap<DispositionKind, u64>> {
     store.read(|c| {
         let mut st = c.prepare(
             "SELECT disposition_kind, count(*) FROM classifications WHERE superseded_at IS NULL AND shadow = ?1 AND created_at >= ?2 GROUP BY disposition_kind",
@@ -80,10 +97,15 @@ pub fn counts(store: &Store, since: Option<&chrono::DateTime<chrono::Utc>>, shad
 }
 
 /// Current classifications for a set of messages, for simulation diffs.
-pub fn current_many(store: &Store, ids: &[MessageId]) -> Result<HashMap<MessageId, Classification>> {
+pub fn current_many(
+    store: &Store,
+    ids: &[MessageId],
+) -> Result<HashMap<MessageId, Classification>> {
     let mut out = HashMap::new();
     for id in ids {
-        if let Some(k) = current(store, id)? { out.insert(id.clone(), k); }
+        if let Some(k) = current(store, id)? {
+            out.insert(id.clone(), k);
+        }
     }
     Ok(out)
 }

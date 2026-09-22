@@ -27,7 +27,10 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_window_state::Builder::new()
-                .with_state_flags(tauri_plugin_window_state::StateFlags::all() - tauri_plugin_window_state::StateFlags::VISIBLE)
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
                 .build(),
         )
         .setup(move |app| {
@@ -40,8 +43,17 @@ pub fn run() {
                 let core = state.app.clone();
                 tauri::async_runtime::spawn(async move {
                     match core.boot(true).await {
-                        Ok(_) => rinfo!(Category::App, "core booted; {} actions", core.runtime.list_actions().len()),
-                        Err(e) => riddle_observability::rerror!(Category::App, "core boot failed: {}: {}", e.kind.as_str(), e.message),
+                        Ok(_) => rinfo!(
+                            Category::App,
+                            "core booted; {} actions",
+                            core.runtime.list_actions().len()
+                        ),
+                        Err(e) => riddle_observability::rerror!(
+                            Category::App,
+                            "core boot failed: {}: {}",
+                            e.kind.as_str(),
+                            e.message
+                        ),
                     }
                 });
             }
@@ -51,13 +63,23 @@ pub fn run() {
                 let token_file = dirs.data.join("bridge.json");
                 tauri::async_runtime::spawn(async move {
                     if let Err(e) = riddle_app::bridge::start(core, 1431, Some(token_file)).await {
-                        riddle_observability::rwarn!(Category::App, "dev bridge did not start: {e}");
+                        riddle_observability::rwarn!(
+                            Category::App,
+                            "dev bridge did not start: {e}"
+                        );
                     }
                 });
             }
             app.manage(state);
-            rinfo!(Category::App, "riddle {} ({}{}) started; profile={:?}; data={}",
-                stamp.version, stamp.git_sha, if stamp.dirty { "-dirty" } else { "" }, profile, dirs.data.display());
+            rinfo!(
+                Category::App,
+                "riddle {} ({}{}) started; profile={:?}; data={}",
+                stamp.version,
+                stamp.git_sha,
+                if stamp.dirty { "-dirty" } else { "" },
+                profile,
+                dirs.data.display()
+            );
             if let Some(w) = app.get_webview_window("main") {
                 let title = match profile {
                     paths::Profile::Dev => format!("Riddle DEV {}", stamp.git_sha),

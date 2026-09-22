@@ -151,26 +151,72 @@ fn progress_line(v: serde_json::Value) {
 }
 
 async fn open_app(prod: bool) -> Result<Arc<App>, RiddleError> {
-    let profile = if prod { Profile::Prod } else { Profile::current() };
+    let profile = if prod {
+        Profile::Prod
+    } else {
+        Profile::current()
+    };
     let dirs = AppDirs::resolve(profile);
-    let build = BuildStamp::from_env_vars(env!("CARGO_PKG_VERSION"), option_env!("RIDDLE_GIT_SHA"), option_env!("RIDDLE_GIT_DIRTY"), option_env!("RIDDLE_BUILT_AT"), profile.as_str());
-    App::open(AppConfig { data_dir: Some(dirs.data), config_dir: Some(dirs.config), dev: profile.is_dev(), build, keychain_service: profile.keychain_service() })
+    let build = BuildStamp::from_env_vars(
+        env!("CARGO_PKG_VERSION"),
+        option_env!("RIDDLE_GIT_SHA"),
+        option_env!("RIDDLE_GIT_DIRTY"),
+        option_env!("RIDDLE_BUILT_AT"),
+        profile.as_str(),
+    );
+    App::open(AppConfig {
+        data_dir: Some(dirs.data),
+        config_dir: Some(dirs.config),
+        dev: profile.is_dev(),
+        build,
+        keychain_service: profile.keychain_service(),
+    })
 }
 
-async fn invoke(rt: &Runtime, name: &str, args: &str, dig: Option<String>, yes: bool, progress: bool) -> Result<serde_json::Value, RiddleError> {
-    let args: serde_json::Value = serde_json::from_str(args).map_err(|e| RiddleError::invalid(format!("--args must be a JSON object: {e}")))?;
-    let mut inv = ActionInvocation { action: name.to_string(), args, principal: Principal::Cli, dig_id: dig.map(DigId::from), idempotency_key: None, confirmed: yes, pending_id: None };
+async fn invoke(
+    rt: &Runtime,
+    name: &str,
+    args: &str,
+    dig: Option<String>,
+    yes: bool,
+    progress: bool,
+) -> Result<serde_json::Value, RiddleError> {
+    let args: serde_json::Value = serde_json::from_str(args)
+        .map_err(|e| RiddleError::invalid(format!("--args must be a JSON object: {e}")))?;
+    let mut inv = ActionInvocation {
+        action: name.to_string(),
+        args,
+        principal: Principal::Cli,
+        dig_id: dig.map(DigId::from),
+        idempotency_key: None,
+        confirmed: yes,
+        pending_id: None,
+    };
     loop {
         match rt.invoke(inv.clone()).await {
-            Ok(out) => return Ok(serde_json::json!({ "result": out.result, "activityId": out.activity_id, "replayed": out.replayed })),
+            Ok(out) => {
+                return Ok(
+                    serde_json::json!({ "result": out.result, "activityId": out.activity_id, "replayed": out.replayed }),
+                )
+            }
             Err(e) if e.kind == ErrorKind::NeedsConfirmation => {
-                let pending: PendingAction = e.detail.clone().and_then(|d| serde_json::from_value(d).ok()).ok_or(e)?;
+                let pending: PendingAction = e
+                    .detail
+                    .clone()
+                    .and_then(|d| serde_json::from_value(d).ok())
+                    .ok_or(e)?;
                 if progress {
-                    progress_line(serde_json::json!({ "type": "plan", "action": pending.action, "summary": pending.summary, "realArguments": pending.real_arguments }));
+                    progress_line(
+                        serde_json::json!({ "type": "plan", "action": pending.action, "summary": pending.summary, "realArguments": pending.real_arguments }),
+                    );
                     inv.pending_id = Some(pending.id);
                     continue;
                 }
-                eprintln!("{}\n{}", pending.summary, serde_json::to_string_pretty(&pending.real_arguments).unwrap_or_default());
+                eprintln!(
+                    "{}\n{}",
+                    pending.summary,
+                    serde_json::to_string_pretty(&pending.real_arguments).unwrap_or_default()
+                );
                 eprint!("Proceed? [y/N] ");
                 let mut line = String::new();
                 std::io::stdin().read_line(&mut line).ok();
@@ -187,7 +233,9 @@ async fn invoke(rt: &Runtime, name: &str, args: &str, dig: Option<String>, yes: 
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).target(env_logger::Target::Stderr).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
+        .target(env_logger::Target::Stderr)
+        .init();
     let cli = Cli::parse();
     let yes = cli.yes || cli.progress;
     let code = match run(cli, yes).await {
@@ -207,13 +255,25 @@ async fn main() {
 
 async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
     if let Command::Paths = cli.command {
-        let profile = if cli.prod { Profile::Prod } else { Profile::current() };
+        let profile = if cli.prod {
+            Profile::Prod
+        } else {
+            Profile::current()
+        };
         let dirs = AppDirs::resolve(profile);
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "profile": profile.as_str(), "data": dirs.data, "config": dirs.config, "logs": dirs.logs, "cache": dirs.cache }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({ "profile": profile.as_str(), "data": dirs.data, "config": dirs.config, "logs": dirs.logs, "cache": dirs.cache })
+            )?
+        );
         return Ok(());
     }
     let app = open_app(cli.prod).await?;
-    let offline = matches!(cli.command, Command::Serve { offline: true, .. } | Command::Pass { offline: true, .. });
+    let offline = matches!(
+        cli.command,
+        Command::Serve { offline: true, .. } | Command::Pass { offline: true, .. }
+    );
     let background = matches!(cli.command, Command::Serve { .. });
     let overrides = if offline {
         let mut s = riddle_settings::Settings::dev_defaults();
@@ -233,26 +293,88 @@ async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
         });
     }
     let out: serde_json::Value = match cli.command {
-        Command::Summary => serde_json::to_value(app.summary(chrono::Utc::now() - chrono::Duration::hours(24))?)?,
+        Command::Summary => {
+            serde_json::to_value(app.summary(chrono::Utc::now() - chrono::Duration::hours(24))?)?
+        }
         Command::Digs => serde_json::to_value(app.list_digs()?)?,
         Command::Actions { sub } => match sub {
             ActionsCmd::List => serde_json::to_value(app.runtime.list_actions())?,
-            ActionsCmd::Invoke { name, args, dig } => invoke(&app.runtime, &name, &args, dig, yes, cli.progress).await?,
+            ActionsCmd::Invoke { name, args, dig } => {
+                invoke(&app.runtime, &name, &args, dig, yes, cli.progress).await?
+            }
         },
-        Command::Invoke { name, args, dig } => invoke(&app.runtime, &name, &args, dig, yes, cli.progress).await?,
+        Command::Invoke { name, args, dig } => {
+            invoke(&app.runtime, &name, &args, dig, yes, cli.progress).await?
+        }
         Command::Finds { status } => {
-            let status = match status.as_str() { "open" => Some(FindStatus::Open), "snoozed" => Some(FindStatus::Snoozed), "resolved" => Some(FindStatus::Resolved), "dismissed" => Some(FindStatus::Dismissed), "all" => None, _ => return Err(RiddleError::invalid("status must be open|snoozed|resolved|dismissed|all")) };
-            serde_json::to_value(app.list_finds(&riddle_store::repo::finds::FindFilter { status, ..Default::default() }, &PageRequest { cursor: None, limit: Some(200) })?)?
+            let status = match status.as_str() {
+                "open" => Some(FindStatus::Open),
+                "snoozed" => Some(FindStatus::Snoozed),
+                "resolved" => Some(FindStatus::Resolved),
+                "dismissed" => Some(FindStatus::Dismissed),
+                "all" => None,
+                _ => {
+                    return Err(RiddleError::invalid(
+                        "status must be open|snoozed|resolved|dismissed|all",
+                    ))
+                }
+            };
+            serde_json::to_value(app.list_finds(
+                &riddle_store::repo::finds::FindFilter {
+                    status,
+                    ..Default::default()
+                },
+                &PageRequest {
+                    cursor: None,
+                    limit: Some(200),
+                },
+            )?)?
         }
-        Command::Messages { dig, disposition, query, limit } => {
-            let filter = riddle_store::repo::messages::MessageFilter { disposition, query, ..Default::default() };
-            serde_json::to_value(app.list_messages(Some(&DigId::from(dig)), &filter, &PageRequest { cursor: None, limit: Some(limit) })?)?
+        Command::Messages {
+            dig,
+            disposition,
+            query,
+            limit,
+        } => {
+            let filter = riddle_store::repo::messages::MessageFilter {
+                disposition,
+                query,
+                ..Default::default()
+            };
+            serde_json::to_value(app.list_messages(
+                Some(&DigId::from(dig)),
+                &filter,
+                &PageRequest {
+                    cursor: None,
+                    limit: Some(limit),
+                },
+            )?)?
         }
-        Command::Explain { dig, message } => serde_json::to_value(app.explain(&DigId::from(dig), &MessageId::from(message))?)?,
-        Command::Sync { dig } => invoke(&app.runtime, "refresh_now", &serde_json::json!({ "digId": dig }).to_string(), None, true, cli.progress).await?,
+        Command::Explain { dig, message } => {
+            serde_json::to_value(app.explain(&DigId::from(dig), &MessageId::from(message))?)?
+        }
+        Command::Sync { dig } => {
+            invoke(
+                &app.runtime,
+                "refresh_now",
+                &serde_json::json!({ "digId": dig }).to_string(),
+                None,
+                true,
+                cli.progress,
+            )
+            .await?
+        }
         Command::Simulate { file, window_days } => {
             let text = std::fs::read_to_string(&file)?;
-            invoke(&app.runtime, "simulate_mesh", &serde_json::json!({ "text": text, "windowDays": window_days }).to_string(), None, true, cli.progress).await?
+            invoke(
+                &app.runtime,
+                "simulate_mesh",
+                &serde_json::json!({ "text": text, "windowDays": window_days }).to_string(),
+                None,
+                true,
+                cli.progress,
+            )
+            .await?
         }
         Command::Export { sub } => match sub {
             ExportCmd::Traces { dig, limit, full } => {
@@ -272,33 +394,71 @@ async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
                 serde_json::Value::Array(redacted)
             }
         },
-        Command::Activity { limit } => serde_json::to_value(app.list_activity(&Default::default(), &PageRequest { cursor: None, limit: Some(limit) })?)?,
+        Command::Activity { limit } => serde_json::to_value(app.list_activity(
+            &Default::default(),
+            &PageRequest {
+                cursor: None,
+                limit: Some(limit),
+            },
+        )?)?,
         Command::Serve { port, .. } => {
-            let profile = if cli.prod { Profile::Prod } else { Profile::current() };
+            let profile = if cli.prod {
+                Profile::Prod
+            } else {
+                Profile::current()
+            };
             let dirs = AppDirs::resolve(profile);
-            let info = riddle_app::bridge::start(app.clone(), port, Some(dirs.data.join("bridge.json"))).await?;
-            eprintln!("riddle serving; bridge on http://127.0.0.1:{} ({} actions)", info.port, app.runtime.list_actions().len());
-            println!("{}", serde_json::json!({ "port": info.port, "token": info.token }));
+            let info =
+                riddle_app::bridge::start(app.clone(), port, Some(dirs.data.join("bridge.json")))
+                    .await?;
+            eprintln!(
+                "riddle serving; bridge on http://127.0.0.1:{} ({} actions)",
+                info.port,
+                app.runtime.list_actions().len()
+            );
+            println!(
+                "{}",
+                serde_json::json!({ "port": info.port, "token": info.token })
+            );
             tokio::signal::ctrl_c().await?;
             ops.runner.stop();
             return Ok(());
         }
         Command::Pass { sift_limit, .. } => {
-            let reports = app.full_pass_all(sift_limit, &riddle_sync::engine::CancelFlag::new()).await?;
-            for d in app.list_digs()? { app.refresh_dig_status(&d.id); }
+            let reports = app
+                .full_pass_all(sift_limit, &riddle_sync::engine::CancelFlag::new())
+                .await?;
+            for d in app.list_digs()? {
+                app.refresh_dig_status(&d.id);
+            }
             serde_json::to_value(reports)?
         }
         Command::Bridge { port } => {
-            let profile = if cli.prod { Profile::Prod } else { Profile::current() };
+            let profile = if cli.prod {
+                Profile::Prod
+            } else {
+                Profile::current()
+            };
             let dirs = AppDirs::resolve(profile);
-            let info = riddle_app::bridge::start(app.clone(), port, Some(dirs.data.join("bridge.json"))).await?;
-            eprintln!("bridge on http://127.0.0.1:{} (token in {})", info.port, dirs.data.join("bridge.json").display());
-            println!("{}", serde_json::json!({ "port": info.port, "token": info.token }));
+            let info =
+                riddle_app::bridge::start(app.clone(), port, Some(dirs.data.join("bridge.json")))
+                    .await?;
+            eprintln!(
+                "bridge on http://127.0.0.1:{} (token in {})",
+                info.port,
+                dirs.data.join("bridge.json").display()
+            );
+            println!(
+                "{}",
+                serde_json::json!({ "port": info.port, "token": info.token })
+            );
             tokio::signal::ctrl_c().await?;
             return Ok(());
         }
         Command::Mcp { allow_mutations } => {
-            riddle_mcp::McpServer::new(app.clone(), allow_mutations).serve_stdio().await?;
+            riddle_mcp::McpServer::new(app.clone(), allow_mutations)
+                .serve_stdio()
+                .await?;
             return Ok(());
         }
         Command::Paths => unreachable!(),

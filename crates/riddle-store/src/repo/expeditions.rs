@@ -15,13 +15,22 @@ pub fn upsert(store: &Store, e: &Expedition) -> Result<()> {
 }
 
 pub fn get(store: &Store, id: &ExpeditionId) -> Result<Option<Expedition>> {
-    store.read(|c| c.query_row("SELECT json FROM expeditions WHERE id = ?1", [id.as_str()], |r| from_json(r.get::<_, String>(0)?)).optional())
+    store.read(|c| {
+        c.query_row(
+            "SELECT json FROM expeditions WHERE id = ?1",
+            [id.as_str()],
+            |r| from_json(r.get::<_, String>(0)?),
+        )
+        .optional()
+    })
 }
 
 pub fn list(store: &Store, limit: u32) -> Result<Vec<Expedition>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT json FROM expeditions ORDER BY updated_at DESC LIMIT ?1")?;
-        let rows = st.query_map([limit], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let rows = st
+            .query_map([limit], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }

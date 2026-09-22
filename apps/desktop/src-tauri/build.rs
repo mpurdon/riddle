@@ -13,7 +13,9 @@ fn git(args: &[&str]) -> Option<String> {
 
 fn main() {
     let sha = git(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
-    let dirty = git(&["status", "--porcelain"]).map(|s| !s.trim().is_empty()).unwrap_or(false);
+    let dirty = git(&["status", "--porcelain"])
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
     let built_at = chrono_free_now();
     println!("cargo:rustc-env=RIDDLE_GIT_SHA={sha}");
     println!("cargo:rustc-env=RIDDLE_GIT_DIRTY={dirty}");
@@ -25,7 +27,10 @@ fn main() {
 
 /// RFC 3339 UTC without pulling chrono into the build script.
 fn chrono_free_now() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let days = secs / 86_400;
     let (h, m, s) = ((secs % 86_400) / 3600, (secs % 3600) / 60, secs % 60);
     // Civil-from-days (Howard Hinnant's algorithm).

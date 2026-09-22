@@ -43,7 +43,9 @@ pub fn show_main(app: &AppHandle) {
 /// Off-screen window rescue after monitor changes.
 pub fn reset_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
-        let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(80.0, 80.0)));
+        let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
+            80.0, 80.0,
+        )));
         let _ = w.set_size(tauri::Size::Logical(tauri::LogicalSize::new(1440.0, 900.0)));
         let _ = w.show();
         let _ = w.set_focus();
@@ -55,8 +57,18 @@ pub fn reset_window(app: &AppHandle) {
 /// registers `refresh_now`.
 pub fn refresh_now(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        let Some(state) = app.try_state::<AppState>() else { return };
-        let inv = ActionInvocation { action: "refresh_now".into(), args: serde_json::json!({}), principal: Principal::System, dig_id: None, idempotency_key: None, confirmed: true, pending_id: None };
+        let Some(state) = app.try_state::<AppState>() else {
+            return;
+        };
+        let inv = ActionInvocation {
+            action: "refresh_now".into(),
+            args: serde_json::json!({}),
+            principal: Principal::System,
+            dig_id: None,
+            idempotency_key: None,
+            confirmed: true,
+            pending_id: None,
+        };
         match state.runtime().invoke(inv).await {
             Ok(_) => rdebug!(Category::App, "refresh requested"),
             Err(e) => rdebug!(Category::App, "refresh not available: {}", e.kind.as_str()),
@@ -68,7 +80,11 @@ pub fn refresh_now(app: AppHandle) {
 pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
     match event {
         WindowEvent::CloseRequested { api, .. } => {
-            let close_to_hide = window.app_handle().try_state::<AppState>().map(|s| s.close_to_hide()).unwrap_or(true);
+            let close_to_hide = window
+                .app_handle()
+                .try_state::<AppState>()
+                .map(|s| s.close_to_hide())
+                .unwrap_or(true);
             if close_to_hide {
                 api.prevent_close();
                 let _ = window.hide();

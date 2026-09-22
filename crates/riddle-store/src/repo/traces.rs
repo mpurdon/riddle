@@ -16,21 +16,35 @@ pub fn record_in(c: &rusqlite::Connection, t: &DecisionTrace) -> rusqlite::Resul
 }
 
 pub fn get(store: &Store, id: &TraceId) -> Result<Option<DecisionTrace>> {
-    store.read(|c| c.query_row("SELECT json FROM decision_traces WHERE id = ?1", [id.as_str()], |r| from_json(r.get::<_, String>(0)?)).optional())
+    store.read(|c| {
+        c.query_row(
+            "SELECT json FROM decision_traces WHERE id = ?1",
+            [id.as_str()],
+            |r| from_json(r.get::<_, String>(0)?),
+        )
+        .optional()
+    })
 }
 
 pub fn for_message(store: &Store, id: &MessageId) -> Result<Vec<DecisionTrace>> {
     store.read(|c| {
-        let mut st = c.prepare("SELECT json FROM decision_traces WHERE message_id = ?1 ORDER BY created_at DESC")?;
-        let rows = st.query_map([id.as_str()], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let mut st = c.prepare(
+            "SELECT json FROM decision_traces WHERE message_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = st
+            .query_map([id.as_str()], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }
 
 pub fn recent(store: &Store, limit: u32) -> Result<Vec<DecisionTrace>> {
     store.read(|c| {
-        let mut st = c.prepare("SELECT json FROM decision_traces ORDER BY created_at DESC LIMIT ?1")?;
-        let rows = st.query_map([limit], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let mut st =
+            c.prepare("SELECT json FROM decision_traces ORDER BY created_at DESC LIMIT ?1")?;
+        let rows = st
+            .query_map([limit], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }
@@ -51,16 +65,29 @@ pub struct TraceStats {
 pub fn stats(store: &Store, since: &chrono::DateTime<chrono::Utc>) -> Result<TraceStats> {
     let traces = store.read(|c| {
         let mut st = c.prepare("SELECT json FROM decision_traces WHERE created_at >= ?1")?;
-        let rows = st.query_map([ts(since)], |r| from_json::<DecisionTrace>(r.get::<_, String>(0)?))?.collect::<rusqlite::Result<Vec<_>>>();
+        let rows = st
+            .query_map([ts(since)], |r| {
+                from_json::<DecisionTrace>(r.get::<_, String>(0)?)
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>();
         rows
     })?;
-    let mut s = TraceStats { count: traces.len() as u64, ..Default::default() };
-    if traces.is_empty() { return Ok(s); }
+    let mut s = TraceStats {
+        count: traces.len() as u64,
+        ..Default::default()
+    };
+    if traces.is_empty() {
+        return Ok(s);
+    }
     let mut total = 0u64;
     let mut judge = 0u64;
     for t in &traces {
-        if t.escalation.is_some() { s.escalated += 1; }
-        if matches!(t.conclusion, riddle_core::Disposition::Unresolved) { s.unresolved += 1; }
+        if t.escalation.is_some() {
+            s.escalated += 1;
+        }
+        if matches!(t.conclusion, riddle_core::Disposition::Unresolved) {
+            s.unresolved += 1;
+        }
         total += t.timing.total_ms;
         judge += t.timing.judge_ms;
         s.judge_tokens += t.cost.judge_input_tokens;

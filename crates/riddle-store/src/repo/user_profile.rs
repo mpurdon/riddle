@@ -4,7 +4,14 @@ use riddle_errors::Result;
 use rusqlite::OptionalExtension;
 
 pub fn get(store: &Store) -> Result<UserProfile> {
-    Ok(store.read(|c| c.query_row("SELECT json FROM user_profile WHERE id = 1", [], |r| from_json(r.get::<_, String>(0)?)).optional())?.unwrap_or_default())
+    Ok(store
+        .read(|c| {
+            c.query_row("SELECT json FROM user_profile WHERE id = 1", [], |r| {
+                from_json(r.get::<_, String>(0)?)
+            })
+            .optional()
+        })?
+        .unwrap_or_default())
 }
 
 pub fn put(store: &Store, p: &UserProfile) -> Result<()> {

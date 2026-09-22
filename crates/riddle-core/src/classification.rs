@@ -33,7 +33,10 @@ impl Disposition {
     }
     /// Whether this disposition removes the message from the user's view.
     pub fn hides(&self) -> bool {
-        matches!(self, Disposition::Spoil | Disposition::Contamination | Disposition::Filed)
+        matches!(
+            self,
+            Disposition::Spoil | Disposition::Contamination | Disposition::Filed
+        )
     }
 }
 

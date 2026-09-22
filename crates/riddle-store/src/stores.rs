@@ -22,20 +22,34 @@ impl Stores {
         let root = root.as_ref().to_path_buf();
         std::fs::create_dir_all(&root)?;
         let index = Store::open(root.join("index.sqlite"), StoreKind::Index)?;
-        Ok(Self { root: Some(root), index: Arc::new(index), digs: RwLock::new(HashMap::new()) })
+        Ok(Self {
+            root: Some(root),
+            index: Arc::new(index),
+            digs: RwLock::new(HashMap::new()),
+        })
     }
 
     /// Everything in memory: the test-host guard uses this so a test can never
     /// open the real store.
     pub fn in_memory() -> Result<Self> {
-        Ok(Self { root: None, index: Arc::new(Store::in_memory(StoreKind::Index)?), digs: RwLock::new(HashMap::new()) })
+        Ok(Self {
+            root: None,
+            index: Arc::new(Store::in_memory(StoreKind::Index)?),
+            digs: RwLock::new(HashMap::new()),
+        })
     }
 
-    pub fn root(&self) -> Option<&Path> { self.root.as_deref() }
-    pub fn index(&self) -> Arc<Store> { self.index.clone() }
+    pub fn root(&self) -> Option<&Path> {
+        self.root.as_deref()
+    }
+    pub fn index(&self) -> Arc<Store> {
+        self.index.clone()
+    }
 
     pub fn dig_dir(&self, dig: &DigId) -> Option<PathBuf> {
-        self.root.as_ref().map(|r| r.join("digs").join(dig.as_str()))
+        self.root
+            .as_ref()
+            .map(|r| r.join("digs").join(dig.as_str()))
     }
 
     /// Open (lazily) the store for a Dig.
@@ -44,7 +58,10 @@ impl Stores {
             return Ok(s.clone());
         }
         let store = match &self.root {
-            Some(root) => Store::open(root.join("digs").join(dig.as_str()).join("dig.sqlite"), StoreKind::Dig)?,
+            Some(root) => Store::open(
+                root.join("digs").join(dig.as_str()).join("dig.sqlite"),
+                StoreKind::Dig,
+            )?,
             None => Store::in_memory(StoreKind::Dig)?,
         };
         let store = Arc::new(store);
@@ -53,7 +70,11 @@ impl Stores {
     }
 
     pub fn open_digs(&self) -> Vec<(DigId, Arc<Store>)> {
-        self.digs.read().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        self.digs
+            .read()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     /// Remove a Dig's store from disk (§13). The caller purges keychain items.
@@ -61,7 +82,8 @@ impl Stores {
         self.digs.write().remove(dig);
         if let Some(dir) = self.dig_dir(dig) {
             if dir.exists() {
-                std::fs::remove_dir_all(&dir).map_err(|e| RiddleError::store(format!("remove {}: {e}", dir.display())))?;
+                std::fs::remove_dir_all(&dir)
+                    .map_err(|e| RiddleError::store(format!("remove {}: {e}", dir.display())))?;
             }
         }
         Ok(())
@@ -69,11 +91,19 @@ impl Stores {
 
     /// Any faulted store, for the Task Centre.
     pub fn any_fault(&self) -> Option<String> {
-        if let Some(f) = self.index.fault() { return Some(f); }
+        if let Some(f) = self.index.fault() {
+            return Some(f);
+        }
         self.digs.read().values().find_map(|s| s.fault())
     }
 
     pub fn total_size_bytes(&self) -> u64 {
-        self.index.size_bytes() + self.digs.read().values().map(|s| s.size_bytes()).sum::<u64>()
+        self.index.size_bytes()
+            + self
+                .digs
+                .read()
+                .values()
+                .map(|s| s.size_bytes())
+                .sum::<u64>()
     }
 }

@@ -5,7 +5,9 @@ use crate::ids::{ActivityId, ConversationId, DigId};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS, Default,
+)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum Autonomy {
@@ -81,8 +83,14 @@ pub struct ActionMeta {
 #[ts(export)]
 pub enum Principal {
     User,
-    Director { conversation_id: ConversationId, read_untrusted: bool },
-    Expedition { expedition_id: crate::ids::ExpeditionId, read_untrusted: bool },
+    Director {
+        conversation_id: ConversationId,
+        read_untrusted: bool,
+    },
+    Expedition {
+        expedition_id: crate::ids::ExpeditionId,
+        read_untrusted: bool,
+    },
     Sift,
     Temporal,
     Cli,
@@ -102,9 +110,20 @@ impl Principal {
         }
     }
     pub fn has_read_untrusted(&self) -> bool {
-        matches!(self, Principal::Director { read_untrusted: true, .. } | Principal::Expedition { read_untrusted: true, .. })
+        matches!(
+            self,
+            Principal::Director {
+                read_untrusted: true,
+                ..
+            } | Principal::Expedition {
+                read_untrusted: true,
+                ..
+            }
+        )
     }
-    pub fn is_user(&self) -> bool { matches!(self, Principal::User) }
+    pub fn is_user(&self) -> bool {
+        matches!(self, Principal::User)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

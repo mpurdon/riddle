@@ -21,8 +21,14 @@ pub enum FindType {
 
 impl FindType {
     pub const ALL: [FindType; 8] = [
-        FindType::Respond, FindType::Decide, FindType::Review, FindType::Do,
-        FindType::Pay, FindType::Attend, FindType::FollowUp, FindType::Know,
+        FindType::Respond,
+        FindType::Decide,
+        FindType::Review,
+        FindType::Do,
+        FindType::Pay,
+        FindType::Attend,
+        FindType::FollowUp,
+        FindType::Know,
     ];
     pub fn as_str(self) -> &'static str {
         match self {
@@ -37,7 +43,10 @@ impl FindType {
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
-        Self::ALL.iter().copied().find(|t| t.as_str().eq_ignore_ascii_case(s) || t.label().eq_ignore_ascii_case(s))
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|t| t.as_str().eq_ignore_ascii_case(s) || t.label().eq_ignore_ascii_case(s))
     }
     pub fn label(self) -> &'static str {
         match self {
@@ -52,7 +61,9 @@ impl FindType {
         }
     }
     /// Dated Find types expire after their date.
-    pub fn is_dated(self) -> bool { matches!(self, FindType::Attend | FindType::Pay) }
+    pub fn is_dated(self) -> bool {
+        matches!(self, FindType::Attend | FindType::Pay)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]

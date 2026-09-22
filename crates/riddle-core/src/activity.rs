@@ -59,7 +59,12 @@ pub struct EntityRef {
 }
 
 impl EntityRef {
-    pub fn new(kind: EntityKind, id: impl std::fmt::Display) -> Self { Self { kind, id: id.to_string() } }
+    pub fn new(kind: EntityKind, id: impl std::fmt::Display) -> Self {
+        Self {
+            kind,
+            id: id.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -67,9 +72,13 @@ impl EntityRef {
 #[ts(export)]
 pub enum ActivityResult {
     Ok,
-    Failed { error: String },
+    Failed {
+        error: String,
+    },
     /// Some affected entities succeeded, some did not; `skipped` says which and why.
-    Partial { skipped: Vec<SkippedEntity> },
+    Partial {
+        skipped: Vec<SkippedEntity>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -103,8 +112,14 @@ pub enum UndoInfo {
         restore: serde_json::Value,
         label: String,
     },
-    NotUndoable { reason: String },
-    Undone { at: DateTime<Utc>, by: Actor, undo_activity_id: ActivityId },
+    NotUndoable {
+        reason: String,
+    },
+    Undone {
+        at: DateTime<Utc>,
+        by: Actor,
+        undo_activity_id: ActivityId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -147,19 +162,32 @@ pub struct RestoreMap {
 }
 
 impl RestoreMap {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
     pub fn entity(mut self, id: impl std::fmt::Display, restore: serde_json::Value) -> Self {
         self.entities.insert(id.to_string(), restore);
         self
     }
-    pub fn shared(mut self, shared: serde_json::Value) -> Self { self.shared = shared; self }
-    pub fn to_value(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or(serde_json::Value::Null) }
+    pub fn shared(mut self, shared: serde_json::Value) -> Self {
+        self.shared = shared;
+        self
+    }
+    pub fn to_value(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+    }
     /// `Some` only when the value carries the per-entity shape.
     pub fn from_value(v: &serde_json::Value) -> Option<Self> {
-        if v.get("entities")?.is_object() { serde_json::from_value(v.clone()).ok() } else { None }
+        if v.get("entities")?.is_object() {
+            serde_json::from_value(v.clone()).ok()
+        } else {
+            None
+        }
     }
     /// Keep only the entities in `ids`.
-    pub fn retain(&mut self, ids: &std::collections::HashSet<String>) { self.entities.retain(|k, _| ids.contains(k)); }
+    pub fn retain(&mut self, ids: &std::collections::HashSet<String>) {
+        self.entities.retain(|k, _| ids.contains(k));
+    }
 }
 
 /// An entity whose provider state changed since the Activity; undo reports it

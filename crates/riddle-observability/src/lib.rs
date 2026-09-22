@@ -35,9 +35,20 @@ pub enum Category {
 
 impl Category {
     pub const ALL: [Category; 14] = [
-        Category::Sync, Category::Projection, Category::Sift, Category::Judge, Category::Llm,
-        Category::Mesh, Category::Director, Category::Expedition, Category::Store, Category::Jobs,
-        Category::Ui, Category::Actions, Category::Credentials, Category::App,
+        Category::Sync,
+        Category::Projection,
+        Category::Sift,
+        Category::Judge,
+        Category::Llm,
+        Category::Mesh,
+        Category::Director,
+        Category::Expedition,
+        Category::Store,
+        Category::Jobs,
+        Category::Ui,
+        Category::Actions,
+        Category::Credentials,
+        Category::App,
     ];
     pub fn as_str(self) -> &'static str {
         match self {
@@ -102,11 +113,22 @@ pub fn record(level: log::Level, category: &str, message: &str) {
     if r.len() >= RING_CAPACITY {
         r.pop_front();
     }
-    r.push_back(LogLine { at: chrono::Utc::now(), level: level.to_string(), category: category.to_string(), message: msg, payload });
+    r.push_back(LogLine {
+        at: chrono::Utc::now(),
+        level: level.to_string(),
+        category: category.to_string(),
+        message: msg,
+        payload,
+    });
 }
 
 /// The most recent lines, newest last, optionally filtered.
-pub fn tail(limit: usize, category: Option<&str>, min_level: Option<log::Level>, text: Option<&str>) -> Vec<LogLine> {
+pub fn tail(
+    limit: usize,
+    category: Option<&str>,
+    min_level: Option<log::Level>,
+    text: Option<&str>,
+) -> Vec<LogLine> {
     let r = ring().lock();
     r.iter()
         .rev()
@@ -166,17 +188,32 @@ pub struct Timed {
 
 impl Timed {
     pub fn start(category: Category, label: impl Into<String>, budget: Duration) -> Self {
-        Self { category, label: label.into(), budget, started: Instant::now() }
+        Self {
+            category,
+            label: label.into(),
+            budget,
+            started: Instant::now(),
+        }
     }
-    pub fn elapsed(&self) -> Duration { self.started.elapsed() }
-    pub fn elapsed_ms(&self) -> u64 { self.started.elapsed().as_millis() as u64 }
+    pub fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+    pub fn elapsed_ms(&self) -> u64 {
+        self.started.elapsed().as_millis() as u64
+    }
 }
 
 impl Drop for Timed {
     fn drop(&mut self) {
         let e = self.started.elapsed();
         if e > self.budget {
-            rwarn!(self.category, "{} took {}ms (budget {}ms)", self.label, e.as_millis(), self.budget.as_millis());
+            rwarn!(
+                self.category,
+                "{} took {}ms (budget {}ms)",
+                self.label,
+                e.as_millis(),
+                self.budget.as_millis()
+            );
         } else {
             rtrace!(self.category, "{} took {}ms", self.label, e.as_millis());
         }
@@ -196,7 +233,11 @@ mod tests {
 
     #[test]
     fn a_payload_is_split_from_the_message_in_the_tail() {
-        record(log::Level::Info, "sift", &format!("classified 3{}", payload(&serde_json::json!({"dig": "d1"}))));
+        record(
+            log::Level::Info,
+            "sift",
+            &format!("classified 3{}", payload(&serde_json::json!({"dig": "d1"}))),
+        );
         let lines = tail(10, Some("sift"), None, None);
         let last = lines.last().unwrap();
         assert_eq!(last.message, "classified 3");

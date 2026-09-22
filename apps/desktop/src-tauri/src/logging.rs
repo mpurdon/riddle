@@ -7,16 +7,29 @@ use tauri_plugin_log::{Builder, RotationStrategy, Target, TargetKind, TimezoneSt
 
 const MAX_FILE_BYTES: u128 = 10 * 1024 * 1024;
 
-pub fn plugin<R: tauri::Runtime>(dirs: &AppDirs, profile: Profile) -> tauri::plugin::TauriPlugin<R> {
+pub fn plugin<R: tauri::Runtime>(
+    dirs: &AppDirs,
+    profile: Profile,
+) -> tauri::plugin::TauriPlugin<R> {
     let level = std::env::var("RIDDLE_LOG")
         .ok()
         .and_then(|l| l.parse::<log::LevelFilter>().ok())
-        .unwrap_or(if profile.is_dev() { log::LevelFilter::Debug } else { log::LevelFilter::Info });
-    let file_name = match profile { Profile::Dev => "riddle-dev", Profile::Prod => "riddle" };
+        .unwrap_or(if profile.is_dev() {
+            log::LevelFilter::Debug
+        } else {
+            log::LevelFilter::Info
+        });
+    let file_name = match profile {
+        Profile::Dev => "riddle-dev",
+        Profile::Prod => "riddle",
+    };
     Builder::new()
         .targets([
             Target::new(TargetKind::Stdout),
-            Target::new(TargetKind::Folder { path: dirs.logs.clone(), file_name: Some(file_name.into()) }),
+            Target::new(TargetKind::Folder {
+                path: dirs.logs.clone(),
+                file_name: Some(file_name.into()),
+            }),
         ])
         .level(level)
         .level_for("hyper", log::LevelFilter::Warn)

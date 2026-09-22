@@ -7,27 +7,54 @@ use ts_rs::TS;
 macro_rules! id_type {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+        #[derive(
+            Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS,
+        )]
         #[serde(transparent)]
         #[ts(export, type = "string")]
         pub struct $name(pub String);
 
         impl $name {
-            pub fn new() -> Self { Self(uuid::Uuid::now_v7().to_string()) }
-            pub fn as_str(&self) -> &str { &self.0 }
+            pub fn new() -> Self {
+                Self(uuid::Uuid::now_v7().to_string())
+            }
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
         }
-        impl Default for $name { fn default() -> Self { Self::new() } }
-        impl From<String> for $name { fn from(s: String) -> Self { Self(s) } }
-        impl From<&str> for $name { fn from(s: &str) -> Self { Self(s.to_string()) } }
+        impl Default for $name {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+        impl From<String> for $name {
+            fn from(s: String) -> Self {
+                Self(s)
+            }
+        }
+        impl From<&str> for $name {
+            fn from(s: &str) -> Self {
+                Self(s.to_string())
+            }
+        }
         impl std::fmt::Display for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) }
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(&self.0)
+            }
         }
-        impl AsRef<str> for $name { fn as_ref(&self) -> &str { &self.0 } }
+        impl AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                &self.0
+            }
+        }
     };
 }
 
 id_type!(DigId, "A connected account.");
-id_type!(MessageId, "Riddle's id for a message; stable across resync (dig id + provider id hash).");
+id_type!(
+    MessageId,
+    "Riddle's id for a message; stable across resync (dig id + provider id hash)."
+);
 id_type!(ThreadId, "Riddle's id for a thread.");
 id_type!(FindId, "A Find.");
 id_type!(MeshId, "A Mesh, stable across versions.");

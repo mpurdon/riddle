@@ -51,7 +51,10 @@ pub struct Store {
 
 impl std::fmt::Debug for Store {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Store").field("kind", &self.kind).field("path", &self.path).finish()
+        f.debug_struct("Store")
+            .field("kind", &self.kind)
+            .field("path", &self.path)
+            .finish()
     }
 }
 
@@ -80,8 +83,16 @@ impl Store {
         configure(&writer).map_err(map_sql)?;
         migrate::run(&writer, kind, Some(&path))?;
         let manager = SqliteConnectionManager::file(&path).with_init(|c| configure(c));
-        let readers = r2d2::Pool::builder().max_size(4).build(manager).map_err(|e| RiddleError::store(e.to_string()))?;
-        rinfo!(Category::Store, "opened {:?} store {}", kind, path.display());
+        let readers = r2d2::Pool::builder()
+            .max_size(4)
+            .build(manager)
+            .map_err(|e| RiddleError::store(e.to_string()))?;
+        rinfo!(
+            Category::Store,
+            "opened {:?} store {}",
+            kind,
+            path.display()
+        );
         Ok(Self {
             kind,
             path: Some(path),
@@ -96,7 +107,9 @@ impl Store {
     /// An in-memory store for tests and the test-host guard (§59).
     pub fn in_memory(kind: StoreKind) -> Result<Self> {
         let writer = Connection::open_in_memory().map_err(map_sql)?;
-        writer.execute_batch("PRAGMA foreign_keys = ON;").map_err(map_sql)?;
+        writer
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(map_sql)?;
         migrate::run(&writer, kind, None)?;
         Ok(Self {
             kind,
@@ -109,8 +122,12 @@ impl Store {
         })
     }
 
-    pub fn kind(&self) -> StoreKind { self.kind }
-    pub fn path(&self) -> Option<&Path> { self.path.as_deref() }
+    pub fn kind(&self) -> StoreKind {
+        self.kind
+    }
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
 
     /// Size on disk including WAL, for the Developer pane's storage row.
     pub fn size_bytes(&self) -> u64 {
@@ -125,15 +142,21 @@ impl Store {
     }
 
     /// Register the hook the app uses to surface a fault in the Task Centre.
-    pub fn on_fault(&self, hook: Arc<FaultHook>) { *self.on_fault.lock() = Some(hook); }
+    pub fn on_fault(&self, hook: Arc<FaultHook>) {
+        *self.on_fault.lock() = Some(hook);
+    }
 
-    pub fn fault(&self) -> Option<String> { self.fault.lock().clone() }
+    pub fn fault(&self) -> Option<String> {
+        self.fault.lock().clone()
+    }
 
     /// Clear the fault after the user or a maintenance job intervened.
     pub fn clear_fault(&self) {
         *self.fault.lock() = None;
         self.consecutive_failures.store(0, Ordering::SeqCst);
-        if let Some(h) = self.on_fault.lock().as_ref() { h(None); }
+        if let Some(h) = self.on_fault.lock().as_ref() {
+            h(None);
+        }
     }
 
     /// Run a read against a pooled reader (or the shared connection in memory).
@@ -167,19 +190,27 @@ impl Store {
             Ok(v) => {
                 let prior = self.consecutive_failures.swap(0, Ordering::SeqCst);
                 if prior > 0 {
-                    rinfo!(Category::Store, "write recovered at {site} after {prior} failures");
+                    rinfo!(
+                        Category::Store,
+                        "write recovered at {site} after {prior} failures"
+                    );
                 }
                 rdebug!(Category::Store, "write ok at {site}");
                 Ok(v)
             }
             Err(e) => {
                 let n = self.consecutive_failures.fetch_add(1, Ordering::SeqCst) + 1;
-                rerror!(Category::Store, "write failed at {site} ({n} consecutive): {e}");
+                rerror!(
+                    Category::Store,
+                    "write failed at {site} ({n} consecutive): {e}"
+                );
                 if n >= FAULT_THRESHOLD {
                     let msg = format!("{n} consecutive write failures; last at {site}: {e}");
                     *self.fault.lock() = Some(msg.clone());
                     rwarn!(Category::Store, "persistence gate faulted");
-                    if let Some(h) = self.on_fault.lock().as_ref() { h(Some(msg)); }
+                    if let Some(h) = self.on_fault.lock().as_ref() {
+                        h(Some(msg));
+                    }
                 }
                 Err(map_sql(e))
             }
@@ -189,7 +220,8 @@ impl Store {
     /// Run a checkpoint and vacuum; called by the maintenance job.
     pub fn compact(&self) -> Result<()> {
         let conn = self.writer.lock();
-        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA optimize;").map_err(map_sql)
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA optimize;")
+            .map_err(map_sql)
     }
 }
 
@@ -198,18 +230,24 @@ fn short_file(f: &str) -> &str {
 }
 
 /// Seconds since epoch as stored in every `*_at INTEGER` column.
-pub fn ts(t: &chrono::DateTime<chrono::Utc>) -> i64 { t.timestamp_millis() }
+pub fn ts(t: &chrono::DateTime<chrono::Utc>) -> i64 {
+    t.timestamp_millis()
+}
 pub fn from_ts(ms: i64) -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::from_timestamp_millis(ms).unwrap_or_default()
 }
-pub fn now_ts() -> i64 { chrono::Utc::now().timestamp_millis() }
+pub fn now_ts() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
 
 /// JSON column helpers so repositories stay short.
 pub fn to_json<T: serde::Serialize>(v: &T) -> rusqlite::Result<String> {
     serde_json::to_string(v).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
 }
 pub fn from_json<T: serde::de::DeserializeOwned>(s: String) -> rusqlite::Result<T> {
-    serde_json::from_str(&s).map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e)))
+    serde_json::from_str(&s).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    })
 }
 
 #[cfg(test)]
@@ -219,10 +257,14 @@ mod tests {
     #[test]
     fn an_in_memory_store_migrates_both_schemas() {
         let dig = Store::in_memory(StoreKind::Dig).unwrap();
-        let n: i64 = dig.read(|c| c.query_row("SELECT count(*) FROM messages", [], |r| r.get(0))).unwrap();
+        let n: i64 = dig
+            .read(|c| c.query_row("SELECT count(*) FROM messages", [], |r| r.get(0)))
+            .unwrap();
         assert_eq!(n, 0);
         let index = Store::in_memory(StoreKind::Index).unwrap();
-        let n: i64 = index.read(|c| c.query_row("SELECT count(*) FROM finds", [], |r| r.get(0))).unwrap();
+        let n: i64 = index
+            .read(|c| c.query_row("SELECT count(*) FROM finds", [], |r| r.get(0)))
+            .unwrap();
         assert_eq!(n, 0);
     }
 
@@ -233,10 +275,18 @@ mod tests {
         let hook = seen.clone();
         s.on_fault(Arc::new(move |f| hook.lock().push(f)));
         for _ in 0..2 {
-            assert!(s.write(|c| c.execute("INSERT INTO nope VALUES (1)", [])).is_err());
+            assert!(s
+                .write(|c| c.execute("INSERT INTO nope VALUES (1)", []))
+                .is_err());
         }
         assert!(s.fault().is_none());
-        s.write(|c| c.execute("INSERT INTO kv (key, value, updated_at) VALUES ('a','b',0)", [])).unwrap();
+        s.write(|c| {
+            c.execute(
+                "INSERT INTO kv (key, value, updated_at) VALUES ('a','b',0)",
+                [],
+            )
+        })
+        .unwrap();
         for _ in 0..3 {
             let _ = s.write(|c| c.execute("INSERT INTO nope VALUES (1)", []));
         }
@@ -251,11 +301,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("index.sqlite");
         let s = Store::open(&p, StoreKind::Index).unwrap();
-        s.write(|c| c.execute("INSERT INTO kv (key, value, updated_at) VALUES ('a','b',0)", [])).unwrap();
+        s.write(|c| {
+            c.execute(
+                "INSERT INTO kv (key, value, updated_at) VALUES ('a','b',0)",
+                [],
+            )
+        })
+        .unwrap();
         assert!(s.size_bytes() > 0);
         drop(s);
         let again = Store::open(&p, StoreKind::Index).unwrap();
-        let v: String = again.read(|c| c.query_row("SELECT value FROM kv WHERE key='a'", [], |r| r.get(0))).unwrap();
+        let v: String = again
+            .read(|c| c.query_row("SELECT value FROM kv WHERE key='a'", [], |r| r.get(0)))
+            .unwrap();
         assert_eq!(v, "b");
     }
 }

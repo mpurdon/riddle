@@ -15,8 +15,12 @@ pub fn record(store: &Store, k: &Correction) -> Result<()> {
 
 pub fn for_message(store: &Store, id: &MessageId) -> Result<Vec<Correction>> {
     store.read(|c| {
-        let mut st = c.prepare("SELECT json FROM corrections WHERE message_id = ?1 ORDER BY created_at DESC")?;
-        let rows = st.query_map([id.as_str()], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        let mut st = c.prepare(
+            "SELECT json FROM corrections WHERE message_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = st
+            .query_map([id.as_str()], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
         rows
     })
 }
@@ -34,13 +38,24 @@ pub fn active(store: &Store, limit: u32) -> Result<Vec<Correction>> {
 pub fn retract_by_activity(store: &Store, activity: &ActivityId) -> Result<u64> {
     let all = store.read(|c| {
         let mut st = c.prepare("SELECT json FROM corrections WHERE retracted_at IS NULL")?;
-        let rows = st.query_map([], |r| from_json::<Correction>(r.get::<_, String>(0)?))?.collect::<rusqlite::Result<Vec<_>>>();
+        let rows = st
+            .query_map([], |r| from_json::<Correction>(r.get::<_, String>(0)?))?
+            .collect::<rusqlite::Result<Vec<_>>>();
         rows
     })?;
     let mut n = 0;
-    for mut k in all.into_iter().filter(|k| k.activity_id.as_ref() == Some(activity)) {
+    for mut k in all
+        .into_iter()
+        .filter(|k| k.activity_id.as_ref() == Some(activity))
+    {
         k.retracted_at = Some(chrono::Utc::now());
-        store.write(|c| { c.execute("UPDATE corrections SET json = ?2, retracted_at = ?3 WHERE id = ?1", params![k.id.as_str(), to_json(&k)?, now_ts()])?; Ok(()) })?;
+        store.write(|c| {
+            c.execute(
+                "UPDATE corrections SET json = ?2, retracted_at = ?3 WHERE id = ?1",
+                params![k.id.as_str(), to_json(&k)?, now_ts()],
+            )?;
+            Ok(())
+        })?;
         n += 1;
     }
     Ok(n)
@@ -49,5 +64,8 @@ pub fn retract_by_activity(store: &Store, activity: &ActivityId) -> Result<u64> 
 /// Active corrections that changed the disposition of a message, newest
 /// first, for Signal test corpora and the labelled calibration set (§31).
 pub fn active_moves(store: &Store, limit: u32) -> Result<Vec<Correction>> {
-    Ok(active(store, limit)?.into_iter().filter(|k| k.to_disposition.is_some()).collect())
+    Ok(active(store, limit)?
+        .into_iter()
+        .filter(|k| k.to_disposition.is_some())
+        .collect())
 }

@@ -14,17 +14,31 @@ pub fn upsert(store: &Store, s: &Stratum) -> Result<()> {
 }
 
 pub fn get(store: &Store, id: &StratumId) -> Result<Option<Stratum>> {
-    store.read(|c| c.query_row("SELECT json FROM strata WHERE id = ?1", [id.as_str()], |r| from_json(r.get::<_, String>(0)?)).optional())
+    store.read(|c| {
+        c.query_row(
+            "SELECT json FROM strata WHERE id = ?1",
+            [id.as_str()],
+            |r| from_json(r.get::<_, String>(0)?),
+        )
+        .optional()
+    })
 }
 
 pub fn list(store: &Store, include_deleted: bool) -> Result<Vec<Stratum>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT json FROM strata ORDER BY name")?;
-        let all: Vec<Stratum> = st.query_map([], |r| from_json(r.get::<_, String>(0)?))?.collect::<rusqlite::Result<_>>()?;
-        Ok(all.into_iter().filter(|s| include_deleted || s.deleted_at.is_none()).collect())
+        let all: Vec<Stratum> = st
+            .query_map([], |r| from_json(r.get::<_, String>(0)?))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(all
+            .into_iter()
+            .filter(|s| include_deleted || s.deleted_at.is_none())
+            .collect())
     })
 }
 
 pub fn by_name(store: &Store, name: &str) -> Result<Option<Stratum>> {
-    Ok(list(store, false)?.into_iter().find(|s| s.name.eq_ignore_ascii_case(name)))
+    Ok(list(store, false)?
+        .into_iter()
+        .find(|s| s.name.eq_ignore_ascii_case(name)))
 }

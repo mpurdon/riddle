@@ -17,7 +17,10 @@ pub struct JudgeState {
 impl JudgeState {
     pub fn new(text: String) -> Self {
         let approx_tokens = (text.len() / 4) as u32;
-        Self { text, approx_tokens }
+        Self {
+            text,
+            approx_tokens,
+        }
     }
 }
 
@@ -36,7 +39,11 @@ impl JudgeQuestion {
             id: s.key(),
             primitive: s.primitive,
             definition: s.definition.clone(),
-            options: s.choices.iter().map(|c| (c.name.clone(), c.definition.clone())).collect(),
+            options: s
+                .choices
+                .iter()
+                .map(|c| (c.name.clone(), c.definition.clone()))
+                .collect(),
         }
     }
 }
@@ -75,19 +82,33 @@ pub struct JudgeIdentity {
 }
 
 impl JudgeIdentity {
-    pub fn key(&self) -> String { format!("{}:{}", self.provider, self.model_id) }
+    pub fn key(&self) -> String {
+        format!("{}:{}", self.provider, self.model_id)
+    }
 }
 
 /// The semantic judgment engine (§18).
 #[async_trait]
 pub trait SemanticJudge: Send + Sync {
-    async fn evaluate(&self, state: &JudgeState, questions: &[JudgeQuestion]) -> Result<Vec<JudgeAnswer>>;
+    async fn evaluate(
+        &self,
+        state: &JudgeState,
+        questions: &[JudgeQuestion],
+    ) -> Result<Vec<JudgeAnswer>>;
     fn limits(&self) -> JudgeLimits;
     fn identity(&self) -> JudgeIdentity;
     /// A cheap liveness probe for the Developer pane and the circuit breaker.
     async fn probe(&self) -> Result<u64> {
         let s = JudgeState::new("The meeting is at noon.".into());
-        let q = JudgeQuestion { id: "probe".into(), primitive: SignalPrimitive::Noul, definition: "The text mentions a time of day.".into(), options: vec![("YES".into(), "It does.".into()), ("NO".into(), "It does not.".into())] };
+        let q = JudgeQuestion {
+            id: "probe".into(),
+            primitive: SignalPrimitive::Noul,
+            definition: "The text mentions a time of day.".into(),
+            options: vec![
+                ("YES".into(), "It does.".into()),
+                ("NO".into(), "It does not.".into()),
+            ],
+        };
         let started = std::time::Instant::now();
         self.evaluate(&s, &[q]).await?;
         Ok(started.elapsed().as_millis() as u64)
@@ -131,28 +152,43 @@ pub trait Clock: Send + Sync {
 
 pub struct SystemClock;
 impl Clock for SystemClock {
-    fn now(&self) -> chrono::DateTime<chrono::Utc> { chrono::Utc::now() }
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc::now()
+    }
 }
 
 /// A clock that tests advance by hand.
 pub struct FixedClock(pub parking_lot_lite::Mutex<chrono::DateTime<chrono::Utc>>);
 impl FixedClock {
-    pub fn at(t: chrono::DateTime<chrono::Utc>) -> Self { Self(parking_lot_lite::Mutex::new(t)) }
-    pub fn advance(&self, d: chrono::Duration) { let mut g = self.0.lock(); *g += d; }
+    pub fn at(t: chrono::DateTime<chrono::Utc>) -> Self {
+        Self(parking_lot_lite::Mutex::new(t))
+    }
+    pub fn advance(&self, d: chrono::Duration) {
+        let mut g = self.0.lock();
+        *g += d;
+    }
 }
 impl Clock for FixedClock {
-    fn now(&self) -> chrono::DateTime<chrono::Utc> { *self.0.lock() }
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        *self.0.lock()
+    }
 }
 
 /// A tiny mutex wrapper so core does not pull in parking_lot for one field.
 pub mod parking_lot_lite {
     pub struct Mutex<T>(std::sync::Mutex<T>);
     impl<T: Default> Default for Mutex<T> {
-        fn default() -> Self { Self(std::sync::Mutex::new(T::default())) }
+        fn default() -> Self {
+            Self(std::sync::Mutex::new(T::default()))
+        }
     }
     impl<T> Mutex<T> {
-        pub fn new(t: T) -> Self { Self(std::sync::Mutex::new(t)) }
-        pub fn lock(&self) -> std::sync::MutexGuard<'_, T> { self.0.lock().unwrap_or_else(|e| e.into_inner()) }
+        pub fn new(t: T) -> Self {
+            Self(std::sync::Mutex::new(t))
+        }
+        pub fn lock(&self) -> std::sync::MutexGuard<'_, T> {
+            self.0.lock().unwrap_or_else(|e| e.into_inner())
+        }
     }
 }
 
@@ -171,10 +207,14 @@ impl EventSink for NullSink {
 #[derive(Default)]
 pub struct RecordingSink(pub parking_lot_lite::Mutex<Vec<crate::api::RiddleEvent>>);
 impl EventSink for RecordingSink {
-    fn emit(&self, event: crate::api::RiddleEvent) { self.0.lock().push(event); }
+    fn emit(&self, event: crate::api::RiddleEvent) {
+        self.0.lock().push(event);
+    }
 }
 impl RecordingSink {
-    pub fn take(&self) -> Vec<crate::api::RiddleEvent> { std::mem::take(&mut *self.0.lock()) }
+    pub fn take(&self) -> Vec<crate::api::RiddleEvent> {
+        std::mem::take(&mut *self.0.lock())
+    }
 }
 
 /// Where Sift and the correction Actions hand a classification to the
@@ -183,7 +223,11 @@ impl RecordingSink {
 /// bookkeeping from Sift's point of view: a failure is reported, never a
 /// reason to lose the classification.
 pub trait ProjectionHook: Send + Sync {
-    fn project(&self, dig: &crate::ids::DigId, classification: &crate::classification::Classification) -> Result<()>;
+    fn project(
+        &self,
+        dig: &crate::ids::DigId,
+        classification: &crate::classification::Classification,
+    ) -> Result<()>;
     fn unproject(&self, dig: &crate::ids::DigId, message_id: &crate::ids::MessageId) -> Result<()>;
 }
 

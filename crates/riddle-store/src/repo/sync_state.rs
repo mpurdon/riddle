@@ -10,7 +10,12 @@ pub const LAST_SYNC_AT: &str = "last_sync_at";
 pub const OLDEST_SYNCED: &str = "oldest_synced";
 
 pub fn get(store: &Store, key: &str) -> Result<Option<String>> {
-    store.read(|c| c.query_row("SELECT value FROM sync_state WHERE key = ?1", [key], |r| r.get(0)).optional())
+    store.read(|c| {
+        c.query_row("SELECT value FROM sync_state WHERE key = ?1", [key], |r| {
+            r.get(0)
+        })
+        .optional()
+    })
 }
 
 pub fn set(store: &Store, key: &str, value: &str) -> Result<()> {
@@ -21,5 +26,8 @@ pub fn set(store: &Store, key: &str, value: &str) -> Result<()> {
 }
 
 pub fn clear(store: &Store, key: &str) -> Result<()> {
-    store.write(|c| { c.execute("DELETE FROM sync_state WHERE key = ?1", [key])?; Ok(()) })
+    store.write(|c| {
+        c.execute("DELETE FROM sync_state WHERE key = ?1", [key])?;
+        Ok(())
+    })
 }

@@ -15,11 +15,20 @@ impl Profile {
         if std::env::var("RIDDLE_PROFILE").as_deref() == Ok("prod") {
             return Profile::Prod;
         }
-        if cfg!(debug_assertions) { Profile::Dev } else { Profile::Prod }
+        if cfg!(debug_assertions) {
+            Profile::Dev
+        } else {
+            Profile::Prod
+        }
     }
-    pub fn is_dev(self) -> bool { self == Profile::Dev }
+    pub fn is_dev(self) -> bool {
+        self == Profile::Dev
+    }
     pub fn as_str(self) -> &'static str {
-        match self { Profile::Dev => "dev", Profile::Prod => "prod" }
+        match self {
+            Profile::Dev => "dev",
+            Profile::Prod => "prod",
+        }
     }
     /// The keychain service name; the suffix keeps dev tokens apart.
     pub fn keychain_service(self) -> String {
@@ -42,15 +51,31 @@ impl AppDirs {
     pub fn resolve(profile: Profile) -> Self {
         if let Ok(root) = std::env::var("RIDDLE_DATA_DIR") {
             let root = PathBuf::from(root);
-            return Self { data: root.join("data"), logs: root.join("logs"), config: root.join("config"), cache: root.join("cache") };
+            return Self {
+                data: root.join("data"),
+                logs: root.join("logs"),
+                config: root.join("config"),
+                cache: root.join("cache"),
+            };
         }
         let id = match profile {
             Profile::Dev => "dev.codenaked.riddle.dev",
             Profile::Prod => "dev.codenaked.riddle",
         };
-        let support = dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join(id);
-        let logs = dirs::home_dir().map(|h| h.join("Library/Logs").join(id)).unwrap_or_else(|| support.join("logs"));
-        let cache = dirs::cache_dir().unwrap_or_else(|| support.clone()).join(id);
-        Self { data: support.join("data"), logs, config: support.join("config"), cache }
+        let support = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(id);
+        let logs = dirs::home_dir()
+            .map(|h| h.join("Library/Logs").join(id))
+            .unwrap_or_else(|| support.join("logs"));
+        let cache = dirs::cache_dir()
+            .unwrap_or_else(|| support.clone())
+            .join(id);
+        Self {
+            data: support.join("data"),
+            logs,
+            config: support.join("config"),
+            cache,
+        }
     }
 }
