@@ -1,0 +1,71 @@
+{
+  "id": "18f2a9c0b1d2e3f4",
+  "threadId": "18f2a9c0b1d2e3f0",
+  "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES", "Label_7"],
+  "snippet": "@priya requested your review on: #142 Add outbox processor &amp; friends",
+  "historyId": "4471023",
+  "internalDate": "1789992120000",
+  "sizeEstimate": 9411,
+  "payload": {
+    "partId": "",
+    "mimeType": "multipart/mixed",
+    "filename": "",
+    "headers": [
+      {"name": "Delivered-To", "value": "matt@example.com"},
+      {"name": "Authentication-Results", "value": "mx.google.com; dkim=pass header.i=@github.com; spf=pass (google.com: domain of noreply@github.com designates 192.30.252.196 as permitted sender) smtp.mailfrom=noreply@github.com; dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=github.com"},
+      {"name": "From", "value": "Priya Natarajan <notifications@github.com>"},
+      {"name": "Reply-To", "value": "example/riddle <reply+ABCDEF@reply.github.com>"},
+      {"name": "To", "value": "example/riddle <riddle@noreply.github.com>"},
+      {"name": "Cc", "value": "Matt <matt@example.com>, Review requested <review_requested@noreply.github.com>"},
+      {"name": "Message-ID", "value": "<example/riddle/pull/142/review_requested/abc123@github.com>"},
+      {"name": "In-Reply-To", "value": "<example/riddle/pull/142@github.com>"},
+      {"name": "References", "value": "<example/riddle/pull/142@github.com>"},
+      {"name": "Subject", "value": "=?UTF-8?Q?Re:_[example/riddle]_Add_outbox_processor_(PR_#142)?="},
+      {"name": "Date", "value": "Mon, 21 Sep 2026 12:02:00 +0000"},
+      {"name": "List-ID", "value": "example/riddle <riddle.example.github.com>"},
+      {"name": "List-Unsubscribe", "value": "<mailto:unsub+abc@reply.github.com>"},
+      {"name": "Precedence", "value": "list"},
+      {"name": "X-GitHub-Reason", "value": "review_requested"}
+    ],
+    "body": {"size": 0},
+    "parts": [
+      {
+        "partId": "0",
+        "mimeType": "multipart/alternative",
+        "filename": "",
+        "headers": [{"name": "Content-Type", "value": "multipart/alternative; boundary=\"b1\""}],
+        "body": {"size": 0},
+        "parts": [
+          {
+            "partId": "0.0",
+            "mimeType": "text/plain",
+            "filename": "",
+            "headers": [{"name": "Content-Type", "value": "text/plain; charset=UTF-8"}],
+            "body": {"size": 71, "data": "QHByaXlhIHJlcXVlc3RlZCB5b3VyIHJldmlldyBvbjogIzE0MiBBZGQgb3V0Ym94IHByb2Nlc3NvciAmIGZyaWVuZHMu"}
+          },
+          {
+            "partId": "0.1",
+            "mimeType": "text/html",
+            "filename": "",
+            "headers": [{"name": "Content-Type", "value": "text/html; charset=UTF-8"}],
+            "body": {"size": 62, "data": "PHA-QHByaXlhIHJlcXVlc3RlZCB5b3VyIHJldmlldyBvbjogPGI-IzE0MjwvYj48L3A-"}
+          }
+        ]
+      },
+      {
+        "partId": "1",
+        "mimeType": "text/calendar",
+        "filename": "invite.ics",
+        "headers": [{"name": "Content-Type", "value": "text/calendar; charset=UTF-8; method=REQUEST"}],
+        "body": {"attachmentId": "ANGjdJ8calendar", "size": 512}
+      },
+      {
+        "partId": "2",
+        "mimeType": "image/png",
+        "filename": "logo.png",
+        "headers": [{"name": "Content-ID", "value": "<logo@example.com>"}, {"name": "Content-Disposition", "value": "inline; filename=\"logo.png\""}],
+        "body": {"attachmentId": "ANGjdJ8logo", "size": 2048}
+      }
+    ]
+  }
+}

@@ -41,3 +41,7 @@ pub fn snoozes_due(store: &Store, now: &chrono::DateTime<chrono::Utc>) -> Result
         rows
     })
 }
+
+pub fn snoozed_until(store: &Store, message_id: &str) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+    store.read(|c| c.query_row("SELECT until FROM snoozes WHERE message_id = ?1", [message_id], |r| r.get::<_, i64>(0)).optional().map(|o| o.map(crate::from_ts)))
+}

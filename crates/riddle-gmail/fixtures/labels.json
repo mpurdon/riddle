@@ -1,0 +1,9 @@
+{
+  "labels": [
+    {"id": "INBOX", "name": "INBOX", "type": "system"},
+    {"id": "SENT", "name": "SENT", "type": "system"},
+    {"id": "CATEGORY_PROMOTIONS", "name": "CATEGORY_PROMOTIONS", "type": "system"},
+    {"id": "Label_7", "name": "Riddle/Spoil", "type": "user", "messageListVisibility": "show", "labelListVisibility": "labelShow"},
+    {"id": "Label_9", "name": "Receipts", "type": "user"}
+  ]
+}

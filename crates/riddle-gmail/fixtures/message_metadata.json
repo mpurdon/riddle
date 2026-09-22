@@ -1,0 +1,19 @@
+{
+  "id": "18f2a9c0b1d2e400",
+  "threadId": "18f2a9c0b1d2e400",
+  "labelIds": ["SENT"],
+  "snippet": "Can you send me the updated numbers for the board deck?",
+  "historyId": "4471030",
+  "internalDate": "1789905720000",
+  "sizeEstimate": 1211,
+  "payload": {
+    "mimeType": "text/plain",
+    "headers": [
+      {"name": "From", "value": "Matt <matt@example.com>"},
+      {"name": "To", "value": "Dan Whitfield <dan@example.com>"},
+      {"name": "Subject", "value": "Board deck numbers"},
+      {"name": "Message-ID", "value": "<CAB12345@mail.example.com>"},
+      {"name": "Date", "value": "Sun, 20 Sep 2026 12:02:00 +0000"}
+    ]
+  }
+}

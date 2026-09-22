@@ -27,3 +27,4 @@ the estimate applied.
 | af9c49d | feat(ai): LLM boundary on Bedrock, escalation refiner, Director tool loop, Expeditions, privacy | 13 | 174353 | 27179661 | 81 | 5 |
 | b324912 | chore(build): line-tables debuginfo and none for dependencies (22 GB target → 1.2 GB); DirectorReads over app read services | 8 | 66242 | 13648894 | 35 | 4 |
 | 83d459c | feat(app): attach the AI boundary — Bedrock LLM, escalation refiner, Director, Expeditions; usage rows to the index store; director_send | 3 | 17589 | 9107088 | 22 | 4 |
+| 82ec6bb | feat(mail): provider trait, fixture mailbox, Gmail client and OAuth, sync engine, projection outbox, people, context, search | 4 | 22132 | 8699208 | 22 | 4 |

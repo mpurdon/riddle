@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": 403,
+    "message": "User-rate limit exceeded.  Retry after 2026-09-22T03:14:15.000Z",
+    "errors": [{"message": "User-rate limit exceeded.  Retry after 2026-09-22T03:14:15.000Z", "domain": "usageLimits", "reason": "rateLimitExceeded"}],
+    "status": "PERMISSION_DENIED"
+  }
+}

@@ -8,6 +8,22 @@ license.workspace = true
 riddle-errors.workspace = true
 riddle-core.workspace = true
 riddle-observability.workspace = true
+riddle-store.workspace = true
+riddle-actions.workspace = true
+riddle-credentials.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+parking_lot.workspace = true
+regex.workspace = true
+sha2.workspace = true
+hex.workspace = true
+base64 = "0.22"
+ammonia = "4"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

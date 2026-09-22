@@ -1,0 +1,10 @@
+{
+  "history": [
+    {"id": "4471100", "messages": [{"id": "m1", "threadId": "t1"}], "messagesAdded": [{"message": {"id": "m1", "threadId": "t1", "labelIds": ["INBOX", "UNREAD"]}}]},
+    {"id": "4471101", "messages": [{"id": "m2", "threadId": "t2"}], "labelsRemoved": [{"message": {"id": "m2", "threadId": "t2"}, "labelIds": ["INBOX"]}]},
+    {"id": "4471102", "messages": [{"id": "m2", "threadId": "t2"}], "labelsAdded": [{"message": {"id": "m2", "threadId": "t2"}, "labelIds": ["Label_7"]}]},
+    {"id": "4471103", "messages": [{"id": "m3", "threadId": "t3"}], "messagesDeleted": [{"message": {"id": "m3", "threadId": "t3"}}]},
+    {"id": "4471104", "messages": [{"id": "m4", "threadId": "t4"}]}
+  ],
+  "historyId": "4471110"
+}

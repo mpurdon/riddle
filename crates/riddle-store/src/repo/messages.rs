@@ -162,6 +162,26 @@ pub struct MessageFilter {
 }
 
 pub fn list(store: &Store, dig_id: &DigId, filter: &MessageFilter, page: &PageRequest) -> Result<Page<MessageSummary>> {
+    search(store, dig_id, filter, &SearchExtras::default(), page)
+}
+
+/// Search-only refinements layered on `MessageFilter` (added for
+/// `riddle-search`): a prepared FTS5 expression that replaces the quoted
+/// `filter.query`, recipient matching, attachment presence, sent-ness and a
+/// disposition set.
+#[derive(Debug, Default, Clone)]
+pub struct SearchExtras {
+    /// A complete FTS5 MATCH expression; used instead of `filter.query` when set.
+    pub fts: Option<String>,
+    pub to: Option<String>,
+    pub has_attachment: Option<bool>,
+    pub is_sent: Option<bool>,
+    pub disposition_in: Vec<String>,
+    /// Sender addresses to exclude (`-from:` in a query).
+    pub exclude_from: Vec<String>,
+}
+
+pub fn search(store: &Store, dig_id: &DigId, filter: &MessageFilter, extras: &SearchExtras, page: &PageRequest) -> Result<Page<MessageSummary>> {
     let limit = page.limit();
     let offset = page.offset();
     store.read(|c| {
@@ -202,9 +222,36 @@ pub fn list(store: &Store, dig_id: &DigId, filter: &MessageFilter, page: &PageRe
         }
         if let Some(s) = &filter.since { sql.push_str(" AND m.date >= ?"); args.push(Box::new(ts(s))); }
         if let Some(u) = &filter.until { sql.push_str(" AND m.date <= ?"); args.push(Box::new(ts(u))); }
-        if let Some(q) = filter.query.as_ref().filter(|q| !q.trim().is_empty()) {
+        if let Some(raw) = extras.fts.as_ref().filter(|q| !q.trim().is_empty()) {
+            sql.push_str(" AND m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)");
+            args.push(Box::new(raw.clone()));
+        } else if let Some(q) = filter.query.as_ref().filter(|q| !q.trim().is_empty()) {
             sql.push_str(" AND m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)");
             args.push(Box::new(fts_query(q)));
+        }
+        if let Some(t) = &extras.to {
+            sql.push_str(" AND (EXISTS (SELECT 1 FROM json_each(m.to_json) WHERE json_extract(value, '$.email') LIKE ?) OR EXISTS (SELECT 1 FROM json_each(m.cc_json) WHERE json_extract(value, '$.email') LIKE ?))");
+            let pat = format!("%{}%", t.to_lowercase());
+            args.push(Box::new(pat.clone()));
+            args.push(Box::new(pat));
+        }
+        if let Some(h) = extras.has_attachment {
+            sql.push_str(if h { " AND json_array_length(m.attachments_json) > 0" } else { " AND json_array_length(m.attachments_json) = 0" });
+        }
+        if let Some(sent) = extras.is_sent {
+            sql.push_str(" AND m.is_sent = ?");
+            args.push(Box::new(sent as i64));
+        }
+        if !extras.disposition_in.is_empty() {
+            let marks = vec!["?"; extras.disposition_in.len()].join(",");
+            sql.push_str(&format!(" AND k.disposition_kind IN ({marks})"));
+            for d in &extras.disposition_in {
+                args.push(Box::new(d.clone()));
+            }
+        }
+        for x in &extras.exclude_from {
+            sql.push_str(" AND m.from_email NOT LIKE ?");
+            args.push(Box::new(format!("%{}%", x.to_lowercase())));
         }
         let count_sql = format!("SELECT count(*) FROM ({sql})");
         let total: i64 = c.query_row(&count_sql, rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), |r| r.get(0))?;
@@ -292,4 +339,162 @@ pub fn ids_since(store: &Store, since: &chrono::DateTime<chrono::Utc>, limit: u3
         let rows = st.query_map(params![ts(since), limit], |r| Ok(MessageId(r.get(0)?)))?.collect();
         rows
     })
+}
+
+
+/// Full rows without bodies, newest first, for aggregation passes (People,
+/// resync reconciliation) that must not load 100k bodies.
+pub fn page_headers(store: &Store, dig_id: &DigId, offset: u64, limit: u32) -> Result<Vec<Message>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT id, provider_id, thread_id, subject, from_email, from_name, to_json, cc_json, bcc_json, date, snippet, labels_json, headers_json, attachments_json, size_bytes, is_sent, NULL AS body_text, NULL AS body_html, synced_at
+             FROM messages WHERE deleted_at IS NULL ORDER BY date DESC LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = st.query_map(params![limit, offset as i64], |r| row_to_message(r, dig_id))?.collect();
+        rows
+    })
+}
+
+/// Messages whose body has not been fetched, newest first (§53: bodies lazily).
+pub fn ids_without_body(store: &Store, limit: u32) -> Result<Vec<MessageId>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT id FROM messages WHERE deleted_at IS NULL AND body_text IS NULL AND body_html IS NULL ORDER BY date DESC LIMIT ?1")?;
+        let rows = st.query_map([limit], |r| Ok(MessageId(r.get(0)?)))?.collect();
+        rows
+    })
+}
+
+pub fn count_without_body(store: &Store) -> Result<u64> {
+    store.read(|c| c.query_row("SELECT count(*) FROM messages WHERE deleted_at IS NULL AND body_text IS NULL AND body_html IS NULL", [], |r| r.get::<_, i64>(0)).map(|n| n as u64))
+}
+
+/// Every distinct sender address (received mail only).
+pub fn distinct_senders(store: &Store) -> Result<Vec<String>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT DISTINCT from_email FROM messages WHERE deleted_at IS NULL AND is_sent = 0")?;
+        let rows = st.query_map([], |r| r.get(0))?.collect();
+        rows
+    })
+}
+
+/// Sender addresses in a set of threads, plus recipients of the user's sent
+/// mail in them, for incremental People updates.
+pub fn addresses_in_threads(store: &Store, threads: &[ThreadId]) -> Result<std::collections::HashSet<String>> {
+    let mut set = std::collections::HashSet::new();
+    for t in threads {
+        store.read(|c| {
+            let mut st = c.prepare("SELECT from_email, to_json, cc_json, is_sent FROM messages WHERE thread_id = ?1 AND deleted_at IS NULL")?;
+            let rows = st.query_map([t.as_str()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))?;
+            for row in rows {
+                let (from, to, cc, sent) = row?;
+                set.insert(from.to_lowercase());
+                if sent != 0 {
+                    for a in from_json::<Vec<Address>>(to)?.into_iter().chain(from_json::<Vec<Address>>(cc)?) {
+                        set.insert(a.email.to_lowercase());
+                    }
+                }
+            }
+            Ok(())
+        })?;
+    }
+    Ok(set)
+}
+
+/// Per-address aggregates for People (§2).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AddressStats {
+    pub messages_from: u64,
+    /// Sent by the user to this address (To or Cc).
+    pub messages_to: u64,
+    pub first_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub name: Option<String>,
+    /// Received messages with list headers, bulk precedence or auto-submitted.
+    pub automated: u64,
+    pub mailing_list: u64,
+    pub auth_failures: u64,
+    pub spam_verdicts: u64,
+}
+
+pub fn address_stats(store: &Store, email: &str) -> Result<AddressStats> {
+    let email = email.to_lowercase();
+    store.read(|c| {
+        let (messages_from, first, last): (i64, Option<i64>, Option<i64>) = c.query_row(
+            "SELECT count(*), min(date), max(date) FROM messages WHERE from_email = ?1 AND deleted_at IS NULL AND is_sent = 0",
+            [&email], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        let (messages_to, first_to, last_to): (i64, Option<i64>, Option<i64>) = c.query_row(
+            "SELECT count(*), min(date), max(date) FROM messages m WHERE m.is_sent = 1 AND m.deleted_at IS NULL AND (
+               EXISTS (SELECT 1 FROM json_each(m.to_json) WHERE lower(json_extract(value, '$.email')) = ?1)
+               OR EXISTS (SELECT 1 FROM json_each(m.cc_json) WHERE lower(json_extract(value, '$.email')) = ?1))",
+            [&email], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        let name: Option<String> = c.query_row(
+            "SELECT from_name FROM messages WHERE from_email = ?1 AND from_name IS NOT NULL AND from_name != '' AND deleted_at IS NULL ORDER BY date DESC LIMIT 1",
+            [&email], |r| r.get(0),
+        ).optional()?;
+        let automated: i64 = c.query_row(
+            "SELECT count(*) FROM messages WHERE from_email = ?1 AND deleted_at IS NULL AND is_sent = 0 AND (
+               json_extract(headers_json, '$.listId') IS NOT NULL OR json_extract(headers_json, '$.listUnsubscribe') IS NOT NULL
+               OR json_extract(headers_json, '$.autoSubmitted') IS NOT NULL OR lower(json_extract(headers_json, '$.precedence')) IN ('bulk', 'list', 'junk'))",
+            [&email], |r| r.get(0),
+        )?;
+        let mailing_list: i64 = c.query_row(
+            "SELECT count(*) FROM messages WHERE from_email = ?1 AND deleted_at IS NULL AND is_sent = 0 AND (json_extract(headers_json, '$.listId') IS NOT NULL OR lower(json_extract(headers_json, '$.precedence')) = 'list')",
+            [&email], |r| r.get(0),
+        )?;
+        let auth_failures: i64 = c.query_row(
+            "SELECT count(*) FROM messages WHERE from_email = ?1 AND deleted_at IS NULL AND (
+               json_extract(headers_json, '$.authentication.spf') = 'fail' OR json_extract(headers_json, '$.authentication.dkim') = 'fail' OR json_extract(headers_json, '$.authentication.dmarc') = 'fail')",
+            [&email], |r| r.get(0),
+        )?;
+        let spam_verdicts: i64 = c.query_row(
+            "SELECT count(*) FROM messages WHERE from_email = ?1 AND deleted_at IS NULL AND EXISTS (SELECT 1 FROM json_each(labels_json) WHERE value = 'SPAM')",
+            [&email], |r| r.get(0),
+        )?;
+        let min_of = |a: Option<i64>, b: Option<i64>| match (a, b) { (Some(x), Some(y)) => Some(x.min(y)), (x, None) => x, (None, y) => y };
+        let max_of = |a: Option<i64>, b: Option<i64>| match (a, b) { (Some(x), Some(y)) => Some(x.max(y)), (x, None) => x, (None, y) => y };
+        Ok(AddressStats {
+            messages_from: messages_from as u64,
+            messages_to: messages_to as u64,
+            first_at: min_of(first, first_to).map(from_ts),
+            last_at: max_of(last, last_to).map(from_ts),
+            name,
+            automated: automated as u64,
+            mailing_list: mailing_list as u64,
+            auth_failures: auth_failures as u64,
+            spam_verdicts: spam_verdicts as u64,
+        })
+    })
+}
+
+/// Provider ids and current labels for every live message dated on or after
+/// `since`, for resync reconciliation (§15) without loading rows.
+pub fn provider_labels_since(store: &Store, since: &chrono::DateTime<chrono::Utc>) -> Result<Vec<(String, MessageId, Vec<String>)>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT provider_id, id, labels_json FROM messages WHERE deleted_at IS NULL AND date >= ?1")?;
+        let rows = st.query_map([ts(since)], |r| Ok((r.get(0)?, MessageId(r.get(1)?), from_json::<Vec<String>>(r.get(2)?)?)))?.collect();
+        rows
+    })
+}
+
+pub fn get_by_provider_id(store: &Store, dig_id: &DigId, provider_id: &str) -> Result<Option<Message>> {
+    store.read(|c| {
+        c.query_row(&format!("SELECT {COLS} FROM messages WHERE provider_id = ?1 AND deleted_at IS NULL"), [provider_id], |r| row_to_message(r, dig_id)).optional()
+    })
+}
+
+/// Rows without bodies matching a set of ids, in one query.
+pub fn summaries_for_ids(store: &Store, dig_id: &DigId, ids: &[MessageId]) -> Result<Vec<Message>> {
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        let m = store.read(|c| {
+            c.query_row(
+                "SELECT id, provider_id, thread_id, subject, from_email, from_name, to_json, cc_json, bcc_json, date, snippet, labels_json, headers_json, attachments_json, size_bytes, is_sent, NULL AS body_text, NULL AS body_html, synced_at FROM messages WHERE id = ?1 AND deleted_at IS NULL",
+                [id.as_str()], |r| row_to_message(r, dig_id),
+            ).optional()
+        })?;
+        if let Some(m) = m { out.push(m); }
+    }
+    Ok(out)
 }
