@@ -74,6 +74,9 @@ pub struct ModelCatalog {
 
 pub const HAIKU_4_5: &str = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
 pub const SONNET_5: &str = "us.anthropic.claude-sonnet-5";
+/// The Director default: accessible on the dev account and priced. Sonnet 5
+/// returned AccessDenied on 2026-09-22; switch back once access is granted.
+pub const SONNET_4_5: &str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
 pub const OPUS_5: &str = "us.anthropic.claude-opus-5";
 
 impl Default for ModelCatalog {
@@ -113,8 +116,8 @@ impl Default for ModelCatalog {
         let mut tiers = HashMap::new();
         tiers.insert(ModelTier::Escalation, HAIKU_4_5.to_string());
         tiers.insert(ModelTier::Verification, HAIKU_4_5.to_string());
-        tiers.insert(ModelTier::Director, SONNET_5.to_string());
-        tiers.insert(ModelTier::Expedition, SONNET_5.to_string());
+        tiers.insert(ModelTier::Director, SONNET_4_5.to_string());
+        tiers.insert(ModelTier::Expedition, SONNET_4_5.to_string());
         Self { entries, tiers }
     }
 }
@@ -211,7 +214,7 @@ mod tests {
     fn tiers_default_to_haiku_for_escalation_and_sonnet_for_the_director() {
         let c = ModelCatalog::default();
         assert_eq!(c.tier(ModelTier::Escalation), Some(HAIKU_4_5));
-        assert_eq!(c.tier(ModelTier::Director), Some(SONNET_5));
+        assert_eq!(c.tier(ModelTier::Director), Some(SONNET_4_5));
     }
 
     #[test]

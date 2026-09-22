@@ -56,5 +56,7 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         more::director_send,
         more::list_conversations,
         more::get_conversation,
+        more::parse_mesh,
+        more::simulate_mesh,
     ]
 }

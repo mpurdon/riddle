@@ -103,6 +103,7 @@ impl App {
                 .chain(riddle_finds::actions())
                 .chain(riddle_mesh::actions())
                 .chain(riddle_signals::actions())
+                .chain(crate::actions::actions())
             {
                 reg.register(a);
             }

@@ -22,7 +22,7 @@ impl App {
         let mut policy = riddle_actions::policy::AutonomyPolicy { dev: config.dev, ..Default::default() };
         policy.default = if config.dev { riddle_core::Autonomy::Observe } else { riddle_core::Autonomy::Suggest };
         let runtime = builder.policy(policy).build();
-        let app = Arc::new(App { config, stores, services, runtime, events });
+        let app = Arc::new(App { config, started_at: std::time::Instant::now(), stores, services, runtime, events });
         Ok(app)
     }
 }

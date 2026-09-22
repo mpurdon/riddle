@@ -41,3 +41,11 @@ pub async fn list_conversations(state: State<'_, AppState>) -> Result<Value> { r
 
 #[tauri::command]
 pub async fn get_conversation(state: State<'_, AppState>, conversation_id: String) -> Result<Value> { route(&state, "get_conversation", json!({ "conversationId": conversation_id })).await }
+
+#[tauri::command]
+pub async fn parse_mesh(state: State<'_, AppState>, text: String) -> Result<Value> { route(&state, "parse_mesh", json!({ "text": text })).await }
+
+#[tauri::command]
+pub async fn simulate_mesh(state: State<'_, AppState>, text: Option<String>, mesh_id: Option<String>, version: Option<u32>, window_days: Option<u32>) -> Result<Value> {
+    route(&state, "simulate_mesh", json!({ "text": text, "meshId": mesh_id, "version": version, "windowDays": window_days })).await
+}

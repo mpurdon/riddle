@@ -125,7 +125,7 @@ interface Settings {
   developerMode: boolean; logLevel: 'error'|'warn'|'info'|'debug'|'trace'
   notifyPriorityThreshold: number; shadowPeriodDays: number
   judge: { provider: 'jev'|'null'|'scripted'; model: string; keySource: 'env'|'keychain'|'ssm'; ssmProfile?: string; ssmParameter?: string; apiKeyPresent: boolean }
-  llm: { provider: 'bedrock'|'null'|'scripted'; profile: string; region: string; escalationModel: string; directorModel: string }
+  llm: { provider: 'bedrock'|'null'|'scripted'; profile: string; region: string; escalationModel: string; directorModel: string }  // default us.anthropic.claude-sonnet-4-5-20250929-v1:0 (Sonnet 5 is not enabled on the account)
   budgets: { dailyJudgeUsd: number; dailyLlmUsd: number; escalationPerDigUsd: number }
   gmail: { clientId: string; clientSecretPresent: boolean }
   autonomy: { default: Autonomy; perDig: Record<string, Autonomy>; perAction: Record<string, Autonomy> }

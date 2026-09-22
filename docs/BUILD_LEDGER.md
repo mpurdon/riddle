@@ -33,3 +33,4 @@ the estimate applied.
 | 16 | feat(ops): settings with compatibility tests, durable job queue and scheduler, Activity ledger and the undo engine | 1 | 1356 | 2289398 | 4 | 1 |
 | 17 | feat(app): settings, job runner and undo wired; boot sequence; headless serve; desktop boots the core | 10 | 33215 | 21280270 | 36 | 1 |
 | 18 | feat(ui): the React client — every product and Developer surface against runtime-faithful mocks | 0 | 276 | 586095 | 1 | 0 |
+| 19 | feat: bridge transport in the client, Playwright against the real core, contract reconciliation, Director on Sonnet 4.5 | 13 | 24935 | 18341000 | 30 | 0 |

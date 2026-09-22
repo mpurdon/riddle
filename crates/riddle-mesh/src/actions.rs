@@ -100,7 +100,7 @@ impl Action for CreateMesh {
         let svc = MeshService::new(ctx.services.stores.index());
         let m = svc.create(text, scope, status, created_by(&ctx.principal))?;
         Ok(ActionResult::ok(
-            serde_json::to_value(&m)?,
+            json!({ "mesh": m, "simulation": Value::Null, "report": Value::Null }),
             format!("Created Mesh {} ({:?})", m.name, m.status),
         )
         .with_affected(vec![mesh_ref(&m)])
@@ -188,7 +188,7 @@ impl Action for UpdateMesh {
                 window_days: window,
             }
         });
-        Ok(ActionResult::ok(json!({ "mesh": m, "simulation": simulation }), format!("Changed Mesh {} to v{} ({:?}); {} of {} messages would change", m.name, m.version, m.status, simulation.changed, simulation.historical_messages))
+        Ok(ActionResult::ok(json!({ "mesh": m, "simulation": simulation, "report": simulation }), format!("Changed Mesh {} to v{} ({:?}); {} of {} messages would change", m.name, m.version, m.status, simulation.changed, simulation.historical_messages))
             .with_affected(vec![mesh_ref(&m)])
             .with_inputs(json!({ "meshId": m.id, "version": m.version }))
             .with_undo(json!({ "meshId": m.id, "version": m.version, "priorVersion": prior.version, "priorStatus": prior.status }), format!("Revert to v{}", prior.version)))

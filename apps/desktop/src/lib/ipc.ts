@@ -17,6 +17,46 @@ export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace'
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
+/**
+ * The loopback dev bridge: the real Rust core reachable from a browser tab.
+ * Configured by `?bridge=<port>:<token>` in the URL (remembered in
+ * localStorage) or `VITE_RIDDLE_BRIDGE=<port>:<token>`. Never used in Tauri.
+ */
+export interface Bridge {
+  port: number
+  token: string
+}
+
+function readBridge(): Bridge | null {
+  if (isTauri || typeof window === 'undefined') return null
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get('bridge')
+    const raw = fromUrl ?? localStorage.getItem('riddleBridge') ?? (import.meta.env.VITE_RIDDLE_BRIDGE as string | undefined) ?? null
+    if (!raw) return null
+    const [port, token] = raw.split(':')
+    if (!port || !token) return null
+    if (fromUrl) localStorage.setItem('riddleBridge', raw)
+    return { port: Number(port), token }
+  } catch {
+    return null
+  }
+}
+
+export const bridge: Bridge | null = readBridge()
+
+async function bridgeCall<T>(command: string, args: Record<string, unknown>): Promise<T> {
+  const b = bridge!
+  const res = await fetch(`http://127.0.0.1:${b.port}/invoke`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${b.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command, args }),
+  })
+  if (res.status === 401) throw { kind: 'provider_auth', message: 'bridge token rejected', detail: null } satisfies RiddleError
+  const body = (await res.json()) as { ok: boolean; result?: T; error?: RiddleError }
+  if (!body.ok) throw body.error ?? { kind: 'internal', message: 'bridge error', detail: null }
+  return body.result as T
+}
+
 /** Commands that must not be logged: logging them would log the act of reading the log. */
 const UNLOGGED = new Set(['ui_log', 'read_app_logs', 'log_categories', 'dev_info', 'in_flight_calls', 'task_centre', 'ui_snapshot'])
 
@@ -36,6 +76,13 @@ export function inFlightCalls(): { command: string; elapsedMs: number }[] {
 /** Fire-and-forget: logging must never fail the thing it describes or recurse. */
 export function log(level: LogLevel, category: string, message: string): void {
   if (!isTauri) {
+    if (bridge) {
+      void fetch(`http://127.0.0.1:${bridge.port}/invoke`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${bridge.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'ui_log', args: { level, category, message } }),
+      }).catch(() => {})
+    }
     if (level === 'error' || level === 'warn') console[level](`[${category}] ${message}`)
     return
   }
@@ -76,6 +123,8 @@ export async function call<T>(command: string, args: Record<string, unknown> = {
         rawInvoke<T>(command, args),
         new Promise<never>((_, reject) => setTimeout(() => reject({ kind: 'internal', message: `${command} timed out after ${TIMEOUT_MS / 1000}s`, detail: null }), TIMEOUT_MS)),
       ])
+    } else if (bridge) {
+      result = await bridgeCall<T>(command, args)
     } else {
       const handler = mocks.get(command)
       if (!handler) throw { kind: 'internal', message: `no mock for ${command}`, detail: null } satisfies RiddleError

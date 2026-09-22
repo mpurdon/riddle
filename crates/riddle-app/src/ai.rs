@@ -39,7 +39,7 @@ impl Default for AiConfig {
             profile: Some("dev".into()),
             region: "us-east-1".into(),
             escalation_model: riddle_ai::catalog::HAIKU_4_5.into(),
-            director_model: riddle_ai::catalog::SONNET_5.into(),
+            director_model: riddle_ai::catalog::SONNET_4_5.into(),
             prompt_override_dir: None,
         }
     }

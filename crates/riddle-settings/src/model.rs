@@ -149,7 +149,7 @@ impl Default for LlmSettings {
             profile: "dev".into(),
             region: "us-east-1".into(),
             escalation_model: "us.anthropic.claude-haiku-4-5-20251001-v1:0".into(),
-            director_model: "us.anthropic.claude-sonnet-5".into(),
+            director_model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0".into(),
         }
     }
 }

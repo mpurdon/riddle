@@ -63,6 +63,7 @@ pub const COMMANDS: &[&str] = &[
     "list_drafts", "get_user_profile", "read_trace", "recent_traces", "usage_summary", "trace_stats",
     "invoke_action", "list_actions", "list_pending", "dev_armed", "list_conversations", "get_conversation", "director_send",
     "task_centre", "get_settings", "privacy_statement", "probe_judge", "probe_llm", "probe_provider", "update_preview",
+    "parse_mesh", "simulate_mesh", "ui_log", "dev_info", "read_app_logs", "log_categories", "in_flight_calls", "export_diagnostics", "clear_caches",
 ];
 
 pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
@@ -198,6 +199,73 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             }
         }
         "update_preview" => Value::Null,
+        "ui_log" => {
+            let level = match opt::<String>(&args, "level").as_deref() { Some("error") => log::Level::Error, Some("warn") => log::Level::Warn, Some("info") => log::Level::Info, Some("debug") => log::Level::Debug, _ => log::Level::Trace };
+            let cat = opt::<String>(&args, "category").and_then(|c| riddle_observability::Category::parse(&c)).unwrap_or(riddle_observability::Category::Ui);
+            let message: String = opt(&args, "message").unwrap_or_default();
+            riddle_observability::record(level, cat.as_str(), &message);
+            log::log!(target: cat.as_str(), level, "{message}");
+            Value::Null
+        }
+        "dev_info" => {
+            let mut stores = vec![json!({ "label": "index", "path": app.stores.index().path().map(|p| p.display().to_string()).unwrap_or_default(), "sizeBytes": app.stores.index().size_bytes() })];
+            for (id, s) in app.stores.open_digs() {
+                stores.push(json!({ "label": format!("dig {id}"), "path": s.path().map(|p| p.display().to_string()).unwrap_or_default(), "sizeBytes": s.size_bytes() }));
+            }
+            json!({
+                "build": app.config.build, "dev": app.config.dev, "os": std::env::consts::OS, "arch": std::env::consts::ARCH,
+                "uptimeSeconds": app.started_at.elapsed().as_secs(),
+                "dataDir": app.config.data_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+                "logDir": app.config.data_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+                "configDir": app.config.config_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+                "cacheDir": "", "stores": stores, "storeFault": app.stores.any_fault(), "logLevel": log::max_level().to_string(),
+            })
+        }
+        "read_app_logs" => {
+            let min = opt::<String>(&args, "level").and_then(|l| l.parse::<log::Level>().ok());
+            serde_json::to_value(riddle_observability::tail(opt::<u32>(&args, "limit").unwrap_or(500) as usize, opt::<String>(&args, "category").as_deref(), min, opt::<String>(&args, "text").as_deref()))?
+        }
+        "log_categories" => json!(riddle_observability::Category::ALL.iter().map(|c| c.as_str()).collect::<Vec<_>>()),
+        "in_flight_calls" => json!([]),
+        "export_diagnostics" => {
+            let mut out = format!("Riddle {} ({}) [{}]\n", app.config.build.version, app.config.build.git_sha, app.config.build.profile);
+            out.push_str(&format!("digs {}; actions {}; fault {:?}\n", app.list_digs()?.len(), app.runtime.list_actions().len(), app.stores.any_fault()));
+            for l in riddle_observability::tail(50, None, Some(log::Level::Warn), None) {
+                out.push_str(&format!("[{}][{}][{}] {}\n", l.at.to_rfc3339(), l.level, l.category, l.message));
+            }
+            json!(out)
+        }
+        "clear_caches" => json!(0),
+        "parse_mesh" => {
+            let text: String = arg(&args, "text")?;
+            let mesh = riddle_mesh::parse::parse(&text)?;
+            riddle_mesh::validate::validate(&mesh, &riddle_mesh::validate::RegistryResolver { index: index.clone() })?;
+            serde_json::to_value(mesh)?
+        }
+        "simulate_mesh" => {
+            let window_days: u32 = opt(&args, "windowDays").unwrap_or(90);
+            let mesh_id: Option<MeshId> = opt(&args, "meshId");
+            let candidate = match (opt::<String>(&args, "text"), &mesh_id) {
+                (Some(text), Some(id)) => {
+                    let mut m = riddle_mesh::parse::parse(&text)?;
+                    let current = repo::meshes::latest(&index, id)?.ok_or_else(|| RiddleError::not_found("mesh"))?;
+                    m.id = current.id.clone();
+                    m.version = current.version + 1;
+                    if !text.to_lowercase().contains("scope:") { m.scope = current.scope.clone(); }
+                    m
+                }
+                (Some(text), None) => riddle_mesh::parse::parse(&text)?,
+                (None, Some(id)) => {
+                    let v: Option<u32> = opt(&args, "version");
+                    match v { Some(v) => repo::meshes::get(&index, id, v)?, None => repo::meshes::latest(&index, id)? }.ok_or_else(|| RiddleError::not_found("mesh"))?
+                }
+                (None, None) => return Err(RiddleError::invalid("simulate_mesh needs text or meshId")),
+            };
+            let digs = app.list_digs()?;
+            let mut input = riddle_mesh::simulate::SimulationInput::new(&app.stores, digs, &candidate);
+            input.window_days = window_days;
+            serde_json::to_value(riddle_mesh::simulate::simulate(input)?)?
+        }
         other => return Err(RiddleError::not_found(format!("no command named {other}"))),
     })
 }

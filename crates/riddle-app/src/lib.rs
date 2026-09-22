@@ -6,6 +6,7 @@
 //! `assemble` wires the domain crates in; `reads` are the query services
 //! commands call; `events` is the broadcast sink clients subscribe to.
 
+pub mod actions;
 pub mod ai;
 pub mod assemble;
 pub mod bridge;
@@ -41,6 +42,7 @@ impl AppConfig {
 
 pub struct App {
     pub config: AppConfig,
+    pub started_at: std::time::Instant,
     pub stores: Arc<Stores>,
     pub services: Arc<Services>,
     pub runtime: Arc<Runtime>,

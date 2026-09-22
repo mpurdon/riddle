@@ -6,7 +6,7 @@
  */
 import { useEffect } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { isTauri, log } from './ipc'
+import { bridge, isTauri, log } from './ipc'
 import { qk } from './api'
 import { useBanners, useDirector, useEventLog, usePipeline, useProposals, toast } from './stores'
 import type { RiddleEvent } from '@/bindings/RiddleEvent'
@@ -147,10 +147,23 @@ export function useEvents(): void {
         })
         .catch((err) => log('error', 'ui', `event listen failed: ${String((err as Error)?.message ?? err)}`))
     }
+    let source: EventSource | null = null
+    if (!isTauri && bridge) {
+      // The dev bridge streams the same events over SSE.
+      source = new EventSource(`http://127.0.0.1:${bridge.port}/events?token=${bridge.token}`)
+      source.onmessage = (m) => {
+        try {
+          dispatch(JSON.parse(m.data) as RiddleEvent)
+        } catch (err) {
+          log('warn', 'ui', `bad bridge event: ${String((err as Error)?.message ?? err)}`)
+        }
+      }
+    }
     return () => {
       cancelled = true
       off()
       unlisten?.()
+      source?.close()
     }
   }, [qc])
 }

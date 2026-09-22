@@ -674,10 +674,12 @@ impl Action for InjectFixtureMessage {
         if let Some(triggers) = ctx.services.get::<RefreshTriggers>() {
             triggers.trigger(Some(&dig.id));
         }
-        let mut r = ActionResult::ok(
-            serde_json::to_value(&message)?,
-            format!("Injected a {template} message"),
-        )
+        let mut value = serde_json::to_value(&message)?;
+        if let Some(o) = value.as_object_mut() {
+            o.insert("messageId".into(), json!(message.id));
+            o.insert("digId".into(), json!(dig.id));
+        }
+        let mut r = ActionResult::ok(value, format!("Injected a {template} message"))
         .with_affected(vec![EntityRef::new(EntityKind::Message, &message.id)])
         .with_inputs(json!({"digId": dig.id, "template": template}));
         r.undo = UndoInfo::NotUndoable {

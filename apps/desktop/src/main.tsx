@@ -2,7 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App } from './app/app'
-import { isTauri, log } from './lib/ipc'
+import { bridge, isTauri, log } from './lib/ipc'
 import './index.css'
 
 const queryClient = new QueryClient({
@@ -13,7 +13,7 @@ window.addEventListener('error', (e) => log('error', 'ui', `uncaught: ${e.messag
 window.addEventListener('unhandledrejection', (e) => log('error', 'ui', `unhandled rejection: ${String(e.reason?.message ?? e.reason)}`))
 
 async function boot() {
-  if (!isTauri) {
+  if (!isTauri && !bridge) {
     // Browser mode: the mocks are only ever loaded here, never in Tauri.
     const mocks = await import('./lib/mocks')
     mocks.registerMocks()
