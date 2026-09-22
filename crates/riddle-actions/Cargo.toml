@@ -1,0 +1,13 @@
+[package]
+name = "riddle-actions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+riddle-errors.workspace = true
+riddle-core.workspace = true
+riddle-observability.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true

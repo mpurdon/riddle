@@ -1,0 +1,8 @@
+[package]
+name = "riddle-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+riddle-core.workspace = true

@@ -1,0 +1,111 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/riddle-errors",
+  "crates/riddle-core",
+  "crates/riddle-observability",
+  "crates/riddle-store",
+  "crates/riddle-settings",
+  "crates/riddle-credentials",
+  "crates/riddle-privacy",
+  "crates/riddle-mail",
+  "crates/riddle-gmail",
+  "crates/riddle-sync",
+  "crates/riddle-projection",
+  "crates/riddle-search",
+  "crates/riddle-embeddings",
+  "crates/riddle-context",
+  "crates/riddle-people",
+  "crates/riddle-signals",
+  "crates/riddle-judge",
+  "crates/riddle-mesh",
+  "crates/riddle-sift",
+  "crates/riddle-scheduler",
+  "crates/riddle-finds",
+  "crates/riddle-activity",
+  "crates/riddle-ai",
+  "crates/riddle-agent",
+  "crates/riddle-expeditions",
+  "crates/riddle-jobs",
+  "crates/riddle-actions",
+  "crates/riddle-cli",
+  "crates/riddle-mcp",
+  "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/mpurdon/riddle"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# internal
+riddle-errors = { path = "crates/riddle-errors" }
+riddle-core = { path = "crates/riddle-core" }
+riddle-observability = { path = "crates/riddle-observability" }
+riddle-store = { path = "crates/riddle-store" }
+riddle-settings = { path = "crates/riddle-settings" }
+riddle-credentials = { path = "crates/riddle-credentials" }
+riddle-privacy = { path = "crates/riddle-privacy" }
+riddle-mail = { path = "crates/riddle-mail" }
+riddle-gmail = { path = "crates/riddle-gmail" }
+riddle-sync = { path = "crates/riddle-sync" }
+riddle-projection = { path = "crates/riddle-projection" }
+riddle-search = { path = "crates/riddle-search" }
+riddle-embeddings = { path = "crates/riddle-embeddings" }
+riddle-context = { path = "crates/riddle-context" }
+riddle-people = { path = "crates/riddle-people" }
+riddle-signals = { path = "crates/riddle-signals" }
+riddle-judge = { path = "crates/riddle-judge" }
+riddle-mesh = { path = "crates/riddle-mesh" }
+riddle-sift = { path = "crates/riddle-sift" }
+riddle-scheduler = { path = "crates/riddle-scheduler" }
+riddle-finds = { path = "crates/riddle-finds" }
+riddle-activity = { path = "crates/riddle-activity" }
+riddle-ai = { path = "crates/riddle-ai" }
+riddle-agent = { path = "crates/riddle-agent" }
+riddle-expeditions = { path = "crates/riddle-expeditions" }
+riddle-jobs = { path = "crates/riddle-jobs" }
+riddle-actions = { path = "crates/riddle-actions" }
+
+# external
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+anyhow = "1"
+log = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "process", "net"] }
+futures = "0.3"
+async-trait = "0.1"
+ts-rs = { version = "10", features = ["serde-compat", "chrono-impl", "serde-json-impl", "no-serde-warnings"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+rusqlite = { version = "0.37", features = ["bundled", "chrono", "serde_json", "backup"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.31"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+dirs = "6"
+sha2 = "0.10"
+hex = "0.4"
+regex = "1"
+toml = "0.8"
+parking_lot = "0.12"
+rand = "0.8"
+clap = { version = "4", features = ["derive"] }
+aws-config = { version = "1", features = ["behavior-version-latest", "sso"] }
+aws-sdk-ssm = "1"
+aws-sdk-bedrockruntime = "1"
+tempfile = "3"
+
+[profile.dev]
+# Dependencies are optimised so a debug app is usable with a 100k-message store.
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 2
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true

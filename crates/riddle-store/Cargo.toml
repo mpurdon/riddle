@@ -1,0 +1,22 @@
+[package]
+name = "riddle-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+riddle-errors.workspace = true
+riddle-core.workspace = true
+riddle-observability.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+rusqlite.workspace = true
+r2d2.workspace = true
+r2d2_sqlite.workspace = true
+parking_lot.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
