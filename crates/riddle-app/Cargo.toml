@@ -14,6 +14,21 @@ riddle-ai.workspace = true
 riddle-agent.workspace = true
 riddle-expeditions.workspace = true
 riddle-privacy.workspace = true
+riddle-mail.workspace = true
+riddle-gmail.workspace = true
+riddle-sync.workspace = true
+riddle-projection.workspace = true
+riddle-people.workspace = true
+riddle-context.workspace = true
+riddle-search.workspace = true
+riddle-embeddings.workspace = true
+riddle-credentials.workspace = true
+riddle-signals.workspace = true
+riddle-judge.workspace = true
+riddle-mesh.workspace = true
+riddle-sift.workspace = true
+riddle-finds.workspace = true
+riddle-scheduler.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
@@ -23,3 +38,6 @@ parking_lot.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 dirs.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -45,9 +45,19 @@ impl Default for AiConfig {
     }
 }
 
+tokio::task_local! {
+    /// The Dig a model call is being made for, set by the engine around
+    /// each Sift so rows from the judge and the refiner (which know no Dig)
+    /// are attributed (§56: task-local attribution).
+    pub static CURRENT_DIG: riddle_core::DigId;
+}
+
 /// Writes usage rows to the Dig store when attributed, else the index store.
 pub fn store_recorder(stores: Arc<Stores>) -> UsageRecorder {
-    Arc::new(move |row: UsageRow| {
+    Arc::new(move |mut row: UsageRow| {
+        if row.dig_id.is_none() {
+            row.dig_id = CURRENT_DIG.try_with(|d| d.clone()).ok();
+        }
         let target = match &row.dig_id {
             Some(d) => stores.dig(d),
             None => Ok(stores.index()),

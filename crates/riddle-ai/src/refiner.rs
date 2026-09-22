@@ -45,13 +45,18 @@ impl LlmRefiner {
             prompts,
             model_id,
             privacy: PrivacyMode::CloudReasoning,
-            max_tokens: 1024,
+            max_tokens: 4096,
         }
     }
 
     /// Bind the refiner to a Dig's privacy mode. `RefineRequest` carries no
     /// Dig, so the caller (Sift) holds one refiner per mode; the check here
     /// is the boundary's own, not a substitute for Sift's.
+    pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = max_tokens;
+        self
+    }
+
     pub fn with_privacy(mut self, privacy: PrivacyMode) -> Self {
         self.privacy = privacy;
         self
@@ -238,10 +243,18 @@ pub fn parse_refinement(text: &str, req: &RefineRequest) -> Result<Parsed> {
         if o.contains_key("disposition") {
             dropped += 1;
         }
-        let Some(name) = o.get("name").and_then(|v| v.as_str()) else {
+        let Some(raw_name) = o.get("name").and_then(|v| v.as_str()) else {
             continue;
         };
-        let version = o.get("version").and_then(|v| v.as_u64()).map(|v| v as u32);
+        // The prompt lists Signals as `name@vN`, and models echo that form.
+        let (name, key_version) = match raw_name.rsplit_once("@v") {
+            Some((n, v)) => (n.trim(), v.trim().parse::<u32>().ok()),
+            None => (raw_name.trim(), None),
+        };
+        let version = o
+            .get("version")
+            .and_then(|v| v.as_u64().map(|v| v as u32).or_else(|| v.as_str().and_then(|s| s.trim_start_matches('v').parse().ok())))
+            .or(key_version);
         // Match against the evaluations we were asked to refine: same name, same version when given.
         let Some(original) = req
             .signals

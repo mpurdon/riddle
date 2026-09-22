@@ -29,3 +29,4 @@ the estimate applied.
 | 12 | feat(app): attach the AI boundary — Bedrock LLM, escalation refiner, Director, Expeditions; usage rows to the index store; director_send | 3 | 17589 | 9107088 | 22 | 4 |
 | 13 | feat(mail): provider trait, fixture mailbox, Gmail client and OAuth, sync engine, projection outbox, people, context, search | 4 | 22132 | 8699208 | 22 | 4 |
 | 14 | feat(sift): Signal registry and Sets, Jev judge with SSM key, Mesh DSL and simulation, the Sift pipeline, Finds and Temporal Sift | 4 | 30858 | 9987017 | 25 | 4 |
+| 15 | feat(app): domain assembly, judge attachment, the processing engine, end-to-end and live tests | 19 | 72263 | 58337102 | 120 | 2 |

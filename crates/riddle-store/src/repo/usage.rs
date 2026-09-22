@@ -16,7 +16,7 @@ pub fn record(store: &Store, u: &UsageRow) -> Result<()> {
 pub fn summary(store: &Store, since: &chrono::DateTime<chrono::Utc>) -> Result<UsageSummary> {
     store.read(|c| {
         let (calls, input, output, priced, unpriced): (i64, i64, i64, f64, i64) = c.query_row(
-            "SELECT count(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cost_usd),0), SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END) FROM usage WHERE at >= ?1",
+            "SELECT count(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cost_usd),0), COALESCE(SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END),0) FROM usage WHERE at >= ?1",
             [ts(since)], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         )?;
         let mut st = c.prepare("SELECT task, COALESCE(SUM(cost_usd),0), count(*) FROM usage WHERE at >= ?1 GROUP BY task")?;
@@ -61,5 +61,20 @@ pub fn recent(store: &Store, limit: u32) -> Result<Vec<UsageRow>> {
             })
         })?.collect();
         rows
+    })
+}
+
+/// Spend today in USD for one or more providers (`jev`, `bedrock`), for the
+/// per-Dig daily budgets (§56): the judge and the LLM are budgeted separately
+/// whatever task used them.
+pub fn spent_today_by_provider(store: &Store, providers: &[&str]) -> Result<f64> {
+    let start = chrono::Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap_or_default().and_utc();
+    store.read(|c| {
+        let mut total = 0.0;
+        for p in providers {
+            let v: f64 = c.query_row("SELECT COALESCE(SUM(cost_usd),0) FROM usage WHERE at >= ?1 AND provider = ?2", params![ts(&start), p], |r| r.get(0))?;
+            total += v;
+        }
+        Ok(total)
     })
 }

@@ -11,6 +11,8 @@ pub mod assemble;
 pub mod bridge;
 pub mod director_reads;
 pub mod dispatch;
+pub mod domains;
+pub mod engine;
 pub mod paths;
 pub mod events;
 pub mod reads;
