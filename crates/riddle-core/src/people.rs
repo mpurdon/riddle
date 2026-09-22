@@ -117,3 +117,20 @@ impl UserProfile {
         })
     }
 }
+
+/// What Sift learned from a sent message (§17 "Sent mail"): the results feed
+/// Thread State, which `riddle-context` recomputes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ThreadStateUpdate {
+    pub thread_id: ThreadId,
+    pub dig_id: DigId,
+    pub message_id: crate::ids::MessageId,
+    pub sent_at: DateTime<Utc>,
+    pub asks_question: bool,
+    pub makes_commitment: bool,
+    pub requests_action: bool,
+    /// Calibrated scores behind the booleans, for the inspector.
+    pub scores: Vec<(String, f64)>,
+}

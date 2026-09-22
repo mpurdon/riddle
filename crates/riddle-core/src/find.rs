@@ -127,3 +127,24 @@ pub struct Find {
     pub trace_id: Option<TraceId>,
     pub superseded_by: Option<FindId>,
 }
+
+/// What Sift proposes when a message deserves attention (§41). `riddle-finds`
+/// joins it to an open Find with the same `identity_key` or creates one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FindProposal {
+    pub find_type: FindType,
+    pub title: String,
+    pub summary: String,
+    pub priority: u8,
+    pub reason: String,
+    /// Cross-Dig deduplication key: the RFC Message-ID root of the thread when
+    /// present, else the provider thread id.
+    pub identity_key: String,
+    pub due_at: Option<DateTime<Utc>>,
+    pub source: FindSource,
+    pub confidence: Option<f64>,
+    pub classification_id: Option<ClassificationId>,
+    pub trace_id: Option<TraceId>,
+}

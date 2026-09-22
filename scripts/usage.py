@@ -137,6 +137,8 @@ def main():
 
     per = collect(since, until)
     tot = defaultdict(int)
+    for k in ("messages", "input", "cache_create", "cache_read", "output", "output_estimated", "tool_calls"):
+        tot[k] = 0
     for s in per.values():
         for k in ("messages", "input", "cache_create", "cache_read", "output", "output_estimated", "tool_calls"):
             tot[k] += s[k]

@@ -100,3 +100,22 @@ pub fn open_by_thread(store: &Store, thread_provider_id: &str) -> Result<Vec<Fin
         rows
     })
 }
+
+/// Every Find in a status, optionally of one type; Temporal Sift walks these.
+pub fn list_by_status(store: &Store, status: FindStatus, find_type: Option<FindType>) -> Result<Vec<Find>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT json FROM finds WHERE status = ?1 AND (?2 IS NULL OR find_type = ?2) ORDER BY created_at")?;
+        let rows = st.query_map(params![status.as_str(), find_type.map(|t| t.as_str())], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        rows
+    })
+}
+
+/// Any Find (open or not) with an identity key, newest first; dedupe checks
+/// that must not recreate a dismissed Follow Up read this.
+pub fn any_by_identity(store: &Store, key: &str) -> Result<Vec<Find>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT json FROM finds WHERE identity_key = ?1 ORDER BY created_at DESC")?;
+        let rows = st.query_map([key], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        rows
+    })
+}

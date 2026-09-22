@@ -98,3 +98,50 @@ pub fn supersede_by_mesh(store: &Store, mesh_id: &str, version: u32) -> Result<V
         Ok(ids)
     })
 }
+
+/// Supersede the current (non-shadow) classification of one message without
+/// writing a replacement: the message returns to the Sift backlog. Used by
+/// undo when the action being undone was the message's first classification.
+pub fn supersede_current(store: &Store, id: &MessageId) -> Result<Option<Classification>> {
+    let prior = current(store, id)?;
+    if prior.is_some() {
+        store.write(|c| {
+            c.execute(
+                "UPDATE classifications SET superseded_at = ?2 WHERE message_id = ?1 AND shadow = 0 AND superseded_at IS NULL",
+                params![id.as_str(), now_ts()],
+            )?;
+            c.execute("DELETE FROM message_strata WHERE message_id = ?1", [id.as_str()])?;
+            Ok(())
+        })?;
+    }
+    Ok(prior)
+}
+
+/// Current non-shadow classifications created by a Mesh version, for
+/// simulation and undo previews.
+pub fn current_by_mesh(store: &Store, mesh_id: &str, version: u32) -> Result<Vec<Classification>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT json FROM classifications WHERE mesh_id = ?1 AND mesh_version = ?2 AND superseded_at IS NULL AND shadow = 0")?;
+        let rows = st.query_map(params![mesh_id, version], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        rows
+    })
+}
+
+/// Message ids whose current classification has the given disposition kind,
+/// newest first, for building Signal test corpora (§31).
+pub fn ids_with_kind(store: &Store, kind: DispositionKind, limit: u32) -> Result<Vec<MessageId>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT message_id FROM classifications WHERE disposition_kind = ?1 AND superseded_at IS NULL AND shadow = 0 ORDER BY created_at DESC LIMIT ?2")?;
+        let rows = st.query_map(params![kind.as_str(), limit], |r| Ok(MessageId(r.get(0)?)))?.collect();
+        rows
+    })
+}
+
+/// Rename a Stratum on every message that carries it (rename or merge of
+/// Strata, §2). Returns how many message rows changed.
+pub fn rename_stratum(store: &Store, from: &str, to: &str) -> Result<u64> {
+    store.write(|c| {
+        c.execute("INSERT OR IGNORE INTO message_strata (message_id, stratum) SELECT message_id, ?2 FROM message_strata WHERE stratum = ?1", params![from, to])?;
+        Ok(c.execute("DELETE FROM message_strata WHERE stratum = ?1", [from])? as u64)
+    })
+}

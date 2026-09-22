@@ -96,3 +96,23 @@ pub fn evaluation_count(store: &Store) -> Result<u64> {
 pub fn invalidate_engine(store: &Store, engine: &str) -> Result<u64> {
     store.write(|c| Ok(c.execute("DELETE FROM signal_evaluations WHERE engine_identity = ?1", [engine])? as u64))
 }
+
+/// Cached evaluations for one message restricted to one engine identity;
+/// simulation and the cache read this to avoid mixing engines.
+pub fn evaluations_for_engine(store: &Store, message: &MessageId, engine: &str) -> Result<Vec<SignalEvaluation>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT json FROM signal_evaluations WHERE message_id = ?1 AND engine_identity = ?2 ORDER BY evaluated_at DESC")?;
+        let rows = st.query_map(params![message.as_str(), engine], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        rows
+    })
+}
+
+/// Every evaluation of one Signal version in the Dig, for calibration and
+/// Signal testing.
+pub fn evaluations_of_signal(store: &Store, name: &str, version: u32, limit: u32) -> Result<Vec<SignalEvaluation>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT json FROM signal_evaluations WHERE signal_name = ?1 AND signal_version = ?2 ORDER BY evaluated_at DESC LIMIT ?3")?;
+        let rows = st.query_map(params![name, version, limit], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        rows
+    })
+}

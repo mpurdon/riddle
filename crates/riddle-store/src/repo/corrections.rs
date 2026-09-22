@@ -45,3 +45,9 @@ pub fn retract_by_activity(store: &Store, activity: &ActivityId) -> Result<u64> 
     }
     Ok(n)
 }
+
+/// Active corrections that changed the disposition of a message, newest
+/// first, for Signal test corpora and the labelled calibration set (§31).
+pub fn active_moves(store: &Store, limit: u32) -> Result<Vec<Correction>> {
+    Ok(active(store, limit)?.into_iter().filter(|k| k.to_disposition.is_some()).collect())
+}

@@ -176,3 +176,17 @@ impl EventSink for RecordingSink {
 impl RecordingSink {
     pub fn take(&self) -> Vec<crate::api::RiddleEvent> { std::mem::take(&mut *self.0.lock()) }
 }
+
+/// Where Sift and the correction Actions hand a classification to the
+/// provider projection outbox (§15). Track A's outbox implements it; Track B
+/// calls it when present so the two meet at integration. Projection is
+/// bookkeeping from Sift's point of view: a failure is reported, never a
+/// reason to lose the classification.
+pub trait ProjectionHook: Send + Sync {
+    fn project(&self, dig: &crate::ids::DigId, classification: &crate::classification::Classification) -> Result<()>;
+    fn unproject(&self, dig: &crate::ids::DigId, message_id: &crate::ids::MessageId) -> Result<()>;
+}
+
+/// Sized handle so a `dyn ProjectionHook` can be registered in a typed
+/// service map (`Services::insert(Arc::new(ProjectionHookHandle(hook)))`).
+pub struct ProjectionHookHandle(pub std::sync::Arc<dyn ProjectionHook>);

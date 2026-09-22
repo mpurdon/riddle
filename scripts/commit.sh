@@ -32,8 +32,10 @@ if [ ${#PATHS[@]} -gt 0 ]; then git add -- "${PATHS[@]}"; else git add -A; fi
   echo "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 } > .build/msg
 git commit -q -F .build/msg
-SHA=$(git rev-parse --short HEAD)
 echo "$NOW" > "$MARK"
+# The row cannot carry its own commit hash (amending would change it), so it
+# carries a sequence number; the closing summary maps rows to hashes by subject.
+SEQ=$(git rev-list --count HEAD)
 
 # Ledger row
 MIN=$(echo "$JSON" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(round(d["minutes"]))')
@@ -41,7 +43,7 @@ OUT=$(echo "$JSON" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(
 INP=$(echo "$JSON" | python3 -c 'import sys,json; d=json.load(sys.stdin); t=d["total"]; print(t["input"]+t["cache_create"]+t["cache_read"])')
 TURNS=$(echo "$JSON" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["total"]["messages"])')
 AG=$(echo "$JSON" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len([k for k in d["sources"] if k!="main"]))')
-printf '| %s | %s | %s | %s | %s | %s | %s |\n' "$SHA" "$SUBJECT" "$MIN" "$OUT" "$INP" "$TURNS" "$AG" >> docs/BUILD_LEDGER.md
+printf '| %s | %s | %s | %s | %s | %s | %s |\n' "$SEQ" "$SUBJECT" "$MIN" "$OUT" "$INP" "$TURNS" "$AG" >> docs/BUILD_LEDGER.md
 git add docs/BUILD_LEDGER.md && git commit -q --amend --no-edit
 echo "committed $(git rev-parse --short HEAD): $SUBJECT"
 echo "$STATS"

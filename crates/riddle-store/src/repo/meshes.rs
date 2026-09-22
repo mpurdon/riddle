@@ -86,3 +86,9 @@ pub fn set_status(store: &Store, id: &MeshId, version: u32, status: MeshStatus) 
 pub fn purge(store: &Store, id: &MeshId) -> Result<()> {
     store.write(|c| { c.execute("DELETE FROM meshes WHERE id = ?1 AND deleted_at IS NOT NULL AND deleted_at < ?2", params![id.as_str(), now_ts()])?; Ok(()) })
 }
+
+/// Remove one version row. Used by undo of `update_mesh`, which reverts the
+/// version it created; every other removal is a soft delete.
+pub fn remove_version(store: &Store, id: &MeshId, version: u32) -> Result<bool> {
+    store.write(|c| Ok(c.execute("DELETE FROM meshes WHERE id = ?1 AND version = ?2", params![id.as_str(), version])? > 0))
+}
