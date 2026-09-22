@@ -129,6 +129,16 @@ pub enum RiddleEvent {
     UpdateAvailable { version: String },
     /// Developer overlay: a Sift stage completed for a message (Live Pipeline, §82).
     PipelineStage { message_id: MessageId, stage: String, ms: u64 },
+    /// Director streaming: text as it arrives.
+    DirectorDelta { conversation_id: crate::ids::ConversationId, text: String },
+    /// Director invoked an Action.
+    DirectorToolCall { conversation_id: crate::ids::ConversationId, call: crate::conversation::ToolCall },
+    /// Director finished a turn (or failed with `error`).
+    DirectorDone { conversation_id: crate::ids::ConversationId, error: Option<String> },
+    /// A Director proposal (Mesh, Signal, Never Hidden entry) awaits the user.
+    ProposalCreated { pending_id: String, summary: String },
+    ExpeditionChanged { expedition_id: crate::ids::ExpeditionId },
+    SettingsChanged,
 }
 
 impl RiddleEvent {
