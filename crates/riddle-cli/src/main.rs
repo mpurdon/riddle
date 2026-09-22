@@ -93,6 +93,11 @@ enum Command {
     },
     /// Show where Riddle keeps its files.
     Paths,
+    /// Run the loopback dev bridge (HTTP + SSE) for automation and browser UI development.
+    Bridge {
+        #[arg(long, default_value_t = 1431)]
+        port: u16,
+    },
     /// Serve the MCP protocol on stdin/stdout for external agents.
     Mcp {
         /// Expose mutating Actions (each still returns a pending confirmation).
@@ -242,6 +247,15 @@ async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
             }
         },
         Command::Activity { limit } => serde_json::to_value(app.list_activity(&Default::default(), &PageRequest { cursor: None, limit: Some(limit) })?)?,
+        Command::Bridge { port } => {
+            let profile = if cli.prod { Profile::Prod } else { Profile::current() };
+            let dirs = AppDirs::resolve(profile);
+            let info = riddle_app::bridge::start(app.clone(), port, Some(dirs.data.join("bridge.json"))).await?;
+            eprintln!("bridge on http://127.0.0.1:{} (token in {})", info.port, dirs.data.join("bridge.json").display());
+            println!("{}", serde_json::json!({ "port": info.port, "token": info.token }));
+            tokio::signal::ctrl_c().await?;
+            return Ok(());
+        }
         Command::Mcp { allow_mutations } => {
             riddle_mcp::McpServer::new(app.clone(), allow_mutations).serve_stdio().await?;
             return Ok(());

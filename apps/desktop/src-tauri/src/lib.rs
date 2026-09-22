@@ -6,6 +6,7 @@ pub mod commands;
 pub mod events;
 pub mod logging;
 pub mod paths;
+pub mod presence;
 pub mod state;
 
 use riddle_observability::{rinfo, Category};
@@ -33,6 +34,16 @@ pub fn run() {
             let state = state::AppState::bootstrap(app.handle().clone(), dirs.clone(), profile)?;
             let stamp = state.build.clone();
             events::spawn_bridge(app.handle().clone(), state.app.clone());
+            if profile.is_dev() {
+                // Dev builds expose the loopback bridge for automation (§59, §91).
+                let core = state.app.clone();
+                let token_file = dirs.data.join("bridge.json");
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = riddle_app::bridge::start(core, 1431, Some(token_file)).await {
+                        riddle_observability::rwarn!(Category::App, "dev bridge did not start: {e}");
+                    }
+                });
+            }
             app.manage(state);
             rinfo!(Category::App, "riddle {} ({}{}) started; profile={:?}; data={}",
                 stamp.version, stamp.git_sha, if stamp.dirty { "-dirty" } else { "" }, profile, dirs.data.display());
@@ -43,9 +54,18 @@ pub fn run() {
                 };
                 let _ = w.set_title(&title);
             }
+            presence::install(app.handle())?;
             Ok(())
         })
+        .on_window_event(presence::on_window_event)
         .invoke_handler(commands::handler())
-        .run(tauri::generate_context!())
-        .expect("error while running Riddle");
+        .build(tauri::generate_context!())
+        .expect("error while building Riddle")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                presence::show_main(app);
+            }
+            let _ = (&app, &event);
+        });
 }

@@ -23,3 +23,4 @@ the estimate applied.
 | 9182960 | feat(app): riddle-app headless core with read services, event bridge, read commands and invoke_action | 6 | 18165 | 11199671 | 60 | 5 |
 | b39b6f9 | feat(cli,mcp): riddle CLI twin and MCP stdio server over the shared core | 6 | 15284 | 8769678 | 36 | 5 |
 | 7cc3994 | chore(ledger): estimate subagent output tokens from content; document the caveat | 1 | 5214 | 1925402 | 6 | 1 |
+| bb5d421 | feat(app): command router and loopback dev bridge (HTTP + SSE) for automation; riddle bridge; tray, close-to-hide, focus refresh | 12 | 122946 | 15869692 | 54 | 5 |
