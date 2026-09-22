@@ -34,12 +34,13 @@ pub struct DevInfo {
 
 #[tauri::command]
 pub fn dev_info(state: State<'_, AppState>) -> Result<DevInfo> {
+    let stores_ref = state.stores();
     let mut stores = vec![StoreInfo {
         label: "index".into(),
-        path: state.stores.index().path().map(|p| p.display().to_string()).unwrap_or_default(),
-        size_bytes: state.stores.index().size_bytes(),
+        path: stores_ref.index().path().map(|p| p.display().to_string()).unwrap_or_default(),
+        size_bytes: stores_ref.index().size_bytes(),
     }];
-    for (id, s) in state.stores.open_digs() {
+    for (id, s) in stores_ref.open_digs() {
         stores.push(StoreInfo { label: format!("dig {}", id), path: s.path().map(|p| p.display().to_string()).unwrap_or_default(), size_bytes: s.size_bytes() });
     }
     Ok(DevInfo {
@@ -53,7 +54,7 @@ pub fn dev_info(state: State<'_, AppState>) -> Result<DevInfo> {
         config_dir: state.dirs.config.display().to_string(),
         cache_dir: state.dirs.cache.display().to_string(),
         stores,
-        store_fault: state.stores.any_fault(),
+        store_fault: stores_ref.any_fault(),
         log_level: log::max_level().to_string(),
     })
 }
@@ -95,7 +96,7 @@ pub struct InFlight {
 pub fn in_flight_calls(state: State<'_, AppState>) -> Result<Vec<InFlight>> {
     let g = state.in_flight.lock();
     let mut v: Vec<InFlight> = g.values().map(|(c, t)| InFlight { command: c.clone(), elapsed_ms: t.elapsed().as_millis() as u64 }).collect();
-    v.sort_by(|a, b| b.elapsed_ms.cmp(&a.elapsed_ms));
+    v.sort_by_key(|i| std::cmp::Reverse(i.elapsed_ms));
     Ok(v)
 }
 

@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # Commit with a build-cost trailer.
 #
-#   scripts/commit.sh "<subject>" [<body-file>]
+#   scripts/commit.sh "<subject>" [<body-file>] [-- <path>...]
 #
-# Stages everything, computes wall time and token usage since the previous
+# Stages the given paths (or everything when none are given), computes wall time and token usage since the previous
 # commit (or since the build started), appends a `Build-Stats:` trailer, and
 # appends the same row to docs/BUILD_LEDGER.md so the ledger and the git log
 # agree. The window marker lives in .build/ (untracked).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-SUBJECT="$1"
-BODY_FILE="${2:-}"
+SUBJECT="$1"; shift
+BODY_FILE=""
+if [ "${1:-}" != "--" ] && [ -n "${1:-}" ]; then BODY_FILE="$1"; shift; fi
+if [ "${1:-}" = "--" ]; then shift; fi
+PATHS=("$@")
 MARK=.build/last-commit-at
 mkdir -p .build
 SINCE=$(cat "$MARK" 2>/dev/null || cat .build/build-started-at)
@@ -18,7 +21,7 @@ NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 STATS=$(python3 scripts/usage.py --since "$SINCE" --until "$NOW" --trailer)
 JSON=$(python3 scripts/usage.py --since "$SINCE" --until "$NOW" --json)
 
-git add -A
+if [ ${#PATHS[@]} -gt 0 ]; then git add -- "${PATHS[@]}"; else git add -A; fi
 {
   echo "$SUBJECT"
   echo

@@ -3,6 +3,7 @@
 //! that matters lives in the `riddle-*` crates.
 
 pub mod commands;
+pub mod events;
 pub mod logging;
 pub mod paths;
 pub mod state;
@@ -31,6 +32,7 @@ pub fn run() {
         .setup(move |app| {
             let state = state::AppState::bootstrap(app.handle().clone(), dirs.clone(), profile)?;
             let stamp = state.build.clone();
+            events::spawn_bridge(app.handle().clone(), state.app.clone());
             app.manage(state);
             rinfo!(Category::App, "riddle {} ({}{}) started; profile={:?}; data={}",
                 stamp.version, stamp.git_sha, if stamp.dirty { "-dirty" } else { "" }, profile, dirs.data.display());

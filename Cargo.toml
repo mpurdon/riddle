@@ -30,6 +30,7 @@ members = [
   "crates/riddle-actions",
   "crates/riddle-cli",
   "crates/riddle-mcp",
+  "crates/riddle-app",
   "apps/desktop/src-tauri",
 ]
 
@@ -69,6 +70,7 @@ riddle-agent = { path = "crates/riddle-agent" }
 riddle-expeditions = { path = "crates/riddle-expeditions" }
 riddle-jobs = { path = "crates/riddle-jobs" }
 riddle-actions = { path = "crates/riddle-actions" }
+riddle-app = { path = "crates/riddle-app" }
 
 # external
 serde = { version = "1", features = ["derive"] }

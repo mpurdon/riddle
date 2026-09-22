@@ -21,6 +21,7 @@ riddle-store.workspace = true
 riddle-settings.workspace = true
 riddle-credentials.workspace = true
 riddle-actions.workspace = true
+riddle-app.workspace = true
 riddle-mail.workspace = true
 riddle-gmail.workspace = true
 riddle-sync.workspace = true
