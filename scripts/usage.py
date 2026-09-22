@@ -10,8 +10,13 @@ commit with what it cost to produce, and by the ledger summary at the end.
 
 Token classes follow the API's usage object: fresh input, cache creation,
 cache read, and output. Subagents are attributed by agent id; the main
-session is "main". Nothing here is an estimate: every number is read from
-the transcript the API wrote.
+session is "main".
+
+One caveat, stated in the ledger: subagent transcripts record output tokens
+as the streaming placeholder (a handful of tokens) rather than the final
+count, so when the recorded value is implausibly small for the content, the
+output is estimated from content length (chars / 3.5) and counted under
+`output_estimated`. Input and cache figures are always as recorded.
 """
 import argparse
 import glob
@@ -27,7 +32,26 @@ def parse_ts(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
+def content_chars(content):
+    n = 0
+    for c in content:
+        if not isinstance(c, dict):
+            continue
+        t = c.get("type")
+        if t == "text":
+            n += len(c.get("text", ""))
+        elif t == "thinking":
+            n += len(c.get("thinking", ""))
+        elif t == "tool_use":
+            n += len(json.dumps(c.get("input", {})))
+    return n
+
+
 def iter_assistant(path):
+    """Yield (ts, id, model, usage, content) with content accumulated per
+    message id, since streaming writes one line per content block."""
+    acc = {}
+    order = []
     with open(path, encoding="utf-8") as f:
         for line in f:
             try:
@@ -40,7 +64,16 @@ def iter_assistant(path):
             u = m.get("usage")
             if not u or not d.get("timestamp"):
                 continue
-            yield d["timestamp"], m.get("id"), m.get("model"), u, m.get("content") or []
+            mid = m.get("id")
+            if mid not in acc:
+                acc[mid] = [d["timestamp"], mid, m.get("model"), u, []]
+                order.append(mid)
+            entry = acc[mid]
+            if u.get("output_tokens", 0) >= entry[3].get("output_tokens", 0):
+                entry[3] = u
+            entry[4].extend(m.get("content") or [])
+    for mid in order:
+        yield tuple(acc[mid])
 
 
 def collect(since, until):
@@ -57,10 +90,13 @@ def collect(since, until):
             if t < since or (until and t > until):
                 continue
             tools = sum(1 for c in content if isinstance(c, dict) and c.get("type") == "tool_use")
-            prev = best.get(mid)
-            # Streaming writes the same message several times; keep the fullest.
-            if prev is None or u.get("output_tokens", 0) >= prev[2].get("output_tokens", 0):
-                best[mid] = (t, model, u, max(tools, prev[3] if prev else 0))
+            est = int(content_chars(content) / 3.5) + 1
+            recorded = u.get("output_tokens", 0)
+            if recorded * 2 < est:
+                u = dict(u)
+                u["output_tokens"] = est
+                u["_estimated"] = True
+            best[mid] = (t, model, u, tools)
         if not best:
             continue
         s = per_source.setdefault(source, defaultdict(int))
@@ -72,6 +108,8 @@ def collect(since, until):
             s["cache_create"] += u.get("cache_creation_input_tokens", 0)
             s["cache_read"] += u.get("cache_read_input_tokens", 0)
             s["output"] += u.get("output_tokens", 0)
+            if u.get("_estimated"):
+                s["output_estimated"] += u.get("output_tokens", 0)
             s["tool_calls"] += tools
             models.add(model or "?")
             first = t if first is None or t < first else first
@@ -100,7 +138,7 @@ def main():
     per = collect(since, until)
     tot = defaultdict(int)
     for s in per.values():
-        for k in ("messages", "input", "cache_create", "cache_read", "output", "tool_calls"):
+        for k in ("messages", "input", "cache_create", "cache_read", "output", "output_estimated", "tool_calls"):
             tot[k] += s[k]
     minutes = (now - since).total_seconds() / 60
     agents = {k: v for k, v in per.items() if k != "main"}
@@ -115,7 +153,8 @@ def main():
               f"out {fmt_k(tot['output'])}, in {fmt_k(tot['input'])}, "
               f"cache-write {fmt_k(tot['cache_create'])}, cache-read {fmt_k(tot['cache_read'])}; "
               f"{tot['messages']} turns, {tot['tool_calls']} tool calls; "
-              f"main out {fmt_k(main_s['output'])}, {len(agents)} agents out {fmt_k(sum(v['output'] for v in agents.values()))}")
+              f"main out {fmt_k(main_s['output'])}, {len(agents)} agents out {fmt_k(sum(v['output'] for v in agents.values()))}"
+              + (f" (of which {fmt_k(tot['output_estimated'])} estimated from content)" if tot['output_estimated'] else ""))
         return
 
     print(f"Window: {since.isoformat()} -> {now.isoformat()} ({minutes:.1f} min)")

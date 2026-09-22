@@ -6,6 +6,13 @@ input including cache writes and reads); turns are assistant messages; agents
 is the number of subagents that contributed in the window. A summary is
 appended at the end of the build.
 
+Caveat: the session transcript records subagent output tokens as a
+streaming placeholder, so `scripts/usage.py` estimates subagent output from
+content length (chars / 3.5) and says so in the trailer. Rows before a55db67
+used the raw placeholder for the five parallel tracks and undercount their
+output; the closing summary recomputes every window from the transcript with
+the estimate applied.
+
 | commit | subject | min | output tok | input tok | turns | agents |
 |---|---|---|---|---|---|---|
 | c056823 | chore: repository skeleton, build ledger and agent rules | 12 | 22885 | 3298128 | 34 | 0 |
@@ -15,3 +22,4 @@ appended at the end of the build.
 | 134d54f | chore: CI and release workflows, version check, contributing, security, changelog, troubleshooting | 9 | 37737 | 17428112 | 153 | 5 |
 | 9182960 | feat(app): riddle-app headless core with read services, event bridge, read commands and invoke_action | 6 | 18165 | 11199671 | 60 | 5 |
 | b39b6f9 | feat(cli,mcp): riddle CLI twin and MCP stdio server over the shared core | 6 | 15284 | 8769678 | 36 | 5 |
+| 7cc3994 | chore(ledger): estimate subagent output tokens from content; document the caveat | 1 | 5214 | 1925402 | 6 | 1 |
