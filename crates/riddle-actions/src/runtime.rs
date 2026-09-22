@@ -115,7 +115,6 @@ impl Runtime {
             inv.confirmed && inv.principal.is_user()
         };
 
-        let decision = decide(&meta, &inv.principal, inv.dig_id.as_ref(), &self.policy.read(), confirmed);
         let activity_id = ActivityId::new();
         let ctx = ActionContext {
             services: self.services.clone(),
@@ -124,6 +123,10 @@ impl Runtime {
             idempotency_key: inv.idempotency_key.clone(),
             activity_id: activity_id.clone(),
         };
+        // The tier may depend on the arguments (`Action::confirmation_for`).
+        let mut meta = meta;
+        meta.confirmation = action.confirmation_for(&ctx, &inv.args);
+        let decision = decide(&meta, &inv.principal, inv.dig_id.as_ref(), &self.policy.read(), confirmed);
         match decision {
             Decision::Deny(reason) => {
                 rwarn!(Category::Actions, "denied {} for {:?}: {reason}", meta.name, inv.principal);
@@ -165,7 +168,7 @@ impl Runtime {
                     undo: r.undo.clone(),
                     dig_id: inv.dig_id.clone(),
                     trace_id: r.provenance.as_ref().and_then(|p| p.trace_id.clone()),
-                    undoes: None,
+                    undoes: r.undoes.clone(),
                     created_at: started,
                 };
                 (r.value, activity)
@@ -224,6 +227,16 @@ impl Runtime {
 
     pub fn arm(&self, armed: bool) { self.policy.write().armed = armed; }
     pub fn is_armed(&self) -> bool { self.policy.read().armed }
+
+    /// Run an Action's `undo` from recorded restore data on behalf of the undo
+    /// engine (§50). Authorization and the Activity row belong to the
+    /// `undo_activity` invocation that calls this; here we only build the
+    /// context and dispatch.
+    pub async fn undo_via(&self, action_name: &str, restore: serde_json::Value, principal: Principal, dig_id: Option<DigId>, activity_id: ActivityId) -> Result<crate::ActionResult> {
+        let action = self.action(action_name)?;
+        let ctx = ActionContext { services: self.services.clone(), principal, dig_id, idempotency_key: None, activity_id };
+        action.undo(&ctx, restore).await
+    }
 }
 
 #[cfg(test)]

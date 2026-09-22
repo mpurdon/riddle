@@ -131,3 +131,70 @@ pub struct Activity {
     pub undoes: Option<ActivityId>,
     pub created_at: DateTime<Utc>,
 }
+
+/// Restore data keyed by affected entity id, so a bulk Activity can be undone
+/// non-linearly (§50): the undo engine hands the Action's `undo` only the
+/// entries for entities no later Activity touched. `shared` carries anything
+/// that is not per-entity (a Mesh version, a label id). Actions that record
+/// their restore data in this shape get partial undo for free; an opaque
+/// restore value is all-or-nothing.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreMap {
+    pub entities: std::collections::BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub shared: serde_json::Value,
+}
+
+impl RestoreMap {
+    pub fn new() -> Self { Self::default() }
+    pub fn entity(mut self, id: impl std::fmt::Display, restore: serde_json::Value) -> Self {
+        self.entities.insert(id.to_string(), restore);
+        self
+    }
+    pub fn shared(mut self, shared: serde_json::Value) -> Self { self.shared = shared; self }
+    pub fn to_value(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or(serde_json::Value::Null) }
+    /// `Some` only when the value carries the per-entity shape.
+    pub fn from_value(v: &serde_json::Value) -> Option<Self> {
+        if v.get("entities")?.is_object() { serde_json::from_value(v.clone()).ok() } else { None }
+    }
+    /// Keep only the entities in `ids`.
+    pub fn retain(&mut self, ids: &std::collections::HashSet<String>) { self.entities.retain(|k, _| ids.contains(k)); }
+}
+
+/// An entity whose provider state changed since the Activity; undo reports it
+/// instead of guessing (§50).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UndoConflict {
+    pub entity: EntityRef,
+    pub detail: String,
+}
+
+/// What an undo did: restored, skipped ("handled since"), and conflicting
+/// entities, plus the undo Activity when anything was restored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UndoReport {
+    pub activity_id: ActivityId,
+    pub restored: Vec<EntityRef>,
+    pub skipped: Vec<SkippedEntity>,
+    pub conflicts: Vec<UndoConflict>,
+    /// `None` when nothing could be restored; the original stays undoable.
+    pub undo_activity_id: Option<ActivityId>,
+}
+
+/// What an undo would do, shown in the in-place confirmation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UndoPreview {
+    pub activity_id: ActivityId,
+    pub label: String,
+    pub summary: String,
+    pub will_restore: Vec<EntityRef>,
+    pub will_skip: Vec<SkippedEntity>,
+    pub conflicts: Vec<UndoConflict>,
+}

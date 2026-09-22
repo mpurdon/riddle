@@ -35,6 +35,9 @@ pub struct ActionResult {
     pub result: ActivityResult,
     /// Redacted inputs for the Activity: identifiers and counts only.
     pub inputs: Value,
+    /// Set by `undo_activity`: the Activity this result undid, so the
+    /// runtime records `undoes` on the Activity it appends.
+    pub undoes: Option<riddle_core::ActivityId>,
 }
 
 impl ActionResult {
@@ -48,8 +51,10 @@ impl ActionResult {
             provenance: None,
             result: ActivityResult::Ok,
             inputs: Value::Null,
+            undoes: None,
         }
     }
+    pub fn with_undoes(mut self, undoes: riddle_core::ActivityId) -> Self { self.undoes = Some(undoes); self }
     pub fn with_affected(mut self, affected: Vec<EntityRef>) -> Self { self.affected = affected; self }
     pub fn with_undo(mut self, restore: Value, label: impl Into<String>) -> Self {
         self.undo = UndoInfo::Undoable { restore, label: label.into() };
@@ -85,6 +90,11 @@ pub struct ActionContext {
 #[async_trait]
 pub trait Action: Send + Sync {
     fn meta(&self) -> ActionMeta;
+    /// The confirmation tier for these particular arguments. Defaults to the
+    /// static policy in `meta()`; an Action whose risk depends on its input
+    /// (`save_settings` is PressHold only when it raises a Dig to Trusted)
+    /// overrides it. The runtime consults this before deciding.
+    fn confirmation_for(&self, _ctx: &ActionContext, _args: &Value) -> riddle_core::ConfirmationPolicy { self.meta().confirmation }
     /// Validate and describe what would really happen, for confirmation.
     async fn preview(&self, _ctx: &ActionContext, args: &Value) -> Result<Preview> {
         Ok(Preview { summary: self.meta().description, real_arguments: args.clone() })

@@ -1,0 +1,14 @@
+# A file with a per-Dig autonomy table but no perAction table and a
+# top-level key this build does not know.
+schemaVersion = 1
+someFutureKey = "ignored"
+closeToHide = false
+
+[autonomy]
+default = "act"
+
+[autonomy.perDig]
+dig-work = "observe"
+
+[budgets]
+dailyJudgeUsd = 0.5

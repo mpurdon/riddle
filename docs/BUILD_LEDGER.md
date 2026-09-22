@@ -30,3 +30,4 @@ the estimate applied.
 | 13 | feat(mail): provider trait, fixture mailbox, Gmail client and OAuth, sync engine, projection outbox, people, context, search | 4 | 22132 | 8699208 | 22 | 4 |
 | 14 | feat(sift): Signal registry and Sets, Jev judge with SSM key, Mesh DSL and simulation, the Sift pipeline, Finds and Temporal Sift | 4 | 30858 | 9987017 | 25 | 4 |
 | 15 | feat(app): domain assembly, judge attachment, the processing engine, end-to-end and live tests | 19 | 72263 | 58337102 | 120 | 2 |
+| 16 | feat(ops): settings with compatibility tests, durable job queue and scheduler, Activity ledger and the undo engine | 1 | 1356 | 2289398 | 4 | 1 |

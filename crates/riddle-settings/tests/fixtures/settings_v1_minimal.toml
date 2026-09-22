@@ -1,0 +1,10 @@
+# Written by Riddle 0.1.0 before the llm, budgets, gmail and autonomy
+# sections existed. Kept as a compatibility fixture: it must always load.
+schemaVersion = 1
+developerMode = false
+logLevel = "warn"
+shadowPeriodDays = 10
+
+[judge]
+provider = "jev"
+model = "jev-1.12.0"
