@@ -98,6 +98,21 @@ enum Command {
         #[arg(long, default_value_t = 1431)]
         port: u16,
     },
+    /// Run Riddle headless: jobs, sync, Sift, projection, and the bridge, until Ctrl-C.
+    Serve {
+        #[arg(long, default_value_t = 1431)]
+        port: u16,
+        /// Use the scripted judge and no LLM (no network, no spend).
+        #[arg(long)]
+        offline: bool,
+    },
+    /// Run one engine pass over every Dig (sync, sift, project, temporal) and print the report.
+    Pass {
+        #[arg(long, default_value_t = 200)]
+        sift_limit: u32,
+        #[arg(long)]
+        offline: bool,
+    },
     /// Serve the MCP protocol on stdin/stdout for external agents.
     Mcp {
         /// Expose mutating Actions (each still returns a pending confirmation).
@@ -198,6 +213,17 @@ async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
         return Ok(());
     }
     let app = open_app(cli.prod).await?;
+    let offline = matches!(cli.command, Command::Serve { offline: true, .. } | Command::Pass { offline: true, .. });
+    let background = matches!(cli.command, Command::Serve { .. });
+    let overrides = if offline {
+        let mut s = riddle_settings::Settings::dev_defaults();
+        s.judge.provider = riddle_settings::JudgeProvider::Scripted;
+        s.llm.provider = riddle_settings::LlmProvider::Null;
+        Some(s)
+    } else {
+        None
+    };
+    let ops = app.boot_with(background, overrides).await?;
     if cli.progress {
         let mut rx = app.events.subscribe();
         tokio::spawn(async move {
@@ -247,6 +273,21 @@ async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
             }
         },
         Command::Activity { limit } => serde_json::to_value(app.list_activity(&Default::default(), &PageRequest { cursor: None, limit: Some(limit) })?)?,
+        Command::Serve { port, .. } => {
+            let profile = if cli.prod { Profile::Prod } else { Profile::current() };
+            let dirs = AppDirs::resolve(profile);
+            let info = riddle_app::bridge::start(app.clone(), port, Some(dirs.data.join("bridge.json"))).await?;
+            eprintln!("riddle serving; bridge on http://127.0.0.1:{} ({} actions)", info.port, app.runtime.list_actions().len());
+            println!("{}", serde_json::json!({ "port": info.port, "token": info.token }));
+            tokio::signal::ctrl_c().await?;
+            ops.runner.stop();
+            return Ok(());
+        }
+        Command::Pass { sift_limit, .. } => {
+            let reports = app.full_pass_all(sift_limit, &riddle_sync::engine::CancelFlag::new()).await?;
+            for d in app.list_digs()? { app.refresh_dig_status(&d.id); }
+            serde_json::to_value(reports)?
+        }
         Command::Bridge { port } => {
             let profile = if cli.prod { Profile::Prod } else { Profile::current() };
             let dirs = AppDirs::resolve(profile);

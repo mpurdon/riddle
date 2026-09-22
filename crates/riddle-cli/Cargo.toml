@@ -16,6 +16,8 @@ riddle-store.workspace = true
 riddle-actions.workspace = true
 riddle-app.workspace = true
 riddle-mcp = { path = "../riddle-mcp" }
+riddle-settings.workspace = true
+riddle-sync.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true

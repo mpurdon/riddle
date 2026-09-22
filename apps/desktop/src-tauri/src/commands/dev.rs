@@ -102,3 +102,50 @@ pub fn in_flight_calls(state: State<'_, AppState>) -> Result<Vec<InFlight>> {
 
 #[allow(dead_code)]
 fn _assert_error_is_serializable(e: RiddleError) -> String { serde_json::to_string(&e).unwrap_or_default() }
+
+/// A redacted diagnostics block safe to paste into an issue: build, OS,
+/// directories, store sizes, fault state, and the last warnings. No
+/// identifiers that could carry content, no settings values that are secrets.
+#[tauri::command]
+pub fn export_diagnostics(state: State<'_, AppState>) -> Result<String> {
+    let info = dev_info(state.clone())?;
+    let mut out = String::new();
+    out.push_str(&format!("Riddle {} ({}{}) built {} [{}]\n", info.build.version, info.build.git_sha, if info.build.dirty { "-dirty" } else { "" }, info.build.built_at, info.build.profile));
+    out.push_str(&format!("OS {} {}; uptime {}s; log level {}\n", info.os, info.arch, info.uptime_seconds, info.log_level));
+    out.push_str(&format!("data {}\nlogs {}\n", info.data_dir, info.log_dir));
+    for s in &info.stores {
+        out.push_str(&format!("store {} {} KB\n", s.label, s.size_bytes / 1024));
+    }
+    if let Some(f) = &info.store_fault {
+        out.push_str(&format!("STORE FAULT: {f}\n"));
+    }
+    match state.app.list_digs() {
+        Ok(digs) => out.push_str(&format!("digs {} ({})\n", digs.len(), digs.iter().map(|d| format!("{:?}/{:?}", d.provider, d.status)).collect::<Vec<_>>().join(", "))),
+        Err(e) => out.push_str(&format!("digs unavailable: {}\n", e.kind.as_str())),
+    }
+    out.push_str(&format!("actions {}\n", state.runtime().list_actions().len()));
+    out.push_str("recent warnings:\n");
+    for l in tail(50, None, Some(log::Level::Warn), None) {
+        out.push_str(&format!("  [{}][{}][{}] {}\n", l.at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true), l.level, l.category, l.message));
+    }
+    Ok(out)
+}
+
+/// Drop derived caches (the in-memory log tail keeps its lines; SQLite
+/// caches are compacted). Stores are never touched.
+#[tauri::command]
+pub fn clear_caches(state: State<'_, AppState>) -> Result<u64> {
+    let mut freed = 0u64;
+    if state.dirs.cache.exists() {
+        if let Ok(rd) = std::fs::read_dir(&state.dirs.cache) {
+            for entry in rd.flatten() {
+                if let Ok(m) = entry.metadata() {
+                    freed += m.len();
+                }
+                let _ = if entry.path().is_dir() { std::fs::remove_dir_all(entry.path()) } else { std::fs::remove_file(entry.path()) };
+            }
+        }
+    }
+    let _ = state.stores().index().compact();
+    Ok(freed)
+}

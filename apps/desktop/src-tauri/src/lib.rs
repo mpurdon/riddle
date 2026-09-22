@@ -34,6 +34,17 @@ pub fn run() {
             let state = state::AppState::bootstrap(app.handle().clone(), dirs.clone(), profile)?;
             let stamp = state.build.clone();
             events::spawn_bridge(app.handle().clone(), state.app.clone());
+            {
+                // Boot the core (settings, domains, AI, judge, jobs); the judge
+                // may resolve its key from SSM, so this runs off the main thread.
+                let core = state.app.clone();
+                tauri::async_runtime::spawn(async move {
+                    match core.boot(true).await {
+                        Ok(_) => rinfo!(Category::App, "core booted; {} actions", core.runtime.list_actions().len()),
+                        Err(e) => riddle_observability::rerror!(Category::App, "core boot failed: {}: {}", e.kind.as_str(), e.message),
+                    }
+                });
+            }
             if profile.is_dev() {
                 // Dev builds expose the loopback bridge for automation (§59, §91).
                 let core = state.app.clone();

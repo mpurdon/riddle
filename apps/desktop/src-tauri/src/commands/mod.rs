@@ -3,6 +3,7 @@
 
 pub mod actions;
 pub mod dev;
+pub mod more;
 pub mod reads;
 
 pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
@@ -12,6 +13,8 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         dev::read_app_logs,
         dev::log_categories,
         dev::in_flight_calls,
+        dev::export_diagnostics,
+        dev::clear_caches,
         actions::invoke_action,
         actions::list_actions,
         actions::list_pending,
@@ -43,5 +46,15 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         reads::recent_traces,
         reads::usage_summary,
         reads::trace_stats,
+        more::task_centre,
+        more::get_settings,
+        more::privacy_statement,
+        more::probe_judge,
+        more::probe_llm,
+        more::probe_provider,
+        more::update_preview,
+        more::director_send,
+        more::list_conversations,
+        more::get_conversation,
     ]
 }

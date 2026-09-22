@@ -31,3 +31,4 @@ the estimate applied.
 | 14 | feat(sift): Signal registry and Sets, Jev judge with SSM key, Mesh DSL and simulation, the Sift pipeline, Finds and Temporal Sift | 4 | 30858 | 9987017 | 25 | 4 |
 | 15 | feat(app): domain assembly, judge attachment, the processing engine, end-to-end and live tests | 19 | 72263 | 58337102 | 120 | 2 |
 | 16 | feat(ops): settings with compatibility tests, durable job queue and scheduler, Activity ledger and the undo engine | 1 | 1356 | 2289398 | 4 | 1 |
+| 17 | feat(app): settings, job runner and undo wired; boot sequence; headless serve; desktop boots the core | 10 | 33215 | 21280270 | 36 | 1 |

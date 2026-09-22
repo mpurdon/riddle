@@ -42,7 +42,9 @@ impl AppState {
 
     pub fn stores(&self) -> Arc<Stores> { self.app.stores() }
 
-    /// Read from settings once the settings track is wired; default on.
-    pub fn close_to_hide(&self) -> bool { true }
+    /// Close-to-hide from settings; on until settings are loaded.
+    pub fn close_to_hide(&self) -> bool {
+        self.app.services.get::<riddle_settings::SettingsStore>().map(|s| s.settings().close_to_hide).unwrap_or(true)
+    }
     pub fn runtime(&self) -> Arc<riddle_actions::Runtime> { self.app.runtime.clone() }
 }

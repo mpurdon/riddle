@@ -62,6 +62,7 @@ pub const COMMANDS: &[&str] = &[
     "list_signals", "signal_versions", "signal_evaluations", "list_strata", "list_expeditions", "get_expedition",
     "list_drafts", "get_user_profile", "read_trace", "recent_traces", "usage_summary", "trace_stats",
     "invoke_action", "list_actions", "list_pending", "dev_armed", "list_conversations", "get_conversation", "director_send",
+    "task_centre", "get_settings", "privacy_statement", "probe_judge", "probe_llm", "probe_provider", "update_preview",
 ];
 
 pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
@@ -153,6 +154,50 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             let id = director.send(req)?;
             json!({ "conversationId": id })
         }
+        "task_centre" => serde_json::to_value(app.task_centre()?)?,
+        "get_settings" => {
+            let store = app.services.require::<riddle_settings::SettingsStore>()?;
+            serde_json::to_value(store.settings())?
+        }
+        "privacy_statement" => {
+            let settings = app.services.get::<riddle_settings::SettingsStore>().map(|s| s.settings());
+            let judge_vendor = app.services.judge().map(|j| { let id = j.identity(); format!("TypeSafe AI ({})", id.model_id) });
+            let llm_vendor = settings.as_ref().filter(|s| s.llm.provider == riddle_settings::LlmProvider::Bedrock).map(|s| format!("Amazon Bedrock ({})", s.llm.escalation_model));
+            let digs = app.list_digs()?;
+            let wanted: Option<DigId> = opt(&args, "digId");
+            let digs = digs.into_iter().filter(|d| wanted.as_ref().is_none_or(|w| w == &d.id)).map(|d| (d.name, d.privacy)).collect();
+            json!(riddle_privacy::disclosure(&riddle_privacy::DisclosureInput { judge_vendor, llm_vendor, digs }))
+        }
+        "probe_judge" => match app.services.judge() {
+            Some(j) => match j.probe().await {
+                Ok(ms) => json!({ "ok": true, "latencyMs": ms, "message": j.identity().key() }),
+                Err(e) => json!({ "ok": false, "latencyMs": 0, "message": format!("{}: {}", e.kind.as_str(), e.message) }),
+            },
+            None => json!({ "ok": false, "latencyMs": 0, "message": "no judge configured" }),
+        },
+        "probe_llm" => match app.services.get::<crate::ai::AiServices>() {
+            Some(ai) => {
+                let started = std::time::Instant::now();
+                match ai.llm.probe().await {
+                    Ok(_) => json!({ "ok": true, "latencyMs": started.elapsed().as_millis() as u64, "message": ai.llm.identity().model_id }),
+                    Err(e) => json!({ "ok": false, "latencyMs": started.elapsed().as_millis() as u64, "message": format!("{}: {}", e.kind.as_str(), e.message) }),
+                }
+            }
+            None => json!({ "ok": false, "latencyMs": 0, "message": "no LLM configured" }),
+        },
+        "probe_provider" => {
+            let dig = app.dig(&arg(&args, "digId")?)?;
+            let domains = app.services.require::<crate::domains::Domains>()?;
+            let started = std::time::Instant::now();
+            match domains.providers.provider_for(&dig) {
+                Ok(p) => match p.profile().await {
+                    Ok(_) => json!({ "ok": true, "latencyMs": started.elapsed().as_millis() as u64, "message": format!("{:?} provider answered", dig.provider) }),
+                    Err(e) => json!({ "ok": false, "latencyMs": started.elapsed().as_millis() as u64, "message": format!("{}: {}", e.kind.as_str(), e.message) }),
+                },
+                Err(e) => json!({ "ok": false, "latencyMs": 0, "message": format!("{}: {}", e.kind.as_str(), e.message) }),
+            }
+        }
+        "update_preview" => Value::Null,
         other => return Err(RiddleError::not_found(format!("no command named {other}"))),
     })
 }
