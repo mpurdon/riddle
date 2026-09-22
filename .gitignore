@@ -20,3 +20,4 @@ apps/desktop/src-tauri/gen/schemas/
 *.swp
 # Logs
 *.log
+__pycache__/
