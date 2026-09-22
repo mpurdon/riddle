@@ -37,3 +37,49 @@ the estimate applied.
 | 20 | style: rustfmt across the workspace; compat test expects the Sonnet 4.5 default | 4 | 1651 | 3211093 | 5 | 0 |
 | 21 | feat: add_fixture_dig honours privacy; Mesh simulation preview verified against real history; README status and build plan updated | 6 | 9049 | 6511520 | 10 | 0 |
 | 22 | feat: Sift Activity with provenance and Undo All; export/import Meshes, unsubscribe, compare_signal_versions; non-incremental builds | 12 | 24900 | 17635692 | 26 | 0 |
+
+## Summary
+
+The build ran from 01:05 to about 04:15 local time on 2026-09-22.
+
+Build window 2026-09-22T04:55:00Z → 2026-09-22T07:49:53Z (2.9 h wall). First commit 2026-09-22 01:06:47 -0400, last 2026-09-22 03:49:47 -0400. 22 commits, 30 crates, 50,723 lines of Rust, 14,028 lines of TypeScript.
+
+### Coordinator session (from the transcript)
+
+| metric | value |
+|---|---|
+| assistant turns | 288 |
+| tool calls | 286 |
+| output tokens | 418,597 |
+| fresh input tokens | 580 |
+| cache writes | 666,696 |
+| cache reads | 122,332,023 |
+
+### Parallel tracks (harness-reported totals; transcript output estimated from content)
+
+| track | wall min | tool uses | harness tokens | transcript output (est.) | cache writes | cache reads |
+|---|---|---|---|---|---|---|
+| A mail | 59 | 81 | 426,101 | 136,720 | 404,991 | 19,166,181 |
+| B sift | 56 | 88 | 425,207 | 120,281 | 359,823 | 20,079,289 |
+| C ai | 42 | 82 | 381,198 | 87,908 | 348,515 | 17,400,320 |
+| D ops | 65 | 85 | 349,246 | 89,259 | 835,604 | 16,554,036 |
+| E ui | 85 | 172 | 626,489 | 230,651 | 1,193,484 | 65,932,267 |
+
+Tracks ran concurrently for about 1.5 h of wall time; their summed duration is 5.1 h. Harness-reported track tokens: 2,208,241.
+
+### Everything together
+
+Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 1,606, cache writes 3,809,113, cache reads 261,464,116, 801 assistant turns, 794 tool calls.
+
+### Morning notes
+
+- Tuning, not building, is the next step: on the fixture Dig the escalation rate is about 50% and the Unresolved rate about 38% against the §65 targets of ≤10% and ≤5%. The Spoil margin (0.15 above threshold), the GitHub Mesh's `ELSE → Escalate` route, and calibration from a labelled sample are the levers; the Shadow Period is designed to gather exactly that evidence.
+- Escalation sends all 27 Signal definitions per call (~8k tokens); trimming to the Signals the Meshes in scope actually read would cut that cost several-fold.
+- The deferred list in `docs/BUILD_PLAN.md` needs the Gmail OAuth client id before any real mailbox can be connected.
+
+### External spend (from Riddle's own usage ledger and the live test output)
+
+- Jev (TypeSafe): about 1,000 calls across the live tests, `riddle serve` and the dev instance, roughly $0.02 in total at $0.042 per million input tokens.
+- Bedrock: Haiku 4.5 escalations at about $0.009 each (roughly 110 across all runs, about $1.0), plus two Director turns on Sonnet 4.5 (about $0.12) and Track C's live probes (under $0.01). Total external spend for the night is about $1.2.
+- The escalation tail dominates, as ARCHITECTURE.md §18 predicted: the judge cost per message is two orders of magnitude below one LLM refinement.
+
