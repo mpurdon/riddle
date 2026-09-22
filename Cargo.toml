@@ -105,8 +105,12 @@ tempfile = "3"
 [profile.dev]
 # Dependencies are optimised so a debug app is usable with a 100k-message store.
 opt-level = 1
+# Line tables only: full debuginfo for a Tauri + AWS SDK tree runs to tens of
+# gigabytes across a workspace this size.
+debug = "line-tables-only"
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 [profile.release]
 lto = "thin"
 codegen-units = 4

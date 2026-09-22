@@ -4375,9 +4375,13 @@ dependencies = [
  "log",
  "parking_lot",
  "riddle-actions",
+ "riddle-agent",
+ "riddle-ai",
  "riddle-core",
  "riddle-errors",
+ "riddle-expeditions",
  "riddle-observability",
+ "riddle-privacy",
  "riddle-store",
  "serde",
  "serde_json",
@@ -4566,12 +4570,24 @@ dependencies = [
 name = "riddle-gmail"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
  "log",
+ "parking_lot",
+ "rand 0.8.8",
+ "reqwest 0.12.28",
  "riddle-core",
+ "riddle-credentials",
  "riddle-errors",
+ "riddle-mail",
  "riddle-observability",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "url",
 ]
 
 [[package]]
