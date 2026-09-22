@@ -307,6 +307,10 @@ Distilled:
 
 **Theming.** Colours are tokens only; one CSS file per theme; a test fails on a missing token; the chosen theme is cached in `localStorage` to avoid a flash (Pontifex `index.css`, `themes.test.ts`, `theme-context.tsx`). CSS-variable themes, ten built-ins, clonable customs, per-tenant selection, cross-window sync via the `storage` event (CORA `src/lib/theme.ts`). Dark-only when the aesthetic demands it: Norse (Sleipnir `theme/tokens.css`), cyber (vpb `CyberTheme.swift`, "glow washes out on a light background"). The rule: "Chrome stays ink-neutral; the only chroma is live status" (CORA `styles.css:1`); production is red everywhere (Sleipnir); "colour only for state and Deploy/Destroy" (Warpcore).
 
+**Window chrome is the first feature.** Before any surface inside it is worth judging, the window has to move, resize, minimise and zoom. A custom title bar means you own dragging: in Tauri that is `data-tauri-drag-region` on the header element, not `-webkit-app-region`, which is a Chromium property that does nothing in WKWebView — so on macOS the stylesheet reads correct and the window is immovable (Riddle's first build shipped exactly that). Mark the bar `deep` and leave the controls alone; Tauri's script already exempts buttons, inputs, links and interactive roles. With `titleBarStyle: Overlay`, reserve left padding for the traffic lights. Verify by dragging the real window, never by reading the CSS.
+
+**The icon is how the app is found.** A placeholder square is indistinguishable in a Dock of thirty apps, so it is a day-0 item, generated from a script (§11 naming motif) and inspected at 16, 32 and 128 px on a grey field before it is called done: one shape, strong contrast, one accent colour, no detail that survives only at 1024. Know too that `tauri dev` runs a bare binary with no bundle, so the Dock shows a generic icon there whatever the icon file says; only a bundled build (`tauri build --debug` suffices) shows the real one.
+
 **Naming motif.** Every app has one and states it in the README: Latin with a Varro quote (Pontifex), Norse with horse watermark and runic close buttons (Sleipnir), Star Trek (Warpcore), Razer green (NommoBar), archaeology (Riddle). Icons come from a script, not a file (Pontifex `icons/make-icon.py`, Sleipnir `scripts/gen_icons.py`).
 
 **Keyboard.** One table drives both the handler and the help sheet "so a shortcut can't exist without being documented" (CORA `MainApp.tsx:2128`; Warpcore `useShortcuts.ts` and `ShortcutsHelp.tsx` kept in step). A `⌘K` palette where the object space is large (Warpcore). Space and Enter drive the hold button; Escape closes editors and tours.
@@ -408,6 +412,9 @@ Distilled:
 ### Day 0, before feature work
 
 - [ ] Name, motif, icon script, README skeleton with a Status line and etymology.
+- [ ] A window you can move, resize, minimise and zoom: the platform's own drag
+      region on any custom title bar, checked by dragging the real window; the real
+      icon in place and legible at 16 px.
 - [ ] Core and adapter split; typed `{kind, message}` errors; one instrumented invoke wrapper; a mirrored command surface in TypeScript.
 - [ ] Action allowlist that clicks, CLI and any agent share.
 - [ ] Logging plugin, fixed category vocabulary, `Timed` guard, never-log-arguments rule, webview errors forwarded, in-app tail.

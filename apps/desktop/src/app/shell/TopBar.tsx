@@ -12,8 +12,15 @@ export function TopBar() {
   const dev = useDevInfo()
   const setHelpOpen = useUi((s) => s.setHelpOpen)
   const { compose } = useComposerActions()
+  // `data-tauri-drag-region="deep"` is what actually moves the window: macOS
+  // renders in WKWebView, which ignores `-webkit-app-region`. Tauri's script
+  // excludes buttons, inputs and anything with an interactive role, so the
+  // controls below still click. The left padding clears the traffic lights.
   return (
-    <header className="titlebar-drag flex h-11 shrink-0 items-center gap-3 border-b border-line bg-sand/60 pl-[84px] pr-3">
+    <header
+      data-tauri-drag-region="deep"
+      className="flex h-11 shrink-0 items-center gap-3 border-b border-line bg-sand/60 pl-[84px] pr-3"
+    >
       <DigSwitcher />
       <div className="flex-1" />
       <SearchBox />

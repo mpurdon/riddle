@@ -76,13 +76,11 @@ input, textarea, [contenteditable], .selectable, pre, code {
   -webkit-user-select: text;
 }
 
-/* The macOS overlay title bar leaves the top strip for dragging. */
-.titlebar-drag {
-  -webkit-app-region: drag;
-}
-.titlebar-drag button, .titlebar-drag a, .titlebar-drag input, .titlebar-drag [role="button"] {
-  -webkit-app-region: no-drag;
-}
+/* The window has no system title bar (titleBarStyle: Overlay), so the top bar
+   is the drag handle. It is marked with `data-tauri-drag-region="deep"` in
+   TopBar.tsx, NOT with `-webkit-app-region`: that is a Chromium property and
+   macOS renders in WKWebView, where it silently does nothing. A window nobody
+   can move was the result the first time. */
 
 /* Focus rings that read on paper and on dark. */
 :focus-visible {

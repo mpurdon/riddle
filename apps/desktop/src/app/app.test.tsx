@@ -40,4 +40,25 @@ describe('the shell renders against the mocks', () => {
     expect(screen.getByLabelText('Ask Riddle')).toBeTruthy()
     await waitFor(() => expect(screen.getByText('DEV')).toBeTruthy())
   })
+
+  // The window has no system title bar, so if this attribute goes, the window
+  // becomes immovable — which is how the first build shipped. `-webkit-app-region`
+  // looks equivalent and is silently ignored by WKWebView on macOS.
+  it('marks the top bar as the window drag region', async () => {
+    resetMockState()
+    registerMocks()
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    window.location.hash = '#/'
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <App />
+      </QueryClientProvider>,
+    )
+    await screen.findByLabelText('Ask Riddle')
+    const bar = container.querySelector('header[data-tauri-drag-region]')
+    expect(bar, 'the top bar carries data-tauri-drag-region').toBeTruthy()
+    expect(bar?.getAttribute('data-tauri-drag-region')).toBe('deep')
+    // Traffic lights sit at the top left under the overlay title bar.
+    expect(bar?.className).toMatch(/pl-\[\d+px\]/)
+  })
 })
