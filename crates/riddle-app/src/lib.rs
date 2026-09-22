@@ -6,6 +6,7 @@
 //! `assemble` wires the domain crates in; `reads` are the query services
 //! commands call; `events` is the broadcast sink clients subscribe to.
 
+pub mod ai;
 pub mod assemble;
 pub mod bridge;
 pub mod director_reads;

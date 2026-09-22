@@ -61,7 +61,7 @@ pub const COMMANDS: &[&str] = &[
     "list_finds", "get_find", "list_activity", "get_activity", "list_meshes", "get_mesh", "mesh_versions",
     "list_signals", "signal_versions", "signal_evaluations", "list_strata", "list_expeditions", "get_expedition",
     "list_drafts", "get_user_profile", "read_trace", "recent_traces", "usage_summary", "trace_stats",
-    "invoke_action", "list_actions", "list_pending", "dev_armed", "list_conversations", "get_conversation",
+    "invoke_action", "list_actions", "list_pending", "dev_armed", "list_conversations", "get_conversation", "director_send",
 ];
 
 pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
@@ -140,9 +140,18 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
         "list_actions" => serde_json::to_value(app.runtime.list_actions())?,
         "list_pending" => serde_json::to_value(repo::pending::list_pending(&index)?)?,
         "dev_armed" => json!(app.runtime.is_armed()),
-        "list_conversations" | "get_conversation" => {
-            // Filled in when the Director track lands its repository.
-            match repo::kv::get_json::<Value>(&index, "conversations_placeholder")? { Some(v) => v, None => json!([]) }
+        "list_conversations" => serde_json::to_value(repo::conversations::list(&index, 100)?)?,
+        "get_conversation" => serde_json::to_value(repo::conversations::get(&index, &arg(&args, "conversationId")?)?.ok_or_else(|| RiddleError::not_found("conversation"))?)?,
+        "director_send" => {
+            let director = app.services.get::<riddle_agent::director::Director>().ok_or_else(|| RiddleError::llm_unavailable("the Director is not configured"))?;
+            let req = riddle_agent::director::SendRequest {
+                conversation_id: opt(&args, "conversationId"),
+                message: arg(&args, "message")?,
+                dig_ids: opt(&args, "digIds").unwrap_or_default(),
+                allow_contamination: opt(&args, "allowContamination").unwrap_or(false),
+            };
+            let id = director.send(req)?;
+            json!({ "conversationId": id })
         }
         other => return Err(RiddleError::not_found(format!("no command named {other}"))),
     })

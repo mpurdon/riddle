@@ -12,8 +12,14 @@ struct Migration {
     sql: &'static str,
 }
 
-const DIG: &[Migration] = &[Migration { version: 1, name: "init", sql: include_str!("../migrations/dig/0001_init.sql") }];
-const INDEX: &[Migration] = &[Migration { version: 1, name: "init", sql: include_str!("../migrations/index/0001_init.sql") }];
+const DIG: &[Migration] = &[
+    Migration { version: 1, name: "init", sql: include_str!("../migrations/dig/0001_init.sql") },
+    Migration { version: 2, name: "embeddings", sql: include_str!("../migrations/dig/0002_embeddings.sql") },
+];
+const INDEX: &[Migration] = &[
+    Migration { version: 1, name: "init", sql: include_str!("../migrations/index/0001_init.sql") },
+    Migration { version: 2, name: "usage", sql: include_str!("../migrations/index/0002_usage.sql") },
+];
 
 fn set_for(kind: StoreKind) -> &'static [Migration] {
     match kind {
