@@ -366,6 +366,36 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             }
         }
         "update_preview" => Value::Null,
+        "compare_signal_versions" => {
+            let name: String = arg(&args, "name")?;
+            let a: u32 = arg(&args, "versionA")?;
+            let b: u32 = arg(&args, "versionB")?;
+            let mut agree = 0u64;
+            let mut disagree = 0u64;
+            let mut compared = 0u64;
+            let mut samples = Vec::new();
+            for d in app.list_digs()? {
+                let store = app.stores.dig(&d.id)?;
+                let ea = repo::signals::evaluations_of_signal(&store, &name, a, 5000)?;
+                let eb = repo::signals::evaluations_of_signal(&store, &name, b, 5000)?;
+                let by_msg: std::collections::HashMap<&MessageId, &SignalEvaluation> =
+                    eb.iter().map(|e| (&e.message_id, e)).collect();
+                for x in &ea {
+                    if let Some(y) = by_msg.get(&x.message_id) {
+                        compared += 1;
+                        if x.selected == y.selected {
+                            agree += 1
+                        } else {
+                            disagree += 1;
+                            if samples.len() < 25 {
+                                samples.push(json!({ "digId": d.id, "messageId": x.message_id, "a": x.selected, "aScore": x.score(None), "b": y.selected, "bScore": y.score(None) }));
+                            }
+                        }
+                    }
+                }
+            }
+            json!({ "name": name, "versionA": a, "versionB": b, "compared": compared, "agree": agree, "disagree": disagree, "agreement": if compared > 0 { agree as f64 / compared as f64 } else { 0.0 }, "samples": samples })
+        }
         "ui_log" => {
             let level = match opt::<String>(&args, "level").as_deref() {
                 Some("error") => log::Level::Error,

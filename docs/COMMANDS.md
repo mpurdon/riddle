@@ -60,6 +60,10 @@ refresh_now             { digId? }
 cancel_job              { jobId }    pause_job { jobId }   resume_job { jobId }
 inject_fixture_message  { digId, template?: string, from?, subject?, body? }   (Demo Mode)
 apply_update_preview    { keep: boolean }
+export_meshes           { includeDisabled? }   → { text, count }
+import_meshes           { text }               (Drafts, or a new version when the name exists; undo removes them)
+unsubscribe             { digId, messageId }   (List-Unsubscribe one-click; external; no undo)
+permanent_delete        { digId, messageIds[] } (TypeCount; no undo)
 ```
 
 ## Reads
@@ -85,6 +89,7 @@ apply_update_preview    { keep: boolean }
 | `parse_mesh` | `{ text }` | `Mesh` (unsaved; throws `invalid` with line info in detail) |
 | `simulate_mesh` | `{ text?, meshId?, version?, windowDays? }` | `SimulationReport` |
 | `list_signals` | – | `Signal[]` |
+| `compare_signal_versions` | `{ name, versionA, versionB }` | `{ compared, agree, disagree, agreement, samples[] }` |
 | `signal_versions` | `{ name }` | `Signal[]` |
 | `signal_evaluations` | `{ digId, messageId }` | `SignalEvaluation[]` |
 | `list_strata` | – | `Stratum[]` |

@@ -19,6 +19,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// (mesh id, version, mesh name, disposition kind) -> (message ids, cached, fresh, trace of the first).
+type SiftGroups = std::collections::BTreeMap<
+    (String, u32, String, String),
+    (Vec<MessageId>, u64, u64, Option<TraceId>),
+>;
+
 #[derive(Debug, Default, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SiftPassReport {
@@ -121,6 +127,8 @@ impl App {
         let sift = Sift::from_services(&self.services);
         let ids = repo::messages::unclassified_ids(&store, limit)?;
         let mut report = SiftPassReport::default();
+        // Grouped for the ledger: (mesh id, version, name, disposition kind) -> (ids, cached, fresh, trace of first).
+        let mut groups: SiftGroups = std::collections::BTreeMap::new();
         for id in ids {
             if cancel.is_some_and(|c| c.is_cancelled()) {
                 break;
@@ -151,6 +159,30 @@ impl App {
                     report.fresh_signals += outcome.fresh as u64;
                     if outcome.judge_unavailable {
                         report.judge_unavailable = true;
+                    }
+                    if !outcome.shadow {
+                        let k = &outcome.classification;
+                        let key =
+                            (
+                                k.mesh_id
+                                    .as_ref()
+                                    .map(|m| m.to_string())
+                                    .unwrap_or_default(),
+                                k.mesh_version.unwrap_or(0),
+                                outcome.trace.mesh_name.clone().unwrap_or_else(|| {
+                                    match k.mechanism {
+                                        DecisionMechanism::Gate => "a gate".into(),
+                                        _ => "deterministic facts".into(),
+                                    }
+                                }),
+                                k.disposition.kind().as_str().to_string(),
+                            );
+                        let g = groups
+                            .entry(key)
+                            .or_insert_with(|| (Vec::new(), 0, 0, Some(k.trace_id.clone())));
+                        g.0.push(id.clone());
+                        g.1 += outcome.cached as u64;
+                        g.2 += outcome.fresh as u64;
                     }
                     match outcome.classification.disposition {
                         Disposition::Unresolved => report.unresolved += 1,
@@ -194,11 +226,93 @@ impl App {
                 }
             }
         }
+        self.record_sift_activity(dig, groups);
         report.remaining = repo::messages::unclassified_count(&store)?;
         rinfo!(Category::Sift, "pass {}: processed {} ({} cached, {} fresh signals), finds +{} joined {}, unresolved {}, hidden {}, remaining {}",
             dig.id, report.processed, report.cached_signals, report.fresh_signals, report.finds_created, report.finds_joined, report.unresolved, report.hidden, report.remaining);
         self.events.emit_summary();
         Ok(report)
+    }
+
+    /// One Activity per (Mesh version, disposition) group of a pass (§47).
+    /// Bookkeeping: a failure here is logged and never fails the pass.
+    fn record_sift_activity(&self, dig: &Dig, groups: SiftGroups) {
+        let index = self.stores.index();
+        for ((mesh_id, version, mesh_name, kind), (ids, cached, fresh, trace)) in groups {
+            if ids.is_empty() {
+                continue;
+            }
+            let n = ids.len();
+            let verb = match kind.as_str() {
+                "spoil" => format!("Sift moved {n} messages to Spoil"),
+                "contamination" => format!("Sift marked {n} messages as Contamination"),
+                "filed" => format!("Sift filed {n} messages"),
+                "find" => format!("Sift surfaced {n} messages as Finds"),
+                _ => format!("Sift left {n} messages Unresolved"),
+            };
+            let note = match (cached, fresh) {
+                (0, 0) => "No Signals were needed.".to_string(),
+                (c, 0) => format!("{c} matched on cached Signals."),
+                (0, f) => format!("{f} needed a fresh evaluation."),
+                (c, f) => format!("{c} matched on cached Signals. {f} needed a fresh evaluation."),
+            };
+            let hides = matches!(kind.as_str(), "spoil" | "contamination" | "filed");
+            let activity = Activity {
+                id: ActivityId::new(),
+                actor: Actor::Sift,
+                action: "sift_classify".into(),
+                summary: verb,
+                why: Some(if mesh_id.is_empty() {
+                    format!("Decided by {mesh_name}")
+                } else {
+                    format!("Triggered by Mesh: {mesh_name} v{version}")
+                }),
+                inputs: serde_json::json!({ "digId": dig.id, "count": n, "cached": cached, "fresh": fresh }),
+                affected: ids
+                    .iter()
+                    .map(|i| EntityRef::new(EntityKind::Message, i))
+                    .collect(),
+                result: ActivityResult::Ok,
+                provenance: Some(Provenance {
+                    mechanism: if mesh_id.is_empty() {
+                        DecisionMechanism::Deterministic
+                    } else {
+                        DecisionMechanism::Mesh
+                    },
+                    mesh_id: if mesh_id.is_empty() {
+                        None
+                    } else {
+                        Some(MeshId::from(mesh_id.as_str()))
+                    },
+                    mesh_version: if version == 0 { None } else { Some(version) },
+                    mesh_name: Some(mesh_name.clone()),
+                    trace_id: trace.clone(),
+                    note: Some(note),
+                }),
+                undo: if hides {
+                    UndoInfo::Undoable {
+                        restore: serde_json::json!({ "digId": dig.id, "messageIds": ids }),
+                        label: if n > 1 {
+                            "Undo All".into()
+                        } else {
+                            "Undo".into()
+                        },
+                    }
+                } else {
+                    UndoInfo::NotUndoable {
+                        reason: "nothing was hidden".into(),
+                    }
+                },
+                dig_id: Some(dig.id.clone()),
+                trace_id: trace,
+                undoes: None,
+                created_at: self.services.clock.now(),
+            };
+            match repo::activities::append(&index, &activity) {
+                Ok(()) => self.events.emit(RiddleEvent::ActivityAppended { activity }),
+                Err(e) => rwarn!(Category::Sift, "sift activity not recorded: {e}"),
+            }
+        }
     }
 
     /// One sync cycle for a Dig through its provider.

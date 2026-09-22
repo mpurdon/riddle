@@ -36,3 +36,4 @@ the estimate applied.
 | 19 | feat: bridge transport in the client, Playwright against the real core, contract reconciliation, Director on Sonnet 4.5 | 13 | 24935 | 18341000 | 30 | 0 |
 | 20 | style: rustfmt across the workspace; compat test expects the Sonnet 4.5 default | 4 | 1651 | 3211093 | 5 | 0 |
 | 21 | feat: add_fixture_dig honours privacy; Mesh simulation preview verified against real history; README status and build plan updated | 6 | 9049 | 6511520 | 10 | 0 |
+| 22 | feat: Sift Activity with provenance and Undo All; export/import Meshes, unsubscribe, compare_signal_versions; non-incremental builds | 12 | 24900 | 17635692 | 26 | 0 |

@@ -44,7 +44,10 @@ fn a_minimal_v1_file_loads_with_defaults_for_every_later_field() {
         Some("/riddle/jev_api_key"),
         "a missing nested key takes its default"
     );
-    assert_eq!(s.llm.director_model, "us.anthropic.claude-sonnet-4-5-20250929-v1:0");
+    assert_eq!(
+        s.llm.director_model,
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    );
     assert_eq!(s.budgets.daily_llm_usd, 5.0);
     assert_eq!(s.autonomy.default, Autonomy::Suggest);
     assert!(s.close_to_hide);

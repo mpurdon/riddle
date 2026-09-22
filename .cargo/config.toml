@@ -1,3 +1,9 @@
 [env]
 # ts-rs writes generated TypeScript here; `cargo test -p riddle-core` regenerates.
 TS_RS_EXPORT_DIR = { value = "apps/desktop/src/bindings", relative = true }
+
+[build]
+# Incremental caches for 30 crates and their test targets reached 10 GB and
+# filled the disk twice during the first build; full rebuilds are cheap
+# enough with dependency debuginfo off.
+incremental = false

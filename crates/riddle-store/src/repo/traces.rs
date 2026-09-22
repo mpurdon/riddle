@@ -51,6 +51,7 @@ pub fn recent(store: &Store, limit: u32) -> Result<Vec<DecisionTrace>> {
 
 /// Aggregates for the Performance and Cost Observatories (§84, §87).
 #[derive(Debug, Clone, serde::Serialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct TraceStats {
     pub count: u64,
     pub escalated: u64,

@@ -4380,6 +4380,7 @@ dependencies = [
  "dirs",
  "log",
  "parking_lot",
+ "reqwest 0.12.28",
  "riddle-actions",
  "riddle-activity",
  "riddle-agent",
