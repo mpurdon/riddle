@@ -147,8 +147,32 @@ impl Clock for FixedClock {
 /// A tiny mutex wrapper so core does not pull in parking_lot for one field.
 pub mod parking_lot_lite {
     pub struct Mutex<T>(std::sync::Mutex<T>);
+    impl<T: Default> Default for Mutex<T> {
+        fn default() -> Self { Self(std::sync::Mutex::new(T::default())) }
+    }
     impl<T> Mutex<T> {
         pub fn new(t: T) -> Self { Self(std::sync::Mutex::new(t)) }
         pub fn lock(&self) -> std::sync::MutexGuard<'_, T> { self.0.lock().unwrap_or_else(|e| e.into_inner()) }
     }
+}
+
+/// Where domain code publishes events for the UI (§7). Emitting never fails
+/// the work: a sink that cannot deliver drops the event.
+pub trait EventSink: Send + Sync {
+    fn emit(&self, event: crate::api::RiddleEvent);
+}
+
+pub struct NullSink;
+impl EventSink for NullSink {
+    fn emit(&self, _event: crate::api::RiddleEvent) {}
+}
+
+/// A sink that keeps events for tests.
+#[derive(Default)]
+pub struct RecordingSink(pub parking_lot_lite::Mutex<Vec<crate::api::RiddleEvent>>);
+impl EventSink for RecordingSink {
+    fn emit(&self, event: crate::api::RiddleEvent) { self.0.lock().push(event); }
+}
+impl RecordingSink {
+    pub fn take(&self) -> Vec<crate::api::RiddleEvent> { std::mem::take(&mut *self.0.lock()) }
 }

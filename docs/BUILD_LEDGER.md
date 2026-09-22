@@ -10,3 +10,4 @@ appended at the end of the build.
 |---|---|---|---|---|---|---|
 | c056823 | chore: repository skeleton, build ledger and agent rules | 12 | 22885 | 3298128 | 34 | 0 |
 | 4a4a812 | feat(core): domain model, typed errors, store and observability foundation | 19 | 104390 | 4908615 | 24 | 0 |
+| 6f640cd | feat(desktop): Tauri shell, instrumented IPC, developer commands, Action runtime | 12 | 34420 | 6202961 | 22 | 0 |

@@ -5,10 +5,11 @@ use crate::ids::{ActivityId, ConversationId, DigId};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum Autonomy {
+    #[default]
     Observe,
     Suggest,
     Act,

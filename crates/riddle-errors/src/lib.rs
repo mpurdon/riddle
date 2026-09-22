@@ -14,7 +14,7 @@ use ts_rs::TS;
 /// The error kinds. Serialized in snake_case so the webview switches on them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../../apps/desktop/src/bindings/")]
+#[ts(export)]
 pub enum ErrorKind {
     /// Sign in. The provider rejected or has no credential.
     ProviderAuth,
@@ -84,7 +84,7 @@ impl ErrorKind {
 /// `{kind, message, detail}`; see `ARCHITECTURE.md` §8.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, thiserror::Error)]
 #[error("{kind:?}: {message}")]
-#[ts(export, export_to = "../../../apps/desktop/src/bindings/")]
+#[ts(export)]
 pub struct RiddleError {
     pub kind: ErrorKind,
     pub message: String,
