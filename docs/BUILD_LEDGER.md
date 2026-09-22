@@ -24,3 +24,4 @@ the estimate applied.
 | b39b6f9 | feat(cli,mcp): riddle CLI twin and MCP stdio server over the shared core | 6 | 15284 | 8769678 | 36 | 5 |
 | 7cc3994 | chore(ledger): estimate subagent output tokens from content; document the caveat | 1 | 5214 | 1925402 | 6 | 1 |
 | bb5d421 | feat(app): command router and loopback dev bridge (HTTP + SSE) for automation; riddle bridge; tray, close-to-hide, focus refresh | 12 | 122946 | 15869692 | 54 | 5 |
+| af9c49d | feat(ai): LLM boundary on Bedrock, escalation refiner, Director tool loop, Expeditions, privacy | 13 | 174353 | 27179661 | 81 | 5 |

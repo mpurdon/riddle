@@ -8,6 +8,19 @@ license.workspace = true
 riddle-errors.workspace = true
 riddle-core.workspace = true
 riddle-observability.workspace = true
+riddle-privacy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+parking_lot.workspace = true
+aws-config.workspace = true
+aws-sdk-bedrockruntime.workspace = true
+aws-smithy-types = "1"
+aws-smithy-runtime-api = "1"
+
+[dev-dependencies]
+tempfile.workspace = true

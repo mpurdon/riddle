@@ -4409,12 +4409,17 @@ dependencies = [
 name = "riddle-context"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "log",
+ "regex",
  "riddle-core",
  "riddle-errors",
+ "riddle-mail",
  "riddle-observability",
+ "riddle-store",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4496,10 +4501,13 @@ dependencies = [
 name = "riddle-embeddings"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "log",
  "riddle-core",
  "riddle-errors",
+ "riddle-mail",
  "riddle-observability",
+ "riddle-store",
  "serde",
  "serde_json",
 ]
@@ -4518,24 +4526,40 @@ dependencies = [
 name = "riddle-expeditions"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "log",
+ "parking_lot",
+ "riddle-actions",
+ "riddle-agent",
+ "riddle-ai",
  "riddle-core",
  "riddle-errors",
  "riddle-observability",
+ "riddle-privacy",
+ "riddle-store",
  "serde",
  "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
 name = "riddle-finds"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "log",
+ "riddle-actions",
  "riddle-core",
  "riddle-errors",
  "riddle-observability",
+ "riddle-store",
  "serde",
  "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -4664,12 +4688,16 @@ dependencies = [
 name = "riddle-people"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "log",
  "riddle-core",
  "riddle-errors",
+ "riddle-mail",
  "riddle-observability",
+ "riddle-store",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4709,10 +4737,12 @@ dependencies = [
 name = "riddle-scheduler"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "log",
  "riddle-core",
  "riddle-errors",
  "riddle-observability",
+ "riddle-store",
  "serde",
  "serde_json",
 ]
@@ -4721,10 +4751,13 @@ dependencies = [
 name = "riddle-search"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "log",
  "riddle-core",
  "riddle-errors",
+ "riddle-mail",
  "riddle-observability",
+ "riddle-store",
  "serde",
  "serde_json",
 ]
@@ -4754,12 +4787,23 @@ dependencies = [
 name = "riddle-sift"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "log",
+ "regex",
+ "riddle-actions",
  "riddle-core",
  "riddle-errors",
+ "riddle-finds",
+ "riddle-judge",
+ "riddle-mesh",
  "riddle-observability",
+ "riddle-signals",
+ "riddle-store",
  "serde",
  "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -4806,12 +4850,22 @@ dependencies = [
 name = "riddle-sync"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "log",
+ "parking_lot",
+ "riddle-actions",
+ "riddle-context",
  "riddle-core",
  "riddle-errors",
+ "riddle-mail",
  "riddle-observability",
+ "riddle-people",
+ "riddle-projection",
+ "riddle-store",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

@@ -3,6 +3,7 @@
 
 pub mod activities;
 pub mod classifications;
+pub mod conversations;
 pub mod corrections;
 pub mod digs;
 pub mod drafts;
