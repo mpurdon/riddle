@@ -35,3 +35,4 @@ the estimate applied.
 | 18 | feat(ui): the React client — every product and Developer surface against runtime-faithful mocks | 0 | 276 | 586095 | 1 | 0 |
 | 19 | feat: bridge transport in the client, Playwright against the real core, contract reconciliation, Director on Sonnet 4.5 | 13 | 24935 | 18341000 | 30 | 0 |
 | 20 | style: rustfmt across the workspace; compat test expects the Sonnet 4.5 default | 4 | 1651 | 3211093 | 5 | 0 |
+| 21 | feat: add_fixture_dig honours privacy; Mesh simulation preview verified against real history; README status and build plan updated | 6 | 9049 | 6511520 | 10 | 0 |

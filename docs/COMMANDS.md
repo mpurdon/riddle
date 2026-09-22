@@ -51,7 +51,7 @@ cancel_expedition       { expeditionId }
 add_never_hidden        { entry }                 remove_never_hidden { entry }
 save_user_profile       { profile: UserProfile }
 save_settings           { settings: Settings }
-add_fixture_dig         { name, email, seed?, count? }
+add_fixture_dig         { name, email, seed?, count?, group?, privacy?, projection? }
 remove_dig              { digId }
 update_dig              { dig: Dig }
 save_dig_group          { group: DigGroup }

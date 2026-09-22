@@ -2,7 +2,9 @@
 
 > **An agent-native email client that sifts through the noise and surfaces what matters.**
 
-**Status:** design stage. See `ARCHITECTURE.md` for the technical design, `ARCHITECTURE-REVIEW.md` for the open review, and `APPLICATION_FEATURES.md` for the desktop conventions this project follows.
+**Status:** first build (v0.1.0, 2026-09-22): the Rust core, the Tauri desktop client, a CLI twin and an MCP server exist and run end to end on a synthetic Fixture Dig with Jev judging and Bedrock escalating. Gmail is built but waits for an OAuth client id. See `ARCHITECTURE.md` for the technical design, `ARCHITECTURE-REVIEW.md` for the review, `APPLICATION_FEATURES.md` for the desktop conventions this project follows, `docs/BUILD_PLAN.md` for what was built and what is deferred, and `docs/BUILD_LEDGER.md` for what the build cost.
+
+**Run it:** `cd apps/desktop && pnpm install && pnpm tauri dev` (the dev build uses its own data directory and starts unarmed). Headless: `cargo run -p riddle-cli -- serve` then open `http://127.0.0.1:1430/?bridge=<port>:<token>` from `pnpm dev`, or drive it with `scripts/bridge.py`. Offline, no spend: `riddle serve --offline`.
 
 ## Product Vision
 

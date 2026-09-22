@@ -394,7 +394,7 @@ impl Action for AddFixtureDig {
             email: email.to_lowercase(),
             provider: ProviderKind::Fixture,
             group: opt(&args, "group")?,
-            privacy: PrivacyMode::CloudJudgment,
+            privacy: opt(&args, "privacy")?.unwrap_or(PrivacyMode::CloudJudgment),
             projection: opt(&args, "projection")?.unwrap_or_default(),
             status: DigStatus::NotConnected,
             shadow_started_at: None,

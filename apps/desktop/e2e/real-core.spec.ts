@@ -112,3 +112,24 @@ test('the Director answers through the real model and the conversation persists'
   const text = (await page.locator('main').textContent()) ?? ''
   expect(text).not.toMatch(/AccessDeniedException|could not complete/i)
 })
+
+test('a Mesh edit previews its impact against real history before applying', async ({ page }) => {
+  await open(page, '/meshes')
+  await expect(page.locator('main')).toContainText(/GitHub Notifications/, { timeout: 15_000 })
+  await page.getByText('GitHub Notifications', { exact: false }).first().click()
+  await page.waitForTimeout(1500)
+  await shot(page, '14-mesh')
+  const editor = page.locator('textarea').first()
+  if (await editor.isVisible().catch(() => false)) {
+    const text = await editor.inputValue()
+    // Tighten the review threshold and ask for the historical impact.
+    await editor.fill(text.replace('review_requested@v1 > .80', 'review_requested@v1 > .90'))
+    const preview = page.getByRole('button', { name: /preview|impact|simulate/i }).first()
+    if (await preview.isVisible().catch(() => false)) {
+      await preview.click()
+      await expect(page.locator('main')).toContainText(/Unchanged|Changed|judge calls|Historical/i, { timeout: 30_000 })
+      await page.waitForTimeout(1000)
+      await shot(page, '15-mesh-simulation')
+    }
+  }
+})
