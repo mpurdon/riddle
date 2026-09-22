@@ -8,6 +8,11 @@ license.workspace = true
 riddle-errors.workspace = true
 riddle-core.workspace = true
 riddle-observability.workspace = true
+riddle-store.workspace = true
+riddle-actions.workspace = true
+riddle-app.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
+tokio = { workspace = true, features = ["io-std", "io-util"] }
+chrono.workspace = true

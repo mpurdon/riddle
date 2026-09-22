@@ -7,6 +7,7 @@
 //! commands call; `events` is the broadcast sink clients subscribe to.
 
 pub mod assemble;
+pub mod paths;
 pub mod events;
 pub mod reads;
 

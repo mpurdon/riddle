@@ -4,10 +4,22 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "riddle"
+path = "src/main.rs"
+
 [dependencies]
 riddle-errors.workspace = true
 riddle-core.workspace = true
 riddle-observability.workspace = true
+riddle-store.workspace = true
+riddle-actions.workspace = true
+riddle-app.workspace = true
+riddle-mcp = { path = "../riddle-mcp" }
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
+tokio.workspace = true
+clap.workspace = true
+chrono.workspace = true
+env_logger = "0.11"

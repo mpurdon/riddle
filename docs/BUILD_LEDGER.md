@@ -14,3 +14,4 @@ appended at the end of the build.
 | 3c0df07 | docs: build plan, IPC command spec, Conversation types and Director events | 4 | 13582 | 920256 | 3 | 0 |
 | 134d54f | chore: CI and release workflows, version check, contributing, security, changelog, troubleshooting | 9 | 37737 | 17428112 | 153 | 5 |
 | 9182960 | feat(app): riddle-app headless core with read services, event bridge, read commands and invoke_action | 6 | 18165 | 11199671 | 60 | 5 |
+| b39b6f9 | feat(cli,mcp): riddle CLI twin and MCP stdio server over the shared core | 6 | 15284 | 8769678 | 36 | 5 |
