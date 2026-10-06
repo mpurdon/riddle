@@ -1,8 +1,8 @@
 id = "reading-social"
 name = "Reading and social"
-version = 2
+version = 3
 area = "Reading"
-summary = "Newsletters you do not read are set aside; social network mail, crowdfunding updates and entertainment are Filed under their own Strata; daily reminders on a schedule become a Find that lasts the day."
+summary = "Newsletters you do not read are set aside; posts from communities you belong to and creators you back are kept under their own Strata; social network mail, crowdfunding updates and entertainment are Filed under their own Strata; daily reminders on a schedule become a Find that lasts the day."
 band = "general"
 
 [detect]
@@ -14,6 +14,12 @@ name = "social_platforms"
 description = "Social networks"
 question = "Which social networks email you?"
 default = ["linkedin.com", "nextdoor.com", "pinterest.com", "instagram.com", "facebookmail.com", "x.com", "twitter.com", "redditmail.com", "tiktok.com", "discord.com", "bsky.app", "threads.net"]
+
+[[lists]]
+name = "communities"
+description = "Groups you belong to that email you"
+question = "Which groups email you (a residents' association, a club, a church list)? Nextdoor, Facebook groups, Google Groups, groups.io and Meetup are known already."
+default = []
 
 [[lists]]
 name = "crowdfunding"
@@ -55,6 +61,24 @@ IF automated_sender AND newsletter@v1 > .60 AND personally_relevant@v1 < .40
     → Spoil + Stratum: Newsletters
 ELSE IF automated_sender AND marketing@v1 > .60 AND personally_relevant@v1 < .40
     → Spoil + Stratum: Newsletters
+'''
+
+# v3: before Payments and Social. A community's posts are neither a
+# social network's notices nor marketing, and money talk in a neighbour's
+# post ("Jon owes me $2500") is not a bill.
+[[meshes]]
+rank = 4
+text = '''
+Mesh: Community
+Scope:
+All Digs
+
+ROUTES
+
+IF community_platform = creator
+    → Filed + Stratum: Creators
+ELSE IF from_community OR sender IN list:communities
+    → Filed + Stratum: Community
 '''
 
 # Before the promotion rules: a social network's mail is Social whichever

@@ -526,6 +526,10 @@ fn bool_words(fact: &str, holds: bool) -> String {
             "it is unsolicited mail from a stranger's free mailbox",
             "it is not unsolicited mail from a stranger",
         ),
+        "from_community" => (
+            "it comes from a community you belong to",
+            "it does not come from a community",
+        ),
         "payment_failed" => ("a payment did not go through", "no payment failed"),
         "payment_recovered" => (
             "a payment went through on a backup method",
@@ -565,6 +569,7 @@ fn subject_words(fact: &str) -> String {
         "github_event" => "what happened on GitHub".into(),
         "list_id" => "the mailing list".into(),
         "verification_code" => "the sign-in code".into(),
+        "community_platform" => "the community".into(),
         "language" => "the language".into(),
         "thread_length" => "the thread length".into(),
         "deadline_days" => "the deadline".into(),

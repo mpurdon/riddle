@@ -131,6 +131,11 @@ pub struct Facts {
     /// failed (`riddle_sift::facts::payment_recovered`).
     #[serde(default)]
     pub payment_recovered: bool,
+    /// The community a post comes from (`nextdoor`, `facebook_group`,
+    /// `google_group`, `groups_io`, `meetup`, `creator`), empty otherwise
+    /// (`riddle_sift::facts::community_platform`).
+    #[serde(default)]
+    pub community_platform: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -215,6 +220,11 @@ impl Facts {
             "has_verification_code" => Bool(!self.verification_code.is_empty()),
             "payment_failed" => Bool(self.payment_failed),
             "payment_recovered" => Bool(self.payment_recovered),
+            "community_platform" => Text(self.community_platform.clone()),
+            // A group the user belongs to; a creator they back is not one.
+            "from_community" => {
+                Bool(!self.community_platform.is_empty() && self.community_platform != "creator")
+            }
             "automated_sender" => Bool(
                 self.mailing_list
                     || self.precedence_bulk
@@ -276,6 +286,8 @@ impl Facts {
         "has_verification_code",
         "payment_failed",
         "payment_recovered",
+        "community_platform",
+        "from_community",
         "automated_sender",
         "known_sender",
     ];

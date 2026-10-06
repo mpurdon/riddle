@@ -1428,6 +1428,7 @@ export function buildFacts(s: MessageSpec, from: Address): Facts {
     verificationCode: '',
     paymentFailed: false,
     paymentRecovered: false,
+    communityPlatform: '',
     senderInContacts: false,
     senderRepliedToBefore: false,
     firstTimeSender: false,

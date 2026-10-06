@@ -26,7 +26,7 @@
 //! v10 adds `suspicious_domain`. v11 adds `verification_code`. v12 adds
 //! `payment_failed` and `payment_recovered`, and recomputes
 //! `lookalike_domain`, which had flagged amazonaws.com as imitating Amazon
-//! and hidden genuine AWS past-due notices.
+//! and hidden genuine AWS past-due notices. v13 adds `community_platform`.
 
 use crate::App;
 use riddle_core::DigId;
@@ -34,7 +34,7 @@ use riddle_errors::Result;
 use riddle_store::repo;
 
 /// The `once_per_dig` key. Renamed when the set of refreshed fields widens.
-const KEY: &str = "message_facts_v12";
+const KEY: &str = "message_facts_v13";
 
 impl App {
     /// Refresh the message-derived facts of every message in this Dig that

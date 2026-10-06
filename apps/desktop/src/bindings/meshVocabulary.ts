@@ -51,6 +51,8 @@ export const MESH_FACTS = [
   { name: 'has_verification_code', kind: 'bool' },
   { name: 'payment_failed', kind: 'bool' },
   { name: 'payment_recovered', kind: 'bool' },
+  { name: 'community_platform', kind: 'text' },
+  { name: 'from_community', kind: 'bool' },
   { name: 'automated_sender', kind: 'bool' },
   { name: 'known_sender', kind: 'bool' },
 ] as const;

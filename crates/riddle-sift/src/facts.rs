@@ -208,6 +208,48 @@ fn embedded_as_word(label: &str, t: &str) -> bool {
     })
 }
 
+/// The community a message comes from, when it is a post or an update from
+/// a group the user belongs to rather than a platform's own marketing:
+/// `nextdoor`, `facebook_group`, `google_group`, `groups_io`, `meetup`, or
+/// `creator` for posts from creators the user backs on Patreon; empty
+/// otherwise. On one mailbox Nextdoor's neighbourhood posts were filed with
+/// LinkedIn and Pinterest, two were made Pay Finds ("Jon owes me $2500"),
+/// and Patreon posts were spoiled as promotions. A platform's own mail is
+/// not a community: Nextdoor markets from `ms.` hosts, Patreon from
+/// `updates.patreon.com`.
+pub fn community_platform(
+    sender: &str,
+    sender_name: &str,
+    sender_domain: &str,
+    list_id: &str,
+) -> String {
+    let domain = sender_domain.to_ascii_lowercase();
+    let local = sender.split('@').next().unwrap_or("").to_ascii_lowercase();
+    let name = sender_name.trim();
+    let platform = if is_or_under(&domain, "nextdoor.com") || is_or_under(&domain, "nextdoor.ca") {
+        (!domain.split('.').any(|p| p == "ms")).then_some("nextdoor")
+    } else if domain == "facebookmail.com" {
+        // A group's notifications carry the group's name ("Lakeview
+        // Residents"); Facebook's own carry "Facebook".
+        (local.starts_with("groupupdates")
+            || (local == "notification"
+                && !name.is_empty()
+                && !name.eq_ignore_ascii_case("facebook")))
+        .then_some("facebook_group")
+    } else if list_id.ends_with("googlegroups.com") {
+        Some("google_group")
+    } else if list_id.ends_with("groups.io") || is_or_under(&domain, "groups.io") {
+        Some("groups_io")
+    } else if is_or_under(&domain, "meetup.com") {
+        Some("meetup")
+    } else if is_or_under(&domain, "creator.patreon.com") || domain == "info.patreon.com" {
+        Some("creator")
+    } else {
+        None
+    };
+    platform.unwrap_or_default().to_string()
+}
+
 /// A payment that did not go through: failed, declined, unsuccessful, or a
 /// request for a different card. It reads the subject and the start of the
 /// body, and a subject that says the payment succeeded wins, so "Payment
@@ -712,6 +754,16 @@ pub fn refresh_from_message(facts: &mut Facts, m: &Message, derived: Derived<'_>
     set(
         &mut facts.payment_recovered,
         payment_recovered(&m.subject, body),
+        &mut changed,
+    );
+    set(
+        &mut facts.community_platform,
+        community_platform(
+            &facts.sender,
+            &facts.sender_name,
+            &facts.sender_domain,
+            &facts.list_id,
+        ),
         &mut changed,
     );
     let lookalike = is_lookalike(&facts.sender_domain, derived.organisation_domains);
@@ -1587,6 +1639,30 @@ mod tests {
         assert!(!is_lookalike("stripedseed.ca", &own));
         assert!(is_lookalike("secure-amazon.com", &own));
         assert!(is_lookalike("amazon-billing.net", &own));
+    }
+
+    #[test]
+    fn community_posts_are_told_from_the_platforms_own_mail() {
+        let c = |sender: &str, name: &str, list: &str| {
+            let domain = sender.rsplit('@').next().unwrap();
+            community_platform(sender, name, domain, list)
+        };
+        assert_eq!(c("no-reply@is.ca.nextdoor.com", "Nextdoor", ""), "nextdoor");
+        assert_eq!(c("reply@rs.ca.nextdoor.com", "", ""), "nextdoor");
+        assert_eq!(c("no-reply@ms.email.nextdoor.com", "Nextdoor", ""), "");
+        assert_eq!(
+            c("notification@facebookmail.com", "Lakeview Residents", ""),
+            "facebook_group"
+        );
+        assert_eq!(c("notification@facebookmail.com", "Facebook", ""), "");
+        assert_eq!(
+            c("someone@gmail.com", "", "hoa.googlegroups.com"),
+            "google_group"
+        );
+        assert_eq!(c("info@meetup.com", "Meetup", ""), "meetup");
+        assert_eq!(c("garandthumb@creator.patreon.com", "", ""), "creator");
+        assert_eq!(c("no-reply@updates.patreon.com", "", ""), "");
+        assert_eq!(c("meetup@taxamo.com", "", ""), "");
     }
 
     #[test]

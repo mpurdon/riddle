@@ -117,4 +117,10 @@ paymentFailed: boolean,
  * A payment that went through on a backup method after the main one
  * failed (`riddle_sift::facts::payment_recovered`).
  */
-paymentRecovered: boolean, };
+paymentRecovered: boolean, 
+/**
+ * The community a post comes from (`nextdoor`, `facebook_group`,
+ * `google_group`, `groups_io`, `meetup`, `creator`), empty otherwise
+ * (`riddle_sift::facts::community_platform`).
+ */
+communityPlatform: string, };

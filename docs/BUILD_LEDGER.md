@@ -84,3 +84,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 - The escalation tail dominates, as ARCHITECTURE.md §18 predicted: the judge cost per message is two orders of magnitude below one LLM refinement.
 
 | 27 | feat: rule packs, importance, sign-in codes, failed payments, Hold/Ask/Allow mailbox writes | 19961 | 3937814 | 1489649746 | 4134 | 56 |
+| 28 | feat: Community and Creators, ahead of Payments and Social | 92 | 18892 | 11793370 | 23 | 0 |
