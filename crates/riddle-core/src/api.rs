@@ -1,12 +1,14 @@
 //! Types that exist for the clients: paging, the morning summary, the "Why?"
 //! explanation, and the event stream the webview subscribes to.
 
+use crate::action::Autonomy;
 use crate::activity::Activity;
 use crate::classification::{DecisionMechanism, Disposition};
-use crate::dig::DigStatus;
+use crate::dig::{DigStatus, ProjectionMode};
 use crate::find::Find;
-use crate::ids::{DigId, FindId, JobId, MessageId, TraceId};
+use crate::ids::{DigId, FindId, JobId, MeshId, MessageId, TraceId};
 use crate::job::Job;
+use crate::mesh::MeshStatus;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -121,6 +123,77 @@ pub struct Explanation {
     pub trace_id: TraceId,
     pub shadow: bool,
     pub reason: String,
+    /// The deciding Mesh's routes in order, replayed against this message:
+    /// each condition with its actual value and result, and where the chain
+    /// stopped. Empty when no Mesh decided (a gate, a user decision).
+    #[serde(default)]
+    pub routes: Vec<RouteCheck>,
+    /// The message's level: the user's own when they set one, otherwise
+    /// the decision's.
+    #[serde(default)]
+    pub importance: crate::importance::Importance,
+    /// True when `importance` is the user's own setting.
+    #[serde(default)]
+    pub importance_set_by_you: bool,
+    /// The one-time sign-in code the message carries, to copy.
+    #[serde(default)]
+    #[ts(optional)]
+    pub verification_code: Option<String>,
+}
+
+/// One route of a Mesh, checked against one message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RouteCheck {
+    /// The `WHEN` condition the route sits under, as a checked clause.
+    pub when: Option<ClauseCheck>,
+    /// The route's own conditions, split on AND.
+    pub clauses: Vec<ClauseCheck>,
+    /// What the route decides, e.g. `Find: Review + Stratum: Engineering`.
+    pub output: String,
+    pub outcome: RouteOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ClauseCheck {
+    /// The condition as written, e.g. `review_requested@v1 > .80`.
+    pub text: String,
+    /// The message's value, e.g. `0.16` or `github.com`; `None` when a
+    /// Signal was not scored for this message.
+    pub actual: Option<String>,
+    pub result: ClauseResult,
+    /// The Signal the clause reads, as `name@vN`, so a client can tell
+    /// which scores the routes used without parsing `text`. `None` for a
+    /// fact or list clause, or one that reads several Signals.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub signal: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ClauseResult {
+    Pass,
+    Fail,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RouteOutcome {
+    /// This route decided the message.
+    Matched,
+    /// Checked and did not match.
+    NoMatch,
+    /// A Signal it needs was not scored, so the chain stopped here.
+    Unknown,
+    /// Not checked: an earlier route decided or stopped the chain.
+    NotReached,
 }
 
 /// Events emitted to the webview. They carry signals, not volume: a client
@@ -171,6 +244,13 @@ pub enum RiddleEvent {
         body: String,
         find_id: Option<FindId>,
     },
+    /// A Gmail sign-in (new account or sign in again) finished. Typed, so
+    /// the UI waits on the Dig id rather than matching a toast title.
+    GmailSignIn {
+        dig_id: DigId,
+        connected: bool,
+        message: Option<String>,
+    },
     UpdateAvailable {
         version: String,
     },
@@ -208,4 +288,57 @@ pub enum RiddleEvent {
 
 impl RiddleEvent {
     pub const NAME: &'static str = "riddle://event";
+}
+
+/// One rule's record: how often it decided, how often the user reversed it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RulePrecision {
+    pub mesh_id: MeshId,
+    pub name: String,
+    pub version: u32,
+    pub status: MeshStatus,
+    pub decisions: u64,
+    pub reversed: u64,
+    pub shadow_proposed: u32,
+    pub shadow_agreed: u32,
+    /// The demotion rule's verdict, from the same numbers the engine uses.
+    pub reversed_often: bool,
+}
+
+/// The seducible moment (Flow 7): one account whose last Spoil calls all
+/// stood, offered as a reason to let Riddle act there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TrustOffer {
+    pub dig_id: DigId,
+    pub dig_name: String,
+    /// Consecutive Sift Spoil decisions on that account without a correction.
+    pub spoil_calls: u64,
+    pub projection: ProjectionMode,
+    pub autonomy: Autonomy,
+}
+
+/// Evidence for the trust card: what Riddle decided in the window, how much
+/// the user reversed or undid, what it would have archived had it been at
+/// Act, and each rule's precision. All of it is computed locally from the
+/// stores; none of it is a survey.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TrustStats {
+    pub since: DateTime<Utc>,
+    pub dig_count: u32,
+    /// Sift decisions (not the user's own, not Shadow proposals).
+    pub decisions: u64,
+    /// Corrections the user made in the window that still stand.
+    pub corrected: u64,
+    /// Activity entries in the window the user undid.
+    pub undone: u64,
+    /// Spoil decisions held below Act on accounts that would archive.
+    pub would_archive: u64,
+    pub rules: Vec<RulePrecision>,
+    pub offer: Option<TrustOffer>,
 }

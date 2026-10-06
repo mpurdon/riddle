@@ -116,10 +116,23 @@ export function fmtDue(iso: string | null | undefined, now: Date = new Date()): 
   if (!iso) return null
   const d = new Date(iso)
   const days = Math.round((d.getTime() - now.getTime()) / 86_400_000)
-  if (days < 0) return `overdue by ${-days} day${days === -1 ? '' : 's'}`
+  if (days < 0) return `overdue by ${plural(-days, 'day')}`
   if (days === 0) return 'due today'
   if (days === 1) return 'due tomorrow'
   return `due in ${days} days`
+}
+
+/** When a follow-up is due, in the reader's own days: "6:00 PM today", "tomorrow", "Tuesday", "Sep 30". */
+export function fmtBy(iso: string, now: Date = new Date()): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const days = Math.round((day(d) - day(now)) / 86_400_000)
+  if (days <= 0) return `${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} today`
+  if (days === 1) return 'tomorrow'
+  if (days < 7) return d.toLocaleDateString([], { weekday: 'long' })
+  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return d.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 export function plural(n: Num, one: string, many = `${one}s`): string {
@@ -148,4 +161,13 @@ export function clamp(n: number, lo: number, hi: number): number {
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return twMerge(clsx(parts))
+}
+
+/** `Name <email>`, or the address alone when there is no name. */
+export function fmtAddress(a: { name?: string | null; email: string }): string {
+  return a.name ? `${a.name} <${a.email}>` : a.email
+}
+
+export function fmtAddresses(list: { name?: string | null; email: string }[]): string {
+  return list.map(fmtAddress).join(', ')
 }

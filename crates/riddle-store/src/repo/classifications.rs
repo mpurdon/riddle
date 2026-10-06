@@ -22,11 +22,12 @@ pub fn record_in(c: &rusqlite::Connection, k: &Classification) -> rusqlite::Resu
         _ => None,
     };
     c.execute(
-        "INSERT INTO classifications (id, message_id, disposition_kind, find_type, mesh_id, mesh_version, json, shadow, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO classifications (id, message_id, disposition_kind, find_type, mesh_id, mesh_version, json, shadow, created_at, series_key, importance)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             k.id.as_str(), k.message_id.as_str(), k.disposition.kind().as_str(), find_type,
-            k.mesh_id.as_ref().map(|m| m.as_str()), k.mesh_version, to_json(k)?, k.shadow as i64, ts(&k.created_at)
+            k.mesh_id.as_ref().map(|m| m.as_str()), k.mesh_version, to_json(k)?, k.shadow as i64, ts(&k.created_at),
+            k.series.as_deref(), k.importance.rank()
         ],
     )?;
     if !k.shadow {
@@ -42,6 +43,19 @@ pub fn record_in(c: &rusqlite::Connection, k: &Classification) -> rusqlite::Resu
         }
     }
     Ok(())
+}
+
+/// Retire every current decision Riddle made, not the user's, so the next
+/// Sift pass decides those messages again. Returns how many were retired.
+pub fn supersede_sift_decisions(store: &Store) -> Result<usize> {
+    store.write(|c| {
+        c.execute(
+            "UPDATE classifications SET superseded_at = ?1
+             WHERE shadow = 0 AND superseded_at IS NULL
+               AND json_extract(json, '$.mechanism') != 'user'",
+            params![crate::now_ts()],
+        )
+    })
 }
 
 pub fn current(store: &Store, id: &MessageId) -> Result<Option<Classification>> {
@@ -141,11 +155,55 @@ pub fn supersede_current(store: &Store, id: &MessageId) -> Result<Option<Classif
 
 /// Current non-shadow classifications created by a Mesh version, for
 /// simulation and undo previews.
+/// Every current decision a Mesh made on this Dig, for reading them again.
+pub fn current_mesh_decisions(store: &Store) -> Result<Vec<Classification>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT json FROM classifications WHERE mesh_id IS NOT NULL AND superseded_at IS NULL AND shadow = 0")?;
+        let rows = st
+            .query_map([], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
+        rows
+    })
+}
+
+/// Rewrite one classification in place (its reason, say). The row keeps its
+/// place in history; nothing is superseded.
+pub fn update(store: &Store, k: &Classification) -> Result<()> {
+    store.write(|c| {
+        c.execute(
+            "UPDATE classifications SET json = ?2, importance = ?3 WHERE id = ?1",
+            params![k.id.as_str(), to_json(k)?, k.importance.rank()],
+        )
+        .map(|_| ())
+    })
+}
+
 pub fn current_by_mesh(store: &Store, mesh_id: &str, version: u32) -> Result<Vec<Classification>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT json FROM classifications WHERE mesh_id = ?1 AND mesh_version = ?2 AND superseded_at IS NULL AND shadow = 0")?;
         let rows = st.query_map(params![mesh_id, version], |r| from_json(r.get::<_, String>(0)?))?.collect();
         rows
+    })
+}
+
+/// The newest current decisions a Mesh made (any version), for spot checks.
+pub fn recent_by_mesh(store: &Store, mesh_id: &str, limit: u32) -> Result<Vec<Classification>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT json FROM classifications WHERE mesh_id = ?1 AND superseded_at IS NULL AND shadow = 0 ORDER BY created_at DESC LIMIT ?2")?;
+        let rows = st.query_map(params![mesh_id, limit], |r| from_json(r.get::<_, String>(0)?))?.collect();
+        rows
+    })
+}
+
+/// How many current decisions a Mesh made (any version).
+pub fn count_by_mesh(store: &Store, mesh_id: &str) -> Result<u64> {
+    store.read(|c| {
+        c.query_row(
+            "SELECT count(*) FROM classifications WHERE mesh_id = ?1 AND superseded_at IS NULL AND shadow = 0",
+            [mesh_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n as u64)
     })
 }
 
@@ -165,5 +223,60 @@ pub fn rename_stratum(store: &Store, from: &str, to: &str) -> Result<u64> {
     store.write(|c| {
         c.execute("INSERT OR IGNORE INTO message_strata (message_id, stratum) SELECT message_id, ?2 FROM message_strata WHERE stratum = ?1", params![from, to])?;
         Ok(c.execute("DELETE FROM message_strata WHERE stratum = ?1", [from])? as u64)
+    })
+}
+
+/// Sift's decisions since a time (non-shadow, not the user's own): the total
+/// and how many were Spoil. Aggregated in SQL; the trust card asks every
+/// minute and must not parse every row to count them.
+pub fn sift_totals_since(
+    store: &Store,
+    after: &chrono::DateTime<chrono::Utc>,
+) -> Result<(u64, u64)> {
+    store.read(|c| {
+        c.query_row(
+            "SELECT count(*), coalesce(sum(disposition_kind = 'spoil'), 0) FROM classifications
+             WHERE created_at > ?1 AND shadow = 0 AND json_extract(json, '$.mechanism') != 'user'",
+            [ts(after)],
+            |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? as u64)),
+        )
+    })
+}
+
+/// Sift's decisions since a time, per deciding Mesh version.
+pub fn decisions_by_mesh_since(
+    store: &Store,
+    after: &chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<(String, u32, u64)>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT mesh_id, mesh_version, count(*) FROM classifications
+             WHERE created_at > ?1 AND shadow = 0 AND mesh_id IS NOT NULL AND json_extract(json, '$.mechanism') != 'user'
+             GROUP BY mesh_id, mesh_version",
+        )?;
+        let rows = st
+            .query_map([ts(after)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u32, r.get::<_, i64>(2)? as u64)))?
+            .collect();
+        rows
+    })
+}
+
+/// The message ids of Sift's latest decisions of one kind, newest first, for
+/// streaks such as "the last 40 Spoil calls".
+pub fn recent_sift_ids_of_kind(
+    store: &Store,
+    kind: DispositionKind,
+    limit: u32,
+) -> Result<Vec<MessageId>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT message_id FROM classifications
+             WHERE disposition_kind = ?1 AND shadow = 0 AND json_extract(json, '$.mechanism') != 'user'
+             ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        let rows = st
+            .query_map(params![kind.as_str(), limit], |r| Ok(MessageId(r.get::<_, String>(0)?)))?
+            .collect();
+        rows
     })
 }

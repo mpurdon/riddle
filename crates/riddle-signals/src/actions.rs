@@ -136,7 +136,7 @@ impl Action for TestSignal {
             .unwrap_or(50) as u32;
         let digs: Vec<DigId> = match &ctx.dig_id {
             Some(d) => vec![d.clone()],
-            None => repo::digs::list(&ctx.services.stores.index())?
+            None => repo::digs::list_enabled(&ctx.services.stores.index())?
                 .into_iter()
                 .map(|d| d.id)
                 .collect(),

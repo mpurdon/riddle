@@ -1,0 +1,49 @@
+id = "developer-github"
+name = "GitHub"
+version = 1
+area = "Developer"
+summary = "Reviews you were asked for personally, failed Actions runs, assignments and admin requests become Finds; team review requests and new pull requests are Filed; approvals, merges, bot comments and pushes are set aside."
+band = "specific"
+
+[detect]
+sender_domains = ["github.com"]
+min_messages = 10
+
+[[meshes]]
+rank = 10
+text = '''
+Mesh: GitHub Notifications
+Scope:
+All Digs
+
+ROUTES
+
+WHEN sender_domain CONTAINS "github.com"
+    IF sender != "notifications@github.com" AND (subject CONTAINS "requesting updated permissions" OR subject CONTAINS "Request to install" OR subject CONTAINS "Request to dismiss")
+        → Find: Do + Stratum: Engineering
+    ELSE IF sender != "notifications@github.com" AND (security_alert@v1 > .80 OR payment_related@v1 > .80 OR account_notification@v1 > .80)
+        → Find: Know + Stratum: Engineering
+    ELSE IF sender != "notifications@github.com"
+        → Spoil
+    ELSE IF github_event = review_requested_you
+        → Find: Review + Stratum: Engineering
+    ELSE IF github_event = run_failed
+        → Find: Do + Stratum: Engineering + Expires: 2d
+    ELSE IF github_event = changes_requested AND github_reason = author
+        → Find: Do + Stratum: Engineering
+    ELSE IF github_event = review_requested_team OR github_event = opened
+        → Filed + Stratum: Engineering
+    ELSE IF github_reason = assign
+        → Find: Do + Stratum: Engineering
+    ELSE IF github_reason = security_alert
+        → Find: Know + Stratum: Engineering
+    ELSE IF github_event = commented AND github_reason = author AND requires_response@v1 > .70
+        → Find: Respond + Stratum: Engineering
+    ELSE
+        → Spoil + Stratum: Engineering
+END
+
+GUARDS
+
+NEVER Spoil IF sender IN never_hidden
+'''

@@ -45,6 +45,28 @@ pub struct Turn {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cost_usd: Option<f64>,
+    /// Set on a Director turn that is an error, not an answer, so the client
+    /// can count down to a retry the provider named and offer one otherwise.
+    #[serde(default)]
+    #[ts(optional)]
+    pub failure: Option<TurnFailure>,
+    /// Set on a Director turn a limit cut short ("the turn's limit of 40
+    /// tool rounds is reached"), so the client can offer to continue.
+    #[serde(default)]
+    #[ts(optional)]
+    pub stopped_early: Option<String>,
+}
+
+/// Why a Director turn failed. `retry_after_secs` comes from the provider
+/// (a circuit breaker's wait, a rate limit's Retry-After) when there is one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TurnFailure {
+    /// The error taxonomy's kind (ARCHITECTURE.md §8), typed so the client
+    /// switches on it rather than on a string it has to keep in step.
+    pub kind: riddle_errors::ErrorKind,
+    pub retry_after_secs: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -61,4 +83,24 @@ pub struct Conversation {
     pub prompt_version: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// What the user allowed beyond a turn's usual limits by saying so
+    /// ("continue for 20", "keep going"); the Director reads it per turn.
+    #[serde(default)]
+    #[ts(optional)]
+    pub allowance: Option<ToolAllowance>,
+}
+
+/// Room the user gave the Director past its per-turn limits. The limits
+/// exist to stop a runaway turn, not to end useful work, so the person can
+/// lift them in words, and the Director parses those words without a model.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ToolAllowance {
+    /// No round limit until a new conversation; the cost limit still holds.
+    pub keep_going: bool,
+    /// The next turn only: this many tool calls.
+    pub next_turn_tool_calls: Option<u32>,
+    /// The next turn only: this cost limit in place of the usual one.
+    pub next_turn_cost_usd: Option<f64>,
 }

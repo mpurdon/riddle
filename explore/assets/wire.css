@@ -1,0 +1,74 @@
+/* Wireframe kit for the proposals page. Monochrome by design: ink on sand,
+   with ochre reserved for "what changed" so the eye lands on the proposal. */
+.wire { font-family: var(--ui); font-size: 11.5px; line-height: 1.3; color: var(--ink); background: var(--sand); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: grid; grid-template-rows: auto 1fr; min-height: 260px; }
+.wire .bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--sand-2); border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 11px; }
+.wire .bar .dots { display: inline-flex; gap: 4px; margin-right: 4px; }
+.wire .bar .dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--clay); display: block; opacity: .7; }
+.wire .bar .search { flex: 1; max-width: 260px; border: 1px solid var(--line); border-radius: 5px; padding: 2px 8px; background: var(--paper); color: var(--clay); }
+.wire .bar .right { margin-left: auto; display: flex; gap: 8px; }
+.wire .body { display: grid; grid-template-columns: 120px minmax(0, 1fr); min-height: 0; }
+.wire .body.three { grid-template-columns: 120px minmax(0, 1fr) minmax(0, 1.3fr); }
+.wire .body.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); }
+.wire .body.one { grid-template-columns: minmax(0, 1fr); }
+.wire .rail { border-right: 1px solid var(--line); padding: 8px 6px; display: flex; flex-direction: column; gap: 2px; background: var(--sand); }
+.wire .rail .g { color: var(--clay); font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; margin: 8px 6px 2px; }
+.wire .rail .g:first-child { margin-top: 0; }
+.wire .rail .it { display: flex; justify-content: space-between; align-items: center; padding: 3px 6px; border-radius: 4px; color: var(--ink-2); }
+.wire .rail .it.on { background: var(--sand-2); color: var(--ink); font-weight: 600; }
+.wire .rail .it .c { font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--slate-soft); color: var(--slate); }
+.wire .rail .it .c.warn { background: var(--ochre-soft); color: var(--ochre); }
+.wire .pane { padding: 10px 12px; min-width: 0; background: var(--paper); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.wire .pane:last-child { border-right: 0; }
+.wire .pane.dim { background: var(--sand); }
+.wire .h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 13px; }
+.wire .h small { font-weight: 400; color: var(--clay); font-size: 10.5px; }
+.wire .sub { color: var(--ink-2); font-size: 10.5px; }
+.wire .row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); }
+.wire .row.sel { box-shadow: inset 2px 0 0 var(--ochre); background: var(--ochre-soft); }
+.wire .row .av { width: 18px; height: 18px; border-radius: 50%; background: var(--sand-2); color: var(--ink-2); display: grid; place-items: center; font-size: 9px; font-weight: 600; }
+.wire .row .t { min-width: 0; }
+.wire .row .t b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wire .row .t span { display: block; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; }
+.wire .row .m { color: var(--clay); font-size: 10px; white-space: nowrap; text-align: right; }
+.wire .row.child { margin-left: 22px; }
+.wire .grp { color: var(--clay); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; margin-top: 4px; }
+.wire .chip { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); background: var(--paper); white-space: nowrap; }
+.wire .chip.ochre { border-color: var(--ochre); color: var(--ochre); background: var(--ochre-soft); }
+.wire .chip.moss { border-color: var(--moss); color: var(--moss); background: var(--moss-soft); }
+.wire .chip.rust { border-color: var(--rust); color: var(--rust); background: var(--rust-soft); }
+.wire .chip.slate { border-color: var(--slate); color: var(--slate); background: var(--slate-soft); }
+.wire .btns { display: flex; flex-wrap: wrap; gap: 5px; }
+.wire .btn { font-size: 10.5px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink); white-space: nowrap; }
+.wire .btn.pri { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.wire .btn.ghost { border-color: transparent; color: var(--ink-2); }
+.wire .btn kbd { font-size: 9px; padding: 0 3px; margin-left: 4px; border-bottom-width: 1px; }
+.wire .card { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; background: var(--paper); }
+.wire .card.sand { background: var(--sand); }
+.wire .card .k { color: var(--clay); font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 3px; }
+.wire .why { display: grid; gap: 3px; font-size: 10.5px; }
+.wire .why .cl { display: flex; gap: 6px; align-items: center; }
+.wire .why .cl i { font-style: normal; width: 12px; text-align: center; font-weight: 700; }
+.wire .why .cl i.ok { color: var(--moss); } .wire .why .cl i.no { color: var(--rust); } .wire .why .cl i.un { color: var(--clay); }
+.wire .body p, .wire .pane p { margin: 0; font-size: 11px; max-width: none; color: var(--ink-2); }
+.wire .msg { border-left: 2px solid var(--line); padding: 4px 8px; font-size: 10.5px; color: var(--ink-2); }
+.wire .msg.you { border-left-color: var(--ochre); color: var(--ink); }
+.wire .stack { display: flex; flex-direction: column; gap: 4px; }
+.wire .bar2 { display: flex; gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 5px; padding: 4px 8px; background: var(--paper); font-size: 10.5px; }
+.wire .bar2 .fill { flex: 1; height: 5px; border-radius: 3px; background: var(--sand-2); overflow: hidden; }
+.wire .bar2 .fill i { display: block; height: 100%; width: 60%; background: var(--ochre); }
+.wire .banner { border: 1px solid var(--ochre); background: var(--ochre-soft); border-radius: 5px; padding: 5px 8px; font-size: 10.5px; }
+.wire .banner.moss { border-color: var(--moss); background: var(--moss-soft); }
+.wire .new { outline: 2px dashed var(--ochre); outline-offset: 2px; position: relative; }
+.wire .steps { display: flex; gap: 4px; align-items: center; font-size: 10px; color: var(--clay); }
+.wire .steps b { color: var(--ink); }
+.wire .steps i { font-style: normal; }
+.wire .split { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.wire .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); font-size: 11px; }
+.wire .tabs span { padding: 3px 8px; color: var(--ink-2); }
+.wire .tabs span.on { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px 0 var(--ochre); }
+.wire .tag { position: absolute; top: -9px; right: 6px; font-size: 9px; background: var(--ochre); color: #fff; padding: 0 5px; border-radius: 3px; font-weight: 600; letter-spacing: .04em; }
+.wire .rel { position: relative; }
+.cap { font-family: var(--ui); font-size: 12.5px; color: var(--ink-2); margin-top: 6px; }
+.cap b { color: var(--ink); }
+.mark { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--ochre); color: #fff; font-size: 10px; font-weight: 700; font-family: var(--mono); vertical-align: middle; }
+.wire .mark { position: absolute; z-index: 2; }

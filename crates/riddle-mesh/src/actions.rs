@@ -19,6 +19,9 @@ pub fn all() -> Vec<Arc<dyn Action>> {
         Arc::new(CreateMesh),
         Arc::new(UpdateMesh),
         Arc::new(SetMeshStatus),
+        Arc::new(SetMeshFallback),
+        Arc::new(SaveList),
+        Arc::new(DeleteList),
         Arc::new(DeleteMesh),
         Arc::new(RestoreMesh),
         Arc::new(RenameStratum),
@@ -27,7 +30,8 @@ pub fn all() -> Vec<Arc<dyn Action>> {
     ]
 }
 
-fn created_by(p: &Principal) -> CreatedBy {
+/// Who a Mesh version is recorded as created by, from the principal of the Action.
+pub fn created_by(p: &Principal) -> CreatedBy {
     match p {
         Principal::User | Principal::Cli => CreatedBy::User,
         Principal::Director { .. } | Principal::Expedition { .. } => CreatedBy::Director,
@@ -59,7 +63,7 @@ fn parse_status(v: Option<&Value>) -> Result<Option<MeshStatus>> {
 }
 
 fn digs(ctx: &ActionContext) -> Result<Vec<Dig>> {
-    repo::digs::list(&ctx.services.stores.index())
+    repo::digs::list_enabled(&ctx.services.stores.index())
 }
 
 pub struct CreateMesh;
@@ -158,10 +162,7 @@ impl Action for UpdateMesh {
         let svc = MeshService::new(ctx.services.stores.index());
         let prior = svc.latest(&id)?;
         let m = svc.update(&id, text, note, created_by(&ctx.principal))?;
-        let window = args
-            .get("windowDays")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(30) as u32;
+        let window = riddle_core::window_days(&args, 30);
         let mut input = SimulationInput::new(&ctx.services.stores, digs(ctx)?, &m);
         input.window_days = window;
         input.now = ctx.services.clock.now();
@@ -186,6 +187,11 @@ impl Action for UpdateMesh {
                 estimated_cost_usd: None,
                 sample_changed: vec![],
                 window_days: window,
+                joins_series: 0,
+                recorded_changes: 0,
+                taken_first_by: vec![],
+                takes_from: vec![],
+                rescore: 0,
             }
         });
         Ok(ActionResult::ok(json!({ "mesh": m, "simulation": simulation, "report": simulation }), format!("Changed Mesh {} to v{} ({:?}); {} of {} messages would change", m.name, m.version, m.status, simulation.changed, simulation.historical_messages))
@@ -273,6 +279,185 @@ impl Action for SetMeshStatus {
             format!("Restored Mesh {} to {:?}", m.name, m.status),
         )
         .with_affected(vec![mesh_ref(&m)]))
+    }
+}
+
+/// Mark a Mesh a fallback (a catch-all expected to lose mail to earlier
+/// Meshes) or a specific rule. Changes no decision.
+pub struct SetMeshFallback;
+
+#[async_trait]
+impl Action for SetMeshFallback {
+    fn meta(&self) -> ActionMeta {
+        meta(
+            "set_mesh_fallback",
+            "Mark a Mesh a fallback, a catch-all for mail no specific Mesh decides",
+        )
+        .mutating()
+        .reversible()
+        .risk(Risk::Low)
+        .autonomy(Autonomy::Trusted)
+        .build()
+    }
+    async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
+        let id = MeshId(arg_str(&args, "meshId")?.to_string());
+        let fallback = args
+            .get("fallback")
+            .and_then(|v| v.as_bool())
+            .ok_or_else(|| RiddleError::invalid("missing argument fallback (true or false)"))?;
+        let svc = MeshService::new(ctx.services.stores.index());
+        let prior = svc.latest(&id)?.fallback;
+        let m = svc.set_fallback(&id, fallback)?;
+        Ok(ActionResult::ok(
+            serde_json::to_value(&m)?,
+            if fallback {
+                format!("Mesh {} is a fallback", m.name)
+            } else {
+                format!("Mesh {} is a specific rule", m.name)
+            },
+        )
+        .with_affected(vec![mesh_ref(&m)])
+        .with_inputs(json!({ "meshId": m.id, "fallback": fallback }))
+        .with_undo(
+            json!({ "meshId": m.id, "fallback": prior }),
+            if prior {
+                "Make it a fallback again"
+            } else {
+                "Make it a specific rule again"
+            },
+        ))
+    }
+    async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
+        self.execute(ctx, restore).await
+    }
+}
+
+/// Create or replace a named list (`sender IN list:banks`). Entries are
+/// addresses or domains; they are normalised (lowercase, no leading `@`,
+/// no duplicates). Undo puts the previous entries back.
+pub struct SaveList;
+
+#[async_trait]
+impl Action for SaveList {
+    fn meta(&self) -> ActionMeta {
+        meta(
+            "save_list",
+            "Create or replace a named list of senders and domains",
+        )
+        .mutating()
+        .reversible()
+        .risk(Risk::Low)
+        .autonomy(Autonomy::Trusted)
+        .build()
+    }
+    async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
+        let name = arg_str(&args, "name")?.trim().to_ascii_lowercase();
+        if !NamedListDef::valid_name(&name) {
+            return Err(RiddleError::invalid(
+                "a list name is lowercase letters, digits and _, like banks or keep_promotions",
+            ));
+        }
+        let entries: Vec<String> =
+            serde_json::from_value(args.get("entries").cloned().unwrap_or(json!([])))
+                .map_err(|e| RiddleError::invalid(format!("entries: {e}")))?;
+        let index = ctx.services.stores.index();
+        let prior = repo::lists::get(&index, &name)?;
+        let list = NamedListDef {
+            description: args
+                .get("description")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .or_else(|| prior.as_ref().map(|p| p.description.clone()))
+                .unwrap_or_default(),
+            entries: NamedListDef::normalise(&entries),
+            pack: args
+                .get("pack")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .or_else(|| prior.as_ref().and_then(|p| p.pack.clone())),
+            name: name.clone(),
+        };
+        repo::lists::put(&index, &list)?;
+        ctx.services.emit(RiddleEvent::SettingsChanged);
+        Ok(ActionResult::ok(
+            serde_json::to_value(&list)?,
+            format!("Saved list:{name} ({} entries)", list.entries.len()),
+        )
+        .with_inputs(json!({ "name": name, "entries": list.entries.len() }))
+        .with_undo(json!({ "name": name, "prior": prior }), "Put the list back"))
+    }
+    async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
+        let name = arg_str(&restore, "name")?.to_string();
+        let index = ctx.services.stores.index();
+        match serde_json::from_value::<Option<NamedListDef>>(restore["prior"].clone())
+            .ok()
+            .flatten()
+        {
+            Some(prior) => repo::lists::put(&index, &prior)?,
+            None => repo::lists::delete(&index, &name)?,
+        }
+        Ok(ActionResult::ok(
+            json!({ "name": name }),
+            format!("Restored list:{name}"),
+        ))
+    }
+}
+
+/// Delete a named list no Mesh uses.
+pub struct DeleteList;
+
+#[async_trait]
+impl Action for DeleteList {
+    fn meta(&self) -> ActionMeta {
+        meta("delete_list", "Delete a named list that no Mesh uses")
+            .mutating()
+            .reversible()
+            .risk(Risk::Low)
+            .autonomy(Autonomy::Trusted)
+            .build()
+    }
+    async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
+        let name = arg_str(&args, "name")?.trim().to_ascii_lowercase();
+        let index = ctx.services.stores.index();
+        let prior = repo::lists::get(&index, &name)?
+            .ok_or_else(|| RiddleError::not_found(format!("no list:{name}")))?;
+        let users: Vec<String> = repo::meshes::list_latest(&index, false)?
+            .into_iter()
+            .filter(|m| {
+                let mut names = Vec::new();
+                for c in m
+                    .routes
+                    .iter()
+                    .map(|r| &r.condition)
+                    .chain(m.guards.iter().map(|g| &g.condition))
+                {
+                    crate::service::named_lists_in(c, &mut names);
+                }
+                names.contains(&name)
+            })
+            .map(|m| m.name)
+            .collect();
+        if !users.is_empty() {
+            return Err(RiddleError::invalid(format!(
+                "list:{name} is used by {}; change those Meshes first",
+                users.join(", ")
+            )));
+        }
+        repo::lists::delete(&index, &name)?;
+        ctx.services.emit(RiddleEvent::SettingsChanged);
+        Ok(
+            ActionResult::ok(json!({ "name": name }), format!("Deleted list:{name}"))
+                .with_undo(json!({ "list": prior }), "Restore the list"),
+        )
+    }
+    async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
+        let list: NamedListDef = serde_json::from_value(restore["list"].clone())
+            .map_err(|e| RiddleError::invalid(format!("list: {e}")))?;
+        repo::lists::put(&ctx.services.stores.index(), &list)?;
+        Ok(ActionResult::ok(
+            json!({ "name": list.name }),
+            format!("Restored list:{}", list.name),
+        ))
     }
 }
 

@@ -98,7 +98,7 @@ export function ActionInspector() {
         {name ? (
           <>
             <Section title={`${name} · recent invocations`}>
-              {recent.data?.items.length ? <ol className="flex flex-col gap-2">{recent.data.items.map((a) => <ActivityEntry key={a.id} a={a} digName={digName} />)}</ol> : <span className="text-xs text-clay">No Activity for this Action yet.</span>}
+              {recent.data?.items.length ? <ol className="flex flex-col gap-2">{recent.data.items.map((a) => <ActivityEntry key={a.id} a={a} digName={digName} developerMode />)}</ol> : <span className="text-xs text-clay">No Activity for this Action yet.</span>}
             </Section>
             <Section title="Metadata"><JsonBlock value={metas.data?.find((m) => m.name === name)} label="action metadata" /></Section>
           </>
@@ -270,7 +270,7 @@ export function FailureInspector() {
           </ol>
         </Section>
         <Section title="Warnings and errors in the log">
-          <ol className="mono text-[11px]">
+          <ol className="mono text-2xs">
             {(logs.data ?? []).map((l, i) => (
               <li key={i} className={cx('border-b border-line/40 py-0.5', l.level === 'error' ? 'text-rust' : 'text-ochre')}>
                 <span className="text-clay">{fmtClockMs(l.at)}</span> {l.level.toUpperCase()} [{l.category}] {l.message}

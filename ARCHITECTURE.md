@@ -55,6 +55,8 @@ Examples:
 
 Digs may operate independently or participate in a unified Riddle.
 
+A Dig can be disabled without being removed (`set_dig_enabled`). A disabled Dig is not synced, sifted or projected, and it is left out of everything that spans Digs: lists, counts, Finds (a Find is hidden when every source is on a disabled Dig), notifications, rule previews and apply-to-history, Temporal Sift and the Director. Its store, decisions and sign-in are kept, and enabling it resumes from where it stopped. Work reads `list_enabled` / `App::list_digs`; only account management reads every Dig. Spend already recorded still counts in usage. A test account beside a real one was the case: removing it was the only way to stop it cluttering Finds and rule previews.
+
 ## Dig Group
 
 A collection of related Digs.
@@ -290,11 +292,21 @@ A Find has a lifecycle:
 OPEN → SNOOZED → OPEN
 OPEN → RESOLVED     user acted, or Thread State shows a reply from any client
 OPEN → DISMISSED    user said not important; recorded as a correction
-OPEN → EXPIRED      dated Finds (Attend, Pay) after their date
-OPEN → SUPERSEDED   merged into another Find
+OPEN → EXPIRED      dated Finds (Attend, Pay) after their date, or any Find
+                    past its route's `+ Expires:` (open or snoozed)
+OPEN → SUPERSEDED   merged into another Find, or replaced by a newer Find
+                    of its `+ Replaces` series
 ```
 
 Messages join an existing Find by thread, or by topic when the Director merges them. The same thread arriving in two Digs produces one Find, not two.
+
+Two route outputs let a Mesh say a Find stops mattering, for mail where only the latest one counts (a daily reminder, a status nag). `+ Replaces` puts the Find in a series (the Mesh and the sender). The Find from the newest message stays open and the others become Superseded by it. Order is by message date, not by when Sift saw the message, so re-deciding history never closes today's Find. `+ Expires:` sets `expires_at`: `end of day` is midnight in the user's timezone on the day the message arrived, `next morning` is 9 am the day after, and a span (`18h`, `2d`) counts from the message's date. The timezone is the system's, recorded into the profile at every boot; daylight saving moves the instant, not the local hour. Temporal Sift closes the Find as Expired then. Mail decided after its expiry makes a Find that is born Expired. Neither output changes a message's disposition, so neither interacts with Never Hidden. `+ Replaces` also works on Spoil and Filed, for a store's sale mail where only the newest matters: the newest message of the series keeps its decision and the older ones are superseded (`message_series` in the Dig store). A superseded message keeps its disposition and stays searchable; it reads as read, sinks out of the Spoil list unless asked for, and is recorded in Activity as `supersede_messages`, whose undo keeps it. Both are recorded in Activity as `close_finds`. Undo reopens the Find and keeps it (`kept_open_at`): an undo is the user choosing that Find, so no rule closes it again, whether a newer one in the series, its expiry or a passed Attend or Pay date. A Mesh in Shadow proposes no Finds, so neither acts there. `+ Expires:` also takes minutes under an hour (`15m`), for what is useful only briefly, such as a sign-in code.
+
+Importance is how much a message matters: Low, Normal, High or Critical, on every message. `Priority:` was already the order Meshes run in, so a route sets the level with `+ Importance: high`. When the route that decided says nothing (or a gate left its match Unresolved), Sift derives it: Spoil, Filed and Contamination are Low, Unresolved is Normal, a Find is the band its 0–100 priority falls in (under 35 Low, under 70 Normal, under 90 High, else Critical), and `+ Notify` is Critical, so it still sorts first. A Find's priority stays the order within its level; an explicit level moves the number into its band rather than replacing it. The level is a column on `classifications` so lists filter on it (`minImportance`, and the Priority inbox's `minImportance`, High and above by default). The user's own level for a message (`set_importance`, Riddle-only, reversible) lives in `importance_overrides`, apart from the classification, so a rule re-deciding the message never overwrites it; lists and the explanation read it first. "Always…" (`remember_for_sender`) carries the level the user set into the rule it writes.
+
+A sign-in code is read out of the message, not guessed from the subject: `verification_code` (`riddle_sift::facts`) is 4 to 10 digits beside a phrase that introduces a code, a strong one ("verification code", "single-use code", "passcode") on either side and a weak one ("your FreshBooks code", "the code below") only before it, nearest first, with links, addresses, years, prices, phone numbers, US ZIPs, "confirmation code" and "promo code" ruled out; `has_verification_code` is the rule's test. On the mailbox that prompted it, the subject rule caught half the code mail and Security and account alerts took the rest as plain notices; the fact found 22 codes in 6,247 messages and nothing else. The Accounts pack (v2) runs before Security and account alerts: `Find: Know + Stratum: Sign-in + Notify + Expires: 15m + Importance: Critical`. The Find carries the code (`Find::code`, the newest when a thread brings another), the notification's title is the code, and the Finds list and the message page show it with a copy button.
+
+A payment that did not go through is its own fact, not a bill: `payment_failed` (failed, declined, "was unsuccessful", "add a different payment method", from the subject or the start of a message whose subject is about a payment; a subject saying it succeeded wins) and `payment_recovered` (charged to a backup method after the main one failed). The Money pack's Payment problems rule (v2, priority -2, ahead of Security alerts, Receipts and Payments) makes a failure `Find: Pay + Notify + Importance: High` and a recovery a Know Find, only from a sender with DKIM or DMARC passing, since "your payment failed" is the commonest phishing opener; past-due and overdue bills notify at High too. On the mailbox that prompted it, ten failures (Google Workspace, Stripe's "was unsuccessful", Uber) were Pay Finds at a bill's priority, and the probe found exactly those plus one scam that a safety rule already holds. The same pass found `lookalike_domain` treating any embedded brand as imitation: amazonaws.com read as Amazon and four genuine AWS past-due notices went to Contamination through the deterministic gate. An embedded brand now counts only as its own word (`paypal-secure`, `amazon-billing`), brands' other domains are named (`OFFICIAL_DOMAINS`), and the flag is recomputed by the facts refresh.
 
 Follow Up Finds are created by Temporal Sift (19), not by an arriving message.
 
@@ -513,7 +525,7 @@ Provider events:
 Multi-device:
 
 - v1 is single-device. Riddle's understanding lives in one machine's store.
-- Policy travels: Meshes and Signals export as files (12).
+- Policy travels: Meshes and Signals export as files (12). Not built beyond the Mesh Actions yet; the steps (export in Settings, automatic backup, sync through a private Git repository) are in `docs/ROADMAP.md`.
 - The purely deterministic subset of Meshes may be compiled into Gmail server-side filters, so that subset applies on every device while Riddle is closed. Existing Gmail filters are imported as seed Meshes on first run so the two rule systems do not fight.
 
 Notifications:
@@ -935,6 +947,7 @@ Reconciliation:
 
 - Gmail is authoritative for Gmail-owned state. A provider-side change wins over a queued projection for the same message, and the conflict is recorded as Activity.
 - Provider-side changes are attributed before the learning layer sees them: a human action in another client, a Gmail filter, another automation, or Riddle's own projection echoing back. Only human actions count as corrections.
+- A change to Gmail's `SPAM` label after Riddle decided a message sends it back to Sift, which recomputes its facts: marked spam meets the Contamination gate, "Not spam" lifts it. Riddle never writes that label, so the change is Gmail's or the user's. Before, sync stored the label and nothing read it, and a scam Gmail moved to Spam days after it arrived stayed Unresolved. A decision the user made is kept.
 - When the history cursor has expired, sync performs a full resync and reconciles labels against Riddle's expected projection, reporting differences rather than overwriting.
 
 Labels and filters Riddle creates carry a managed-by marker so the user can tell Riddle's from their own.
@@ -1049,8 +1062,25 @@ gmail_category, gmail_important, gmail_spam,
 directly_addressed, cc_only, thread_length, my_last_reply_at,
 has_calendar_part, has_structured_receipt, language,
 urgency_language_present, asks_for_payment_or_credentials,
-dates_and_deadlines (parsed, compared here, never by the judge)
+dates_and_deadlines (parsed, compared here, never by the judge),
+sender_cadence (daily | weekdays | every_few_days | weekly | monthly | irregular),
+sender_on_schedule (about one a day, at the same local time),
+government_sender (a government domain whose mail passed DMARC),
+from_me (an own address, and sent, a draft or authenticated), spoofs_me,
+free_mail_sender (gmail.com, outlook.com, icloud.com…),
+glyph_substitution ("| look forward", Latin mixed with Cyrillic in one word),
+cold_outreach (one-to-one mail from a stranger's free mailbox, not a reply),
+github_event (review_requested_you | review_requested_team | approved | commented | merged | closed | pushed | run_failed | opened | changes_requested),
+list_id (the List-Id identifier, e.g. platform.northwind.github.com)
 ```
+
+One sender, several kinds of mail: rules group a sender under `WHEN` and route by facts first (a header, the subject, `is_reply`, `list_id`, the sender's name), then by the account Signals (`security_alert`, `payment_related`, `account_notification`) for what only reading tells, then a default for the rest. GitHub is the worked case. `X-GitHub-Reason` says why the user is on a thread and sticks to it: once a team is asked to review a PR, every approval, bot comment and merge arrives as `review_requested`, and 1,437 of them were open Review Finds. `github_event` reads the first line of the notification ("requested your review", "requested review from @team", "approved this pull request", "Run failed:" in the subject), so personal review requests become Review Finds, team requests and new PRs are Filed, follow-ups are Spoil, and failed Actions runs, which arrive as `subscribed`, become Do Finds that expire after two days.
+
+`government_sender` is true for Canadian federal, provincial and territorial domains (`canada.ca`, `gc.ca`, `ontario.ca`, `gov.bc.ca`…, matched as whole labels so `petro-canada.ca` is not one), `.gov` and `.mil`, and a government second level under a country code (`gov.uk`, `gouv.fr`), and only when DMARC passed: the Canada Revenue Agency and the RCMP are the names scams use most, and a forged From line or a domain that merely ends in "canada.ca" must not become the most urgent Find. A route's `+ Notify` makes its Find interrupt at once in any notification mode and gives it a priority of at least 95; before, the flag was recorded and read by nothing.
+
+`sender_cadence` is classified by People from when the sender's mail arrived over 120 days, by the user's local day. It says whether only the newest message of a sender is likely to matter, not whether any does: on the mailbox that prompted it, eighteen senders wrote daily and one was a to-do. `sender_on_schedule` separates mail on a timer from mail the user's own actions set off: purchase confirmations and LinkedIn were daily and personally relevant too, but came several times a day at any hour. The rule that picked out only the reminder was `IF sender_cadence = daily AND sender_on_schedule AND personally_relevant@v1 > .8 → Find: Do + Replaces + Expires: end of day`; with cadence and the Signal alone it also caught 137 purchase confirmations.
+
+`cold_outreach` came from a scam opener Gmail flagged only days after it arrived: an investor's name on a numbered Gmail address, "I noticed your comment on my YouTube channel", SPF, DKIM and DMARC all passing. It is a free-mail sender nobody knows or protects, with none of the headers bulk mail carries, not a reply (a shop answering a website form has no thread in the mailbox but is not an opener), on a thread the user has not answered. It describes how mail arrived, not what it says, and real strangers write that way too, so a rule pairs it with a Signal, and never with `human_authored` alone, which scored that shop's reply 0.15 and a fake recruiter 0.18 (on that mailbox it never scored any of 6,198 messages above 0.6, and its partner's mail sat near 0.2, so the default Human correspondence Mesh, gated on `human_authored > .70`, decided nothing; it now decides people by `known_sender` and non-automated mail, and uses Signals only for the Find type): `claims_prior_contact` (the author says they already know the reader) contradicts a history Riddle can check, and `glyph_substitution` is a filter-evasion trick few honest writers use. At a free mailbox, authentication proves only that someone with an account there sent the mail, so it no longer counts as support for a Find from a first-time sender, and a free-mail domain is never seeded as the user's organisation. Drafts are the user's own and are Filed without a judge; mail from an own address counts as known; an own address on mail that failed DMARC outright is Contamination evidence ("I have access to your account"), though an organisation or Never Hidden match still leaves it Unresolved for the user.
 
 **Gates.** The Never Hidden list and Contamination evidence are applied before any Signal is evaluated. A gate outcome cannot be overridden by a Signal or a route.
 
@@ -1126,6 +1156,7 @@ A scheduler owns:
 - Follow Up Finds: no reply after N days to an open ask of mine
 - Respond Finds: resolved when Thread State shows my reply from any client
 - Attend and Pay Finds: expire or escalate at their date
+- Finds past their `+ Expires:` time: expire
 - snooze expiry
 - re-evaluation of Context-dependent Signals whose Context slice changed (26)
 - the Shadow Period clock per Mesh (51)
@@ -1766,6 +1797,22 @@ Resolution order for one message:
 
 "Refine" means a more specific Mesh adds outputs, such as a Stratum or Notify. "Override" means it produces a different disposition. Both are visible in the Mesh Inspector.
 
+Order is one list and is kept visible, because rules in an ordered list fail quietly: a generic "account notification → Filed" rule at Priority 0 filed GitHub push notifications before the GitHub Mesh at 10 saw them, and only a trace showed it.
+
+- Two running Meshes in one scope may not share a Priority; a tie used to be broken by name. Creating, updating or activating a Mesh that would tie is refused with the free numbers either side. A new Mesh without a `Priority:` line takes the first free one from 0; an update without one keeps its version's.
+- Every simulation reports `taken_first_by` (mail the candidate would decide on its own that an earlier Mesh decides, by Mesh) and `takes_from` (mail it would take from later Meshes). "Would decide" means a route matched, stood under the confidence policy, and no guard vetoed it (`simulate::decider`).
+- The Meshes page opens on the run order (`mesh_order`): every running Mesh in position, what it decided over a window, and the same "taken first by" counts, replayed over stored facts and cached Signals without the judge.
+- A Mesh can be marked a fallback (`set_mesh_fallback`): a catch-all such as Updates or Automated notifications that exists to decide what no specific Mesh did. The mark changes no decision and makes no version; the run order and previews stop flagging the mail earlier Meshes take from it, so the warnings that remain are specific rules competing. Newsletters and Automated notifications are seeded as fallbacks.
+- Apply to history re-decides any message whose recorded effect would differ, not only its disposition: another Find type, other Strata, Notify, or joining or leaving a `+ Replaces` series.
+
+## Named lists and rule packs
+
+Rules that one person wrote carry that person's senders: `NOT sender_domain CONTAINS "uber.com"` in a promotions rule, a registrar's domain in a bank rule. Named lists move those values out of the text. `sender IN list:keep_promotions` (or `sender_domain IN list:…`) reads a list the person keeps (`save_list`, Settings and the Packs page): an address matches exactly, a domain matches it and its subdomains by whole labels. A Mesh may only name a list that exists.
+
+A rule pack is a TOML file: an id, a version, an area, a summary, the lists its Meshes read (each with the question onboarding asks and generic defaults, never one person's values), the Meshes (text without `Priority:`), and how onboarding detects that it applies. Packs are built in (`crates/riddle-mesh/packs/`) or imported from a file (`import_pack`), and any set of Meshes can be written as one (`create_pack`, entries left out unless asked). `install_pack` creates the lists from the person's answers (merging into lists that exist), then places each Mesh by band and rank: safety (-100…-61), personal (-60…-21), specific (-20…19), general (20…39), fallback (40…69), at band start plus the Mesh's rank or the next free slot. Ranks, not install order, decide the order, so installing Shopping before Money still runs payments before promotions. New Meshes start in Shadow unless the person chooses Active; a Mesh of the same name that is not the pack's is refused unless the install may replace it, and one whose rules are unchanged keeps its status. Each Mesh records the pack and version it came from; installing a newer version replaces the pack's own Meshes and leaves the lists. Undo puts back every Mesh and list the install changed. Removing a pack sends its Meshes to Recently Deleted and keeps the lists.
+
+The rule check (`rule_check`, `rule_samples`, `grade_decision`) shows each running Mesh with what it decided and ten recent decisions, one per sender before repeats, to mark right or wrong; a wrong one is corrected on the spot (`set_disposition`). It is how a pack earns trust for someone with no Director conversation behind it.
+
 ---
 
 # 37. Mesh Versioning
@@ -1908,6 +1955,9 @@ priority
 status            OPEN | SNOOZED | RESOLVED | DISMISSED | EXPIRED | SUPERSEDED
 due_at            for Attend and Pay
 snoozed_until
+expires_at        from a route's `+ Expires:`; not a deadline
+series            key (Mesh + sender) and message date, from `+ Replaces`
+kept_open_at      set when the user undoes a rule's closing; rules leave it open
 
 created_at
 resolved_at
@@ -2254,7 +2304,7 @@ Every confirmation is re-validated in the Action layer, never only in the dialog
 
 Autonomy is per Dig and per Action, unlocked from OBSERVE through SUGGEST to ACT as the Shadow Period (19) shows agreement. TRUSTED is opt-in per Dig.
 
-Dev builds start in OBSERVE and must be explicitly armed (59).
+Dev builds start in OBSERVE, and their mailbox writes start on Hold (59).
 
 ---
 
@@ -2459,7 +2509,7 @@ Client hardening:
 A dev build must never touch the real mailbox by accident.
 
 - Dev and prod are split at build time: separate data directory, keychain service suffix, log file, and a DEV badge in the UI.
-- Dev builds start in OBSERVE. Provider mutations require explicit arming, and a separate OAuth client and test account are the default.
+- Dev builds start in OBSERVE, with mailbox writes on Hold, and a separate OAuth client and test account are the default. What a dev build may write is `ProviderWrites` (`set_mailbox_writes`, under Developer → Mailbox writes): Hold writes nothing; Ask leaves queued writes for one "Send" (`send_held_changes`, a single confirmation for the batch, or `discard_held_changes`) and asks before any Action that calls the provider; Allow writes as a release build does and needs press and hold. Actions split by how they touch the mailbox. `external` ones call the provider while they run (send, permanent delete, unsubscribe, sign-in) and are what Hold refuses and Ask asks about. `projected` ones change Riddle and queue the matching write in the outbox (corrections, archive, Strata, Shadow review); they always run, and the outbox holds their writes until Allow or a Send. It replaced one armed switch, under which corrections shared the external flag and a batch of seven was refused seven times, though none of them would have touched the mailbox while the account's projection was off.
 - Dev builds are signed with a stable Developer ID so keychain ACLs survive rebuilds.
 - Tests never open the real store or call Gmail: a test-host guard plus an in-memory store.
 - A panic inside a command is caught at the boundary and the webview times out (7).
@@ -3637,12 +3687,14 @@ personally_relevant > .70
 The user can:
 
 ```text
-[View Jev]
-[View Signal]
+[Inspect decision]   (Developer Mode only)
+[View Signal]        (Developer Mode only)
 [View Mesh]
-[Not Important]
+[Mark as Filed]
 [Undo]
 ```
+
+The card leads with the one-sentence `reason` the pipeline wrote for a person; the route walk above sits under a "How it was decided" disclosure.
 
 If corrected, the correction becomes structured feedback available for Signal and Mesh evaluation.
 
@@ -3761,7 +3813,7 @@ The following are non-negotiable unless explicitly superseded by a later archite
 43. **Untrusted content never becomes durable policy without an explicit user action.**
 44. **Meshes pin Signal versions; thresholds are written against calibrated scores.**
 45. **Every message has exactly one disposition, and Unresolved is one of them.**
-46. **Dev builds cannot mutate a real mailbox until explicitly armed.**
+46. **Dev builds cannot mutate a real mailbox until the user allows it, or sends what waits.**
 47. **Logs carry identifiers, never content.**
 48. **Provider-side changes are attributed before they are treated as corrections.**
 49. **Sent mail is sifted.**
@@ -3769,7 +3821,176 @@ The following are non-negotiable unless explicitly superseded by a later archite
 
 ---
 
-# 96. Final Principle
+# 96. Trust on Evidence
+
+The UX study (`explore/`, September 2026) asked how a user comes to let Riddle
+act, and the answer was evidence the user can inspect, never a survey. Five
+mechanisms carry it:
+
+- **Trust stats** (`trust_stats { digId?, sinceDays? }`): Sift decisions in
+  the window, corrections that still stand, Activity entries the user undid,
+  Spoil decisions held below Act on accounts that would archive, and each
+  rule's precision (`decisions` vs `reversed`, plus Shadow `proposed` vs
+  `agreed`). The Summary's trust card renders it; nothing is estimated.
+- **The seducible moment**: when an account below Act with Gmail changes on
+  has forty consecutive Sift Spoil calls that stood, `trust_stats.offer`
+  names it once. The offer states the rung change and the undo guarantee,
+  and "Not now" waits for the next clean run. It never nags.
+- **Shadow review** (`review_shadow`): Agree counts for the proposing Mesh
+  (`shadow_agreed`) and marks the row; Disagree records the user's own
+  decision as a correction held against the proposing Mesh, not against
+  whatever decided the message for real. Until this Action nothing recorded
+  agreement; the Shadow Period could never be earned.
+- **Demotion on evidence**: when the user has reversed a quarter or more of
+  an Active Mesh version's last twenty-plus decisions on an account, the
+  Mesh steps back to Shadow and a `notify` event says so. Promotion is earned
+  in the Shadow Period; demotion is earned the same way.
+- **Per-rule autonomy**: a Mesh may carry `Autonomy: Observe | Suggest | Act`
+  in its header, a cap below the account's rung. The projection gate holds
+  decisions of a capped Mesh whatever the account allows; `Trusted` is
+  refused as a Mesh cap because sending is an account decision. An update
+  without the line keeps the cap.
+
+Each of these is answered by the store, not guessed by the client. A
+message row says whether it is a Shadow proposal and how the user reviewed
+it (`MessageSummary.shadow`, `shadow_review`; `search { shadowOnly }` lists
+the proposals, and a disagreement keeps the proposal beside the decision).
+A Dig says what Sift would do to its mailbox and what holds it
+(`Dig.mailbox { writes, held: autonomy | dev_unarmed }`), a Dig group names
+the Meshes that use it (`used_by`), an `ActionOutcome` carries its Activity
+sentence and the entities it touched (`summary`, `affected`, which the client
+uses to invalidate exactly what changed), a demoted Mesh records when and on
+what counts (`Mesh.demoted { at, reversed, decided }`, cleared by any status
+the user chooses), and each rule's precision row says whether the engine's
+demotion rule fired (`reversed_often`, `riddle_core::reversed_often`). The
+client had derived all five from dates, settings and string matches and got
+each of them wrong in some state.
+
+Two smaller rules follow from the same study. A **guard-only Mesh** (the
+user's "Your corrections", one `NEVER … IF sender = …` line per one-click
+rule) keeps its Active status across updates: guards veto and never hide
+mail, so there is nothing to earn. **Notifications** default to a brief
+(`settings.notifications`): only a Never Hidden sender, or a Pay or Respond
+Find due within a day, interrupts at once; everything else is said at the
+chosen times, the text carries the Find's type and reason and never its
+subject, and the dock badge counts decisions waiting (open Finds plus
+Unresolved), never messages.
+
+---
+
+# 97. Rules in Words
+
+A Mesh route is written in the evaluator's grammar (`ELSE IF
+payment_related@v1 > .80 AND requires_action@v1 > .70 → Find: Pay + Stratum:
+Finance`), and until this section that grammar was also the reason shown on
+the Why card. `riddle_mesh::humanize` reads it as a sentence, deterministically
+and without a model call, in two voices:
+
+- **The rule as written** (`Route.words`, `Guard.words`, filled by the parser
+  and backfilled on read for Meshes stored earlier): "When payment related
+  is very likely and requires action is likely, it is something to pay under
+  Finance." The Meshes page shows it under each route and guard.
+- **The rule against one message** (the classification's `reason` for a
+  Mesh decision): "It appears payment related is almost certain and requires
+  action is likely, so it is something to pay under Finance." The decision
+  reads the message's actual scores, facts and thread length, says "was not
+  scored" for a Signal the judge did not answer, and names the guard when
+  one vetoed the route. Lists and detail headers lead with it. The Why card
+  does not: its job is to show exactly what happened, so it shows
+  `matched_rule`, the grammar, and the route walk with each clause's actual
+  value.
+
+The words for a probability are calibrated language, not invention: Sherman
+Kent's "Words of Estimative Probability" as standardised in ICD 203, with
+the IPCC scale's top band. The bands are Riddle's, cut where Mesh thresholds
+sit: virtually certain (≥ .99), almost certain (≥ .95), extremely likely
+(≥ .90), very likely (≥ .80), likely (≥ .65), more likely than not (> .50),
+about as likely as not (.45 to .50), unlikely (.20 to .45), very unlikely
+(.05 to .20), almost certainly not (below .05). A rule reads its threshold as
+a floor, so `> .80` is "very likely" and a score of .96 that cleared it is
+"almost certain"; the two never contradict. Facts read as statements about
+the message, each with its negation ("you were only copied", "the sender's
+domain imitates one you know"); an unknown fact or Signal falls back to its
+name in words, so a new Signal reads acceptably before anyone writes a gloss.
+
+A reason is written when the decision is made. Decisions made before there
+were words are rewritten once per Dig at boot (`App::rewrite_reasons_in_words`):
+each current Mesh decision is read against its stored trace, exactly as the
+Why card replays it, and the classification and the Finds that carry it get
+the sentence, with no judge call. `resift { digId? }` is for a change of
+rules, not of wording: it retires every decision Riddle made (never the
+user's), as superseded rows the inspector still shows, and queues a Sift job
+per account; cached Signal scores mean most of it costs nothing.
+
+Activating a Mesh decides new mail only. Two entry points send past mail
+back to Sift through one mechanism (`send_back_to_sift` in riddle-app):
+"Apply to past mail" on the Meshes page (`apply_mesh_to_history`, the
+Mesh's changed set from a window, previewed and confirmed) and "Decide
+again" in a Find's Why drawer (`decide_again`, that one message). Both
+retire the current decision, close an open Find on the message as
+Superseded (a fresh one appears if it still is one), and queue the pass.
+Undo puts the earlier decision and the Find back, and the Sift pass the
+action itself caused does not count as "handled since".
+
+The changed set is every message the current rules decide differently,
+every message a `+ Replaces` route would pull into its series, and every
+message never scored on a Signal the Mesh reads. The last matters after a
+Signal changes: a Mesh pins `signal@vN`, the simulation cannot score a
+message against a version the judge has not evaluated, and such mail used
+to count as unchanged, so history kept decisions made without the Signal
+the rule now reads. The preview says how many need a fresh judge call and
+what that costs; the cap is 2,000 messages per apply.
+
+---
+
+# 98. Facts Before Signals
+
+The first real mailbox Riddle sifted end to end came back three quarters
+Unresolved. The judge had scored every Signal; what failed was the step after
+routing. The default Meshes ended in `Escalate`, or in Signal routes whose
+weakest margin fell under the confidence policy (§37), and the account was
+local-only at the time, so the escalation the routes asked for was refused.
+Two thousand GitHub notifications sat behind a single `ELSE → Escalate`.
+
+Three decisions follow:
+
+- **A header is a fact, not a judgement.** GitHub states why it sent a
+  notification in `X-GitHub-Reason`; mail synced before that header was kept
+  says the same in its footer. `github_reason` is a deterministic fact
+  (`riddle_sift::facts::github_reason`), the default GitHub Mesh routes on it
+  (`review_requested`, `assign`, `mention`, `ci_activity`, and a Filed floor
+  instead of `Escalate`), and the stored facts of older mail are filled once
+  per Dig at boot (`App::backfill_github_reason`). The same shape applies to
+  `gmail_category` and `list_unsubscribe` for promotions, social and update
+  mail, and to sender domains for banks, crowdfunding and entertainment:
+  when a fact says it, no Signal is asked, no margin can fail, and no
+  escalation is needed.
+- **The simulation applies Sift's confidence policy.** `ConfidencePolicy`
+  in riddle-mesh holds the margins and the non-English rule; Sift's defaults
+  come from it. A preview used to promise "1,289 to Spoil" where Sift would
+  have held every one for escalation; now it says Unresolved, which is what
+  the person would have got.
+- **A match too close to call lets a later Mesh decide.** A route that
+  matches on a Signal whose margin is short of the policy's for its
+  disposition no longer ends the search (`evaluate_with`): the next Mesh gets
+  its turn, and the thin match is the decision, held as before, only when
+  nothing after it matches. The reason names what was passed over. Without
+  it an early Signal rule stranded borderline mail a later rule would have
+  decided with confidence: a promotions rule at priority 27 would have sent
+  77 Spoil messages to Unresolved. It falls through to the next Mesh, never
+  to its own Mesh's ELSE. Only a short margin falls through: the non-English hold does not,
+  because its remedy is escalation (the refiner reads the message), not a
+  later Mesh deciding on the same unreliable Signals. And falling through never
+  hides: a borderline Find would have surfaced as Unresolved, so only a later
+  Find or Filed may take it over; a later Spoil or Contamination is skipped,
+  and if nothing else decides, the Find is held Unresolved as before.
+- **Spoil earns its place; Filed may start Active.** A new Mesh that hides
+  mail starts in Shadow and is activated by hand; one that only files can
+  start Active, since nothing it decides leaves the Inbox view.
+
+---
+
+# 97. Final Principle
 
 Most email clients ask:
 

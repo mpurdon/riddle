@@ -14,7 +14,7 @@ use riddle_jobs::{
     DigStatusSource, JobContext, JobHandler, JobOutcome, JobQueue, JobSpec, ResourceConfig,
     Resources, Runner, SleepDetector, UsageBudgetGate, WakeHook, WakeReason,
 };
-use riddle_observability::{rinfo, rwarn, Category};
+use riddle_observability::{rdebug, rinfo, rwarn, Category};
 use riddle_settings::{
     ArmControl, JudgeProvider, KeySource, LlmProvider, Secret, SecretPresence, Settings,
     SettingsStore,
@@ -41,10 +41,9 @@ impl SecretPresence for Presence {
         let creds = self.app.services.get::<riddle_credentials::Credentials>();
         match secret {
             Secret::JudgeApiKey { source, .. } => match source {
-                KeySource::Env => {
-                    std::env::var("TYPESAFE_API_KEY").is_ok()
-                        || std::env::var("RIDDLE_JEV_API_KEY").is_ok()
-                }
+                KeySource::Env => ["TYPESAFE_API_KEY", "RIDDLE_JEV_API_KEY"]
+                    .iter()
+                    .any(|v| std::env::var(v).is_ok_and(|s| !s.trim().is_empty())),
                 KeySource::Keychain => creds
                     .map(|c| c.present(riddle_credentials::JEV_API_KEY))
                     .unwrap_or(false),
@@ -105,6 +104,19 @@ pub fn judge_config(s: &Settings) -> JudgeConfig {
 pub struct AppDigStatus(pub Arc<App>);
 
 impl AppDigStatus {
+    /// Whether the Dig can reach its mailbox: a Gmail Dig needs its refresh
+    /// token; a Fixture Dig is always reachable.
+    fn signed_in(&self, dig: &Dig) -> bool {
+        match dig.provider {
+            ProviderKind::Fixture => true,
+            ProviderKind::Gmail => self
+                .0
+                .services
+                .get::<riddle_credentials::Credentials>()
+                .is_some_and(|c| c.present(&riddle_credentials::gmail_refresh_token_key(&dig.id))),
+        }
+    }
+
     pub fn status_of(&self, dig: &Dig) -> Result<DigStatus> {
         let store = self.0.stores.dig(&dig.id)?;
         let initial_done = repo::sync_state::get(&store, repo::sync_state::INITIAL_SYNC_DONE)?
@@ -113,15 +125,37 @@ impl AppDigStatus {
         let total = repo::messages::count(&store)?;
         let unclassified = repo::messages::unclassified_count(&store)?;
         let pending = repo::outbox::pending_count(&store)?;
-        if let DigStatus::Degraded { reason } = &dig.status {
-            return Ok(DigStatus::Degraded {
-                reason: reason.clone(),
-            });
-        }
+        // Degraded is derived below on every call, never read back from the
+        // stored Dig: `refresh_dig_status` saves what this returns, so
+        // returning a saved Degraded kept "first sync failed" and "judge
+        // unavailable" on screen after the cause had cleared.
         if let DigStatus::Shadow { day, of } = &dig.status {
             return Ok(DigStatus::Shadow { day: *day, of: *of });
         }
-        if total == 0 && !initial_done {
+        if !initial_done {
+            // A failed first sync is a problem to show, not "Not connected":
+            // the account is signed in and "Sync now" retries it. Any later
+            // sync job (Sync now, the poll) supersedes the failure.
+            let first = repo::jobs::latest_for_dig(
+                &self.0.stores.index(),
+                &dig.id,
+                &[
+                    JobKind::InitialSync.as_str(),
+                    JobKind::CatchUp.as_str(),
+                    JobKind::IncrementalSync.as_str(),
+                ],
+            )?;
+            if let Some(Job {
+                status: JobStatus::Failed { error },
+                ..
+            }) = first
+            {
+                return Ok(DigStatus::Degraded {
+                    reason: format!("first sync failed ({error}); Sync now retries"),
+                });
+            }
+        }
+        if total == 0 && !initial_done && !self.signed_in(dig) {
             return Ok(DigStatus::NotConnected);
         }
         if !initial_done {
@@ -195,6 +229,12 @@ impl JobHandler for PassHandler {
                     return Ok(JobOutcome::done());
                 };
                 let dig = self.app.dig(&dig_id)?;
+                // Queued before the account was disabled: nothing to do
+                // until it is enabled, when the scheduler queues it again.
+                if dig.disabled {
+                    rdebug!(Category::Sync, "job for disabled dig {} skipped", dig.id);
+                    return Ok(JobOutcome::done());
+                }
                 let mut progress_fn = {
                     let p = ctx.progress.clone();
                     move |sp: riddle_sync::engine::SyncProgress| {
@@ -296,11 +336,16 @@ impl App {
             events,
         )?);
         self.services.insert(store.clone());
+        self.load_autonomy(&store);
+        Ok(store)
+    }
+
+    /// Install the saved autonomy levels, keeping the runtime's mailbox writes.
+    fn load_autonomy(&self, store: &SettingsStore) {
         let mut policy = store.autonomy_policy();
-        policy.armed = self.runtime.is_armed();
+        policy.writes = self.runtime.writes();
         policy.dev = self.config.dev;
         *self.runtime.policy.write() = policy;
-        Ok(store)
     }
 
     /// Jobs, undo, Task Centre sources, settings and job Actions.
@@ -397,26 +442,33 @@ impl App {
                 }
             }
         });
-        // Refresh triggers from Actions (refresh_now, inject) become jobs.
+        // Refresh requests from Actions (refresh_now, inject) become jobs. One
+        // drain task for every Dig, looked up at request time, so an account
+        // added after launch is refreshed like any other.
         if let Some(domains) = self.services.get::<crate::domains::Domains>() {
-            if let Ok(digs) = self.list_digs() {
-                for d in digs {
-                    let notify = domains.triggers.for_dig(&d.id);
-                    let queue = ops.queue.clone();
-                    let name = d.name.clone();
-                    let id = d.id.clone();
-                    tokio::spawn(async move {
-                        loop {
-                            notify.notified().await;
-                            let _ = queue.enqueue(
-                                JobSpec::new(JobKind::IncrementalSync, format!("Refresh {name}"))
-                                    .dig(id.clone())
-                                    .priority(Priority::Interactive),
-                            );
-                        }
-                    });
+            let mut rx = domains.triggers.subscribe();
+            let queue = ops.queue.clone();
+            let app = self.clone();
+            tokio::spawn(async move {
+                loop {
+                    let target = match rx.recv().await {
+                        Ok(t) => t,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => None,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    };
+                    let digs = match target {
+                        Some(id) => app.dig(&id).ok().into_iter().collect(),
+                        None => app.list_digs().unwrap_or_default(),
+                    };
+                    for d in digs {
+                        let _ = queue.enqueue(
+                            JobSpec::new(JobKind::IncrementalSync, format!("Refresh {}", d.name))
+                                .dig(d.id.clone())
+                                .priority(Priority::Interactive),
+                        );
+                    }
                 }
-            }
+            });
         }
         rinfo!(Category::Jobs, "background work started");
     }
@@ -473,35 +525,168 @@ impl App {
     }
 
     /// `boot` with a settings override applied first (tests, the CLI's flags).
+    /// An `offline` config with no explicit override gets the offline one:
+    /// the person's settings with the scripted judge, no LLM and no Gmail
+    /// client, so no run reaches the network.
     pub async fn boot_with(
         self: &Arc<Self>,
         background: bool,
         override_settings: Option<Settings>,
     ) -> Result<Arc<Ops>> {
         let settings = self.attach_settings()?;
+        let override_settings = override_settings.or_else(|| {
+            self.config.offline.then(|| {
+                let mut s = settings.settings();
+                s.judge.provider = JudgeProvider::Scripted;
+                s.llm.provider = LlmProvider::Null;
+                s.gmail.client_id = String::new();
+                s
+            })
+        });
         if let Some(o) = override_settings {
-            settings.save(o)?;
+            // In memory only: an override is this run's, never the person's file.
+            settings.override_in_memory(o)?;
+            // The watcher starts below and only sees later saves.
+            self.load_autonomy(&settings);
         }
         let s = settings.settings();
-        let gmail = if s.gmail.client_id.is_empty() {
-            None
-        } else {
-            Some(riddle_gmail::GmailOAuthConfig::new(
-                s.gmail.client_id.clone(),
-                None,
-            ))
-        };
-        self.attach_domains(gmail)?;
+        self.services
+            .insert(Arc::new(crate::live::SecretsChanged::default()));
+        self.attach_domains(crate::live::gmail_config(&s))?;
         self.attach_ai(&ai_config(&s));
         self.attach_judge(&judge_config(&s)).await;
-        let ops = self.attach_ops(settings)?;
+        let ops = self.attach_ops(settings.clone())?;
+        self.watch_settings(ops.clone(), settings);
         for d in self.list_digs()? {
             self.refresh_dig_status(&d.id);
         }
+        self.record_system_timezone();
+        // Stored decisions and facts from before this build catch up now:
+        // off the boot path in the app, inline for the CLI and tests.
         if background {
+            let app = self.clone();
+            tokio::task::spawn_blocking(move || app.backfill_all());
             self.start_background(&ops);
             self.enqueue_catch_up_all();
+        } else {
+            self.backfill_all();
         }
         Ok(ops)
+    }
+
+    /// Keep the profile's timezone the system's, so "Expires: end of day"
+    /// ends the user's day. Every boot, because the person travels and the
+    /// Mac follows; nothing else sets it. Bookkeeping: a failure is logged
+    /// and the Finds it would time fall back to UTC.
+    pub fn record_system_timezone(&self) {
+        let zone = match iana_time_zone::get_timezone() {
+            Ok(z) => z,
+            Err(e) => {
+                rwarn!(Category::App, "system timezone unreadable: {e}");
+                return;
+            }
+        };
+        let index = self.stores.index();
+        let result = repo::user_profile::get(&index).and_then(|mut p| {
+            if p.timezone.as_deref() == Some(zone.as_str()) {
+                return Ok(());
+            }
+            p.timezone = Some(zone.clone());
+            repo::user_profile::put(&index, &p)
+        });
+        if let Err(e) = result {
+            rwarn!(Category::App, "timezone not recorded: {}", e.kind.as_str());
+        }
+    }
+
+    /// Every boot-time backfill, each once per Dig.
+    pub fn backfill_all(&self) {
+        self.rewrite_all_reasons_in_words();
+        // People first: the facts refresh copies each sender's rhythm.
+        self.refresh_all_people_cadence();
+        self.refresh_all_message_facts();
+    }
+
+    /// People recorded before `Person::cadence` existed gain it: every
+    /// address of the Dig is refreshed once. Sync keeps it current after.
+    pub fn refresh_all_people_cadence(&self) {
+        // v2: `on_schedule` joined `cadence`; v3: `every_few_days`.
+        // A person's mail spans Digs, and `open_digs` holds only those opened
+        // so far: open every one first, or a Dig not yet touched this boot
+        // would count as having no mail and be marked done.
+        if let Err(e) = self.list_digs().and_then(|digs| {
+            digs.iter()
+                .try_for_each(|d| self.stores.dig(&d.id).map(drop))
+        }) {
+            rwarn!(
+                Category::App,
+                "people cadence deferred: {}",
+                e.kind.as_str()
+            );
+            return;
+        }
+        self.once_per_dig("people_cadence_v3", |dig_id| {
+            let profile = repo::user_profile::get(&self.stores.index())?;
+            riddle_people::rebuild_for_dig(
+                &self.stores.index(),
+                &self.stores.open_digs(),
+                dig_id,
+                &profile,
+                self.services.clock.now(),
+            )
+        });
+    }
+
+    /// Run `body` once on each Dig, remembering in the index store
+    /// (`<key>:<dig id>`) which Digs it has run on. The one mechanism behind
+    /// every boot-time backfill: two of them carried their own flag, their
+    /// own "warn and go on" loop and their own count line. A failure on one
+    /// Dig is reported and the rest go on; that Dig runs again next boot,
+    /// because the flag is set only after the body succeeds. Tests clear the
+    /// flag to run a body again.
+    pub fn once_per_dig(&self, key: &str, body: impl Fn(&DigId) -> Result<usize>) {
+        let index = self.stores.index();
+        let digs = match self.list_digs() {
+            Ok(d) => d,
+            Err(e) => {
+                rwarn!(Category::Sift, "{key} skipped: {}", e.kind.as_str());
+                return;
+            }
+        };
+        for d in digs {
+            let flag = format!("{key}:{}", d.id);
+            match repo::kv::get(&index, &flag) {
+                Ok(Some(v)) if v == "1" => continue,
+                Ok(_) => {}
+                Err(e) => {
+                    rwarn!(
+                        Category::Sift,
+                        "{key} on {} skipped: {}",
+                        d.id,
+                        e.kind.as_str()
+                    );
+                    continue;
+                }
+            }
+            match body(&d.id) {
+                Ok(n) => {
+                    if let Err(e) = repo::kv::set(&index, &flag, "1") {
+                        rwarn!(
+                            Category::Sift,
+                            "{key} on {} done but not recorded: {}",
+                            d.id,
+                            e.kind.as_str()
+                        );
+                    }
+                    rinfo!(Category::Sift, "{key} on {}: {n} changed", d.id);
+                }
+                Err(e) => rwarn!(
+                    Category::Sift,
+                    "{key} on {} skipped: {}",
+                    d.id,
+                    e.kind.as_str()
+                ),
+            }
+        }
     }
 }

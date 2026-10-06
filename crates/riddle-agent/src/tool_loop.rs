@@ -84,7 +84,7 @@ pub struct LoopBudget {
 impl Default for LoopBudget {
     fn default() -> Self {
         Self {
-            max_iterations: 12,
+            max_iterations: 40,
             max_tool_calls: None,
             max_cost_usd: None,
             max_tokens: None,
@@ -182,6 +182,11 @@ struct State {
     unpriced_calls: u32,
     llm_calls: u32,
     model_id: String,
+    /// Failures per exact call (tool and arguments). The same call failing
+    /// the same way twice is a loop, and ends the turn's tool use sooner
+    /// than any round count would.
+    failures: std::collections::HashSet<String>,
+    repeated_failure: Option<String>,
 }
 
 impl ToolLoop {
@@ -231,6 +236,8 @@ impl ToolLoop {
             model_id: model_id
                 .clone()
                 .unwrap_or_else(|| self.llm.identity().model_id),
+            failures: Default::default(),
+            repeated_failure: None,
         };
         let mut text = String::new();
         let mut stop = LoopStop::EndTurn;
@@ -327,6 +334,17 @@ impl ToolLoop {
                         pending_id: pid,
                         summary,
                     });
+                }
+                if !call.ok {
+                    // A second identical failure is a loop; the first sets the trap.
+                    if !st.failures.insert(format!("{name} {args}"))
+                        && st.repeated_failure.is_none()
+                    {
+                        st.repeated_failure = Some(format!(
+                            "the same {name} call failed twice ({})",
+                            call.summary
+                        ));
+                    }
                 }
                 st.tool_calls.push(call);
                 results.push(block);
@@ -591,11 +609,16 @@ impl ToolLoop {
                     .await
             }
             ReadTool::ListActivity => self.reads.list_activity(scope, args.clone()).await,
+            ReadTool::SimulateMesh => self.reads.simulate_mesh(scope, args.clone()).await,
+            ReadTool::MeshCorrections => self.reads.mesh_corrections(scope, args.clone()).await,
         }
     }
 }
 
 fn exhausted(budget: &LoopBudget, st: &State, iteration: u32) -> Option<String> {
+    if let Some(r) = &st.repeated_failure {
+        return Some(r.clone());
+    }
     if iteration + 1 >= budget.max_iterations {
         return Some(format!(
             "the turn's limit of {} tool rounds is reached",

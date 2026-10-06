@@ -8,21 +8,73 @@ use riddle_store::repo;
 use riddle_store::repo::messages::MessageFilter;
 use std::collections::HashMap;
 
+/// `rule_check:<mesh id>:<message id>` = `right` | `wrong`.
+pub const GRADE_PREFIX: &str = "rule_check:";
+
 impl App {
+    /// The accounts Riddle works on (every one not disabled), with what Sift
+    /// may do to each mailbox right now. Sync, Sift, summaries and every
+    /// read across accounts go through this, so a disabled account drops out
+    /// of all of them at once.
     pub fn list_digs(&self) -> Result<Vec<Dig>> {
-        repo::digs::list(&self.stores.index())
+        Ok(self
+            .list_all_digs()?
+            .into_iter()
+            .filter(|d| !d.disabled)
+            .collect())
+    }
+
+    /// Every account, disabled ones included: for managing accounts (the
+    /// Settings list, the switcher's way back to a disabled account).
+    pub fn list_all_digs(&self) -> Result<Vec<Dig>> {
+        let policy = self.runtime.policy.read().clone();
+        Ok(repo::digs::list(&self.stores.index())?
+            .into_iter()
+            .map(|mut d| {
+                d.mailbox = Some(crate::domains::mailbox_effect(&policy, &d));
+                d
+            })
+            .collect())
     }
 
     pub fn dig(&self, id: &DigId) -> Result<Dig> {
-        repo::digs::get(&self.stores.index(), id)?
-            .ok_or_else(|| RiddleError::not_found(format!("dig {id}")))
+        let mut d = repo::digs::get(&self.stores.index(), id)?
+            .ok_or_else(|| RiddleError::not_found(format!("dig {id}")))?;
+        d.mailbox = Some(crate::domains::mailbox_effect(
+            &self.runtime.policy.read(),
+            &d,
+        ));
+        Ok(d)
+    }
+
+    /// Groups with the rules that name them, so a client can say why a
+    /// group cannot be renamed or deleted without re-deriving the list.
+    pub fn list_dig_groups(&self) -> Result<Vec<DigGroup>> {
+        let index = self.stores.index();
+        Ok(repo::digs::list_groups(&index)?
+            .into_iter()
+            .map(|mut g| {
+                g.used_by = riddle_mail::actions::group_users(&index, &g.name).unwrap_or_default();
+                g
+            })
+            .collect())
     }
 
     /// The morning summary (README "The Core Experience"). Honest: `caught_up`
     /// is false while any Dig has unclassified mail or a running catch-up.
-    pub fn summary(&self, since: chrono::DateTime<chrono::Utc>) -> Result<Summary> {
+    /// With `dig_id` the numbers cover that one Dig, so the Summary and the
+    /// rail badges can follow the Dig switcher instead of contradicting the
+    /// pages that already do.
+    pub fn summary(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+        dig_id: Option<&DigId>,
+    ) -> Result<Summary> {
         let index = self.stores.index();
-        let digs = repo::digs::list(&index)?;
+        let digs = match dig_id {
+            Some(d) => vec![self.dig(d)?],
+            None => repo::digs::list_enabled(&index)?,
+        };
         let mut arrived = 0u64;
         let mut counts: HashMap<DispositionKind, u64> = HashMap::new();
         let mut remaining = 0u64;
@@ -72,12 +124,13 @@ impl App {
                 s.disagreements += repo::corrections::active(&store, 10_000)?.len() as u64;
             }
         }
-        let finds_open = repo::finds::count_open(&index)?;
+        let finds_open = repo::finds::count_open(&index, dig_id)?;
         let running_catch_up = repo::jobs::active(&index)?.iter().any(|j| {
             matches!(
                 j.kind,
                 JobKind::CatchUp | JobKind::InitialSync | JobKind::Sift
             ) && matches!(j.status, JobStatus::Running | JobStatus::Queued)
+                && dig_id.is_none_or(|d| j.dig_id.as_ref().is_none_or(|jd| jd == d))
         });
         Ok(Summary {
             as_of: chrono::Utc::now(),
@@ -106,9 +159,103 @@ impl App {
         })
     }
 
-    /// Messages across Digs (or one Dig), merged newest first. Cross-Dig
-    /// paging uses one offset applied per Dig, which over-fetches by the
-    /// number of Digs; acceptable for a desktop list.
+    /// The trust card's evidence (Flow 7): decisions, corrections and undos
+    /// in the window, what Sift would have archived had the account been at
+    /// Act, per-rule precision, and one offer when an account's last Spoil
+    /// calls all stood. Everything comes from the stores; nothing is asked.
+    pub fn trust_stats(&self, since_days: u32, dig_id: Option<&DigId>) -> Result<TrustStats> {
+        const OFFER_STREAK: u64 = 40;
+        let since = chrono::Utc::now() - chrono::Duration::days(since_days.max(1) as i64);
+        let index = self.stores.index();
+        let digs = match dig_id {
+            Some(d) => vec![self.dig(d)?],
+            None => repo::digs::list_enabled(&index)?,
+        };
+        let policy = self.runtime.policy.read().clone();
+        let mut decisions = 0u64;
+        let mut corrected = 0u64;
+        let mut would_archive = 0u64;
+        let mut per_rule: HashMap<(MeshId, u32), (u64, u64)> = HashMap::new();
+        let mut best_offer: Option<TrustOffer> = None;
+        for dig in &digs {
+            let store = self.stores.dig(&dig.id)?;
+            let level = policy.level_for(Some(&dig.id), crate::domains::PROJECTION_AUTONOMY);
+            let held = level < Autonomy::Act;
+            let (total, spoil) = repo::classifications::sift_totals_since(&store, &since)?;
+            decisions += total;
+            if held && dig.projection == ProjectionMode::Full {
+                would_archive += spoil;
+            }
+            for (mid, version, n) in repo::classifications::decisions_by_mesh_since(&store, &since)?
+            {
+                per_rule.entry((MeshId::from(mid), version)).or_default().0 += n;
+            }
+            let (corrected_here, by_mesh) =
+                repo::corrections::active_since_by_mesh(&store, &since)?;
+            corrected += corrected_here;
+            for (mid, version, n) in by_mesh {
+                per_rule.entry((MeshId::from(mid), version)).or_default().1 += n;
+            }
+            // The seducible moment: consecutive Sift Spoil calls that stood.
+            let reversed_spoil: std::collections::HashSet<MessageId> =
+                repo::corrections::reversed_from_spoil(&store)?
+                    .into_iter()
+                    .collect();
+            let mut streak = 0u64;
+            for id in
+                repo::classifications::recent_sift_ids_of_kind(&store, DispositionKind::Spoil, 200)?
+            {
+                if reversed_spoil.contains(&id) {
+                    break;
+                }
+                streak += 1;
+            }
+            if held
+                && dig.projection != ProjectionMode::None
+                && streak >= OFFER_STREAK
+                && best_offer.as_ref().is_none_or(|o| streak > o.spoil_calls)
+            {
+                best_offer = Some(TrustOffer {
+                    dig_id: dig.id.clone(),
+                    dig_name: dig.name.clone(),
+                    spoil_calls: streak,
+                    projection: dig.projection,
+                    autonomy: level,
+                });
+            }
+        }
+        let undone =
+            repo::activities::undone_count_since(&index, &since, dig_id.map(|d| d.as_str()))?;
+        let mut rules = Vec::new();
+        for ((mid, version), (n, reversed)) in per_rule {
+            if let Some(m) = repo::meshes::get(&index, &mid, version)? {
+                rules.push(RulePrecision {
+                    mesh_id: mid,
+                    name: m.name,
+                    version,
+                    status: m.status,
+                    decisions: n,
+                    reversed,
+                    shadow_proposed: m.shadow_proposed,
+                    shadow_agreed: m.shadow_agreed,
+                    reversed_often: reversed_often(n as usize, reversed as usize),
+                });
+            }
+        }
+        rules.sort_by(|a, b| b.decisions.cmp(&a.decisions).then(a.name.cmp(&b.name)));
+        Ok(TrustStats {
+            since,
+            dig_count: digs.len() as u32,
+            decisions,
+            corrected,
+            undone,
+            would_archive,
+            rules,
+            offer: best_offer,
+        })
+    }
+
+    /// Messages across Digs (or one Dig), merged newest first.
     pub fn list_messages(
         &self,
         dig_id: Option<&DigId>,
@@ -119,15 +266,70 @@ impl App {
             Some(d) => vec![self.dig(d)?],
             None => self.list_digs()?,
         };
+        self.merge_messages(&digs, |_| filter.clone(), page)
+    }
+
+    /// The Priority inbox: only what the user chose to see first. Messages
+    /// carrying a chosen Stratum, a chosen provider label (Starred,
+    /// Important), or belonging to an open Find at or above the chosen
+    /// priority, OR-combined (`Settings.priority_inbox`). The Find sources
+    /// come from the index store and are handed to each Dig's query as ids,
+    /// since a Dig store cannot join across databases.
+    pub fn priority_inbox(
+        &self,
+        dig_id: Option<&DigId>,
+        page: &PageRequest,
+    ) -> Result<Page<MessageSummary>> {
+        let settings = self
+            .services
+            .require::<riddle_settings::SettingsStore>()?
+            .settings();
+        let chosen = settings.priority_inbox;
+        let digs = match dig_id {
+            Some(d) => vec![self.dig(d)?],
+            None => self.list_digs()?,
+        };
+        let mut by_dig: HashMap<DigId, Vec<MessageId>> = HashMap::new();
+        for (dig, message) in repo::finds::open_source_ids(
+            &self.stores.index(),
+            chosen.min_find_priority.unwrap_or(0),
+            &chosen.find_types,
+        )? {
+            by_dig.entry(dig).or_default().push(message);
+        }
+        self.merge_messages(
+            &digs,
+            |dig| MessageFilter {
+                priority: Some(repo::messages::PriorityCriteria {
+                    strata: chosen.strata.clone(),
+                    labels: chosen.labels.clone(),
+                    message_ids: by_dig.get(&dig.id).cloned().unwrap_or_default(),
+                    min_importance: chosen.min_importance,
+                }),
+                ..Default::default()
+            },
+            page,
+        )
+    }
+
+    /// One page across Digs, newest first, with the filter built per Dig.
+    /// Cross-Dig paging uses one offset applied per Dig, which over-fetches
+    /// by the number of Digs; acceptable for a desktop list.
+    fn merge_messages(
+        &self,
+        digs: &[Dig],
+        filter_for: impl Fn(&Dig) -> MessageFilter,
+        page: &PageRequest,
+    ) -> Result<Page<MessageSummary>> {
         if digs.len() == 1 {
             let store = self.stores.dig(&digs[0].id)?;
-            return repo::messages::list(&store, &digs[0].id, filter, page);
+            return repo::messages::list(&store, &digs[0].id, &filter_for(&digs[0]), page);
         }
         let mut items = Vec::new();
         let mut total = 0u64;
-        for dig in &digs {
+        for dig in digs {
             let store = self.stores.dig(&dig.id)?;
-            let p = repo::messages::list(&store, &dig.id, filter, page)?;
+            let p = repo::messages::list(&store, &dig.id, &filter_for(dig), page)?;
             total += p.total.unwrap_or(0);
             items.extend(p.items);
         }
@@ -170,6 +372,7 @@ impl App {
             .or(repo::classifications::current_shadow(&store, id)?)
             .ok_or_else(|| RiddleError::not_found("message has not been sifted yet"))?;
         let trace = repo::traces::get(&store, &class.trace_id)?;
+        let yours = repo::importance::get(&store, id)?;
         let (signals, gate, escalated, rationale) = match &trace {
             Some(t) => (
                 t.signals
@@ -202,12 +405,58 @@ impl App {
             trace_id: class.trace_id.clone(),
             shadow: class.shadow,
             reason: class.reason.clone(),
+            routes: self
+                .route_checks(&class, trace.as_ref())
+                .unwrap_or_default(),
+            importance_set_by_you: yours.is_some(),
+            verification_code: repo::facts::get(&store, id)?
+                .map(|f| f.verification_code)
+                .filter(|c| !c.is_empty()),
+            importance: yours.unwrap_or(class.importance),
         })
+    }
+
+    /// The deciding Mesh version, replayed against the facts and scores the
+    /// decision used. Best effort: an explanation without it still answers.
+    fn route_checks(
+        &self,
+        class: &Classification,
+        trace: Option<&DecisionTrace>,
+    ) -> Option<Vec<RouteCheck>> {
+        let trace = trace?;
+        let index = self.stores.index();
+        let mesh =
+            repo::meshes::get(&index, class.mesh_id.as_ref()?, class.mesh_version?).ok()??;
+        let profile = repo::user_profile::get(&index).unwrap_or_default();
+        let sender = trace.facts.sender.clone();
+        let named = repo::lists::named(&index).unwrap_or_default();
+        let lists = riddle_mesh::ProfileLists {
+            profile: &profile,
+            sender: &sender,
+            facts: &trace.facts,
+            named: &named,
+        };
+        Some(riddle_mesh::check_routes(
+            &mesh,
+            &trace.facts,
+            &trace.signals,
+            &lists,
+        ))
     }
 
     pub fn read_trace(&self, dig_id: &DigId, id: &TraceId) -> Result<DecisionTrace> {
         let store = self.stores.dig(dig_id)?;
         repo::traces::get(&store, id)?.ok_or_else(|| RiddleError::not_found(format!("trace {id}")))
+    }
+
+    /// The dev build's mailbox writes and how many queued changes wait.
+    pub fn mailbox_writes(&self) -> Result<MailboxWritesState> {
+        let policy = self.runtime.policy.read().clone();
+        Ok(MailboxWritesState {
+            dev: policy.dev,
+            writes: policy.writes,
+            held: crate::actions::held_changes(&self.services)?,
+        })
     }
 
     pub fn recent_traces(&self, dig_id: Option<&DigId>, limit: u32) -> Result<Vec<DecisionTrace>> {
@@ -238,7 +487,8 @@ impl App {
         };
         let mut by_task: HashMap<String, (f64, u64)> = HashMap::new();
         let mut by_provider: HashMap<String, (f64, u64)> = HashMap::new();
-        for d in self.list_digs()? {
+        // Money already spent counts whether or not the account is on now.
+        for d in self.list_all_digs()? {
             let store = self.stores.dig(&d.id)?;
             let s = repo::usage::summary(&store, &since)?;
             total.calls += s.calls;
@@ -272,6 +522,90 @@ impl App {
     ) -> Result<Vec<SignalEvaluation>> {
         let store = self.stores.dig(dig_id)?;
         repo::signals::evaluations_for(&store, id)
+    }
+
+    /// Every running Mesh in the order it runs, what each decided over the
+    /// window, and which earlier Meshes take mail it also matches
+    /// (`riddle_mesh::order`). Over enabled accounts, with Sift's policy.
+    pub fn mesh_order(&self, window_days: u32) -> Result<MeshOrder> {
+        riddle_mesh::order::mesh_order(
+            &self.stores,
+            &self.list_digs()?,
+            window_days,
+            self.services.clock.now(),
+            &riddle_mesh::ConfidencePolicy::default(),
+        )
+    }
+
+    /// Every running Mesh with what it decided and how the checked ones
+    /// were graded (`grade_decision`), in run order.
+    pub fn rule_check(&self) -> Result<Vec<RuleCheckRow>> {
+        let index = self.stores.index();
+        let digs = self.list_digs()?;
+        let running = repo::meshes::list_running(&index)?;
+        let mut out = Vec::new();
+        for m in riddle_mesh::eval::ordered(&running) {
+            let mut decided = 0;
+            for d in &digs {
+                decided +=
+                    repo::classifications::count_by_mesh(&*self.stores.dig(&d.id)?, m.id.as_str())?;
+            }
+            let grades = repo::kv::list_prefix(&index, &format!("{GRADE_PREFIX}{}:", m.id))?;
+            out.push(RuleCheckRow {
+                mesh_id: m.id.clone(),
+                mesh_name: m.name.clone(),
+                priority: m.priority,
+                status: m.status,
+                fallback: m.fallback,
+                decided,
+                right: grades.iter().filter(|(_, v)| v == "right").count() as u64,
+                wrong: grades.iter().filter(|(_, v)| v == "wrong").count() as u64,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Up to `limit` recent decisions a Mesh made, ungraded ones first and
+    /// spread over the recent ones rather than the newest run of one sender.
+    pub fn rule_samples(&self, mesh_id: &MeshId, limit: usize) -> Result<Vec<RuleSample>> {
+        let index = self.stores.index();
+        let mut pool = Vec::new();
+        for d in self.list_digs()? {
+            let store = self.stores.dig(&d.id)?;
+            for k in repo::classifications::recent_by_mesh(&store, mesh_id.as_str(), 300)? {
+                let Some(m) = repo::messages::get(&store, &d.id, &k.message_id)? else {
+                    continue;
+                };
+                let grade = repo::kv::get(
+                    &index,
+                    &format!("{GRADE_PREFIX}{}:{}", mesh_id, k.message_id),
+                )?;
+                pool.push(RuleSample {
+                    dig_id: d.id.clone(),
+                    message_id: k.message_id.clone(),
+                    from: m.from.clone(),
+                    subject: m.subject.clone(),
+                    date: m.date,
+                    disposition: k.disposition.clone(),
+                    strata: k.strata.clone(),
+                    grade,
+                });
+            }
+        }
+        pool.sort_by_key(|s| std::cmp::Reverse(s.date));
+        let (ungraded, graded): (Vec<_>, Vec<_>) =
+            pool.into_iter().partition(|s| s.grade.is_none());
+        // One per sender first, so ten checks are not ten mails from one shop.
+        let mut seen = std::collections::HashSet::new();
+        let (first, rest): (Vec<_>, Vec<_>) = ungraded
+            .into_iter()
+            .partition(|s| seen.insert(s.from.email.to_ascii_lowercase()));
+        Ok(first
+            .into_iter()
+            .chain(rest)
+            .chain(graded)
+            .take(limit)
+            .collect())
     }
 
     pub fn list_finds(

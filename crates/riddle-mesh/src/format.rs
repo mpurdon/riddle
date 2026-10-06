@@ -1,7 +1,7 @@
 //! Canonical Mesh text from the AST: what the editor shows after a Director
 //! proposal and what `parse` must read back unchanged (round trip).
 
-use riddle_core::{CmpOp, Disposition, Expr, FactValue, Mesh, MeshOutput, MeshScope};
+use riddle_core::{CmpOp, Disposition, Expiry, Expr, FactValue, Mesh, MeshOutput, MeshScope};
 
 fn fmt_threshold(t: f64) -> String {
     if t == 0.0 {
@@ -73,12 +73,19 @@ pub fn fmt_expr(e: &Expr) -> String {
                 fmt_threshold(*threshold)
             )
         }
-        Expr::Fact { fact, op, value } => match (op, value) {
-            (CmpOp::Eq, FactValue::Bool(true)) => fact.clone(),
-            (CmpOp::Eq, FactValue::Bool(false)) => format!("NOT {fact}"),
-            _ => format!("{fact} {} {}", op.as_str(), fmt_value(value)),
-        },
+        Expr::Fact { fact, op, value } => {
+            let fact = match fact.strip_prefix(riddle_core::HEADER_PREFIX) {
+                Some(h) => format!("header {h}"),
+                None => fact.clone(),
+            };
+            match (op, value) {
+                (CmpOp::Eq, FactValue::Bool(true)) => fact,
+                (CmpOp::Eq, FactValue::Bool(false)) => format!("NOT {fact}"),
+                _ => format!("{fact} {} {}", op.as_str(), fmt_value(value)),
+            }
+        }
         Expr::InList { subject, list } => format!("{subject} IN {}", list.as_str()),
+        Expr::InNamedList { subject, list } => format!("{subject} IN list:{list}"),
         Expr::And { items } => items
             .iter()
             .map(|i| fmt_child(i, 2))
@@ -112,6 +119,20 @@ pub fn fmt_output(o: &MeshOutput) -> String {
     if o.notify {
         parts.push("Notify".into());
     }
+    if o.replaces {
+        parts.push("Replaces".into());
+    }
+    if let Some(e) = o.expires {
+        parts.push(format!("Expires: {}", fmt_expiry(e)));
+    }
+    if let Some(i) = o.importance {
+        let s = i.as_str();
+        parts.push(format!(
+            "Importance: {}{}",
+            s[..1].to_ascii_uppercase(),
+            &s[1..]
+        ));
+    }
     parts.join(" + ")
 }
 
@@ -137,13 +158,46 @@ pub fn format(m: &Mesh) -> String {
     }
     if !m.routes.is_empty() {
         out.push_str("\nROUTES\n");
+        let mut open_block: Option<&Expr> = None;
         for (i, r) in m.routes.iter().enumerate() {
+            // Consecutive routes under the same WHEN print as one block.
+            if open_block.is_some() && r.when.as_ref() != open_block {
+                out.push_str("\nEND\n");
+                open_block = None;
+            }
+            if let (Some(gate), None) = (&r.when, open_block) {
+                out.push_str(&format!("\nWHEN {}\n", fmt_expr(gate)));
+                open_block = Some(gate);
+                let head = match &r.local {
+                    Some(c) => format!("IF {}", fmt_expr(c)),
+                    None => "ELSE".to_string(),
+                };
+                out.push_str(&format!(
+                    "    {head}\n        → {}\n",
+                    fmt_output(&r.output)
+                ));
+                continue;
+            }
+            if open_block.is_some() {
+                let head = match &r.local {
+                    Some(c) => format!("ELSE IF {}", fmt_expr(c)),
+                    None => "ELSE".to_string(),
+                };
+                out.push_str(&format!(
+                    "    {head}\n        → {}\n",
+                    fmt_output(&r.output)
+                ));
+                continue;
+            }
             let head = match (&r.condition, i) {
                 (Expr::Always, _) => "ELSE".to_string(),
                 (c, 0) => format!("IF {}", fmt_expr(c)),
                 (c, _) => format!("ELSE IF {}", fmt_expr(c)),
             };
             out.push_str(&format!("\n{head}\n    → {}\n", fmt_output(&r.output)));
+        }
+        if open_block.is_some() {
+            out.push_str("\nEND\n");
         }
     }
     if !m.guards.is_empty() {
@@ -160,6 +214,32 @@ pub fn format(m: &Mesh) -> String {
         }
     }
     out
+}
+
+/// `48` → `(2, "day")`, `18` → `(18, "hour")`: whole days when it divides,
+/// so `Expires:` and its sentence agree on the unit.
+pub fn split_hours(h: u32) -> (u32, &'static str) {
+    if h.is_multiple_of(24) {
+        (h / 24, "day")
+    } else {
+        (h, "hour")
+    }
+}
+
+/// What `Expires:` says, in the form the parser reads back.
+pub fn fmt_expiry(e: Expiry) -> String {
+    match e {
+        Expiry::After { hours } => fmt_hours(hours),
+        Expiry::AfterMinutes { minutes } => format!("{minutes}m"),
+        Expiry::EndOfDay => "end of day".into(),
+        Expiry::NextMorning => "next morning".into(),
+    }
+}
+
+/// `48` → `2d`, `18` → `18h`: the shortest form `Expires:` reads back.
+pub fn fmt_hours(h: u32) -> String {
+    let (n, unit) = split_hours(h);
+    format!("{n}{}", &unit[..1])
 }
 
 #[cfg(test)]

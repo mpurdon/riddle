@@ -5,6 +5,8 @@ import type { GmailSettings } from "./GmailSettings";
 import type { JudgeSettings } from "./JudgeSettings";
 import type { LlmSettings } from "./LlmSettings";
 import type { LogLevel } from "./LogLevel";
+import type { NotificationSettings } from "./NotificationSettings";
+import type { PriorityInboxSettings } from "./PriorityInboxSettings";
 import type { PrivacyMode } from "./PrivacyMode";
 import type { ProjectionMode } from "./ProjectionMode";
 
@@ -13,6 +15,6 @@ import type { ProjectionMode } from "./ProjectionMode";
  */
 export type Settings = { schemaVersion: number, developerMode: boolean, logLevel: LogLevel, 
 /**
- * Finds at or above this priority (0–100) interrupt; the rest wait.
+ * Finds at or above this priority (0–100) interrupt in Stream mode; the rest wait.
  */
-notifyPriorityThreshold: number, shadowPeriodDays: number, judge: JudgeSettings, llm: LlmSettings, budgets: BudgetSettings, gmail: GmailSettings, autonomy: AutonomySettings, projectionDefault: ProjectionMode, privacyDefault: PrivacyMode, launchAtLogin: boolean, closeToHide: boolean, };
+notifyPriorityThreshold: number, notifications: NotificationSettings, priorityInbox: PriorityInboxSettings, shadowPeriodDays: number, judge: JudgeSettings, llm: LlmSettings, budgets: BudgetSettings, gmail: GmailSettings, autonomy: AutonomySettings, projectionDefault: ProjectionMode, privacyDefault: PrivacyMode, launchAtLogin: boolean, closeToHide: boolean, };

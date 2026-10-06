@@ -319,6 +319,8 @@ mod tests {
                 status: DigStatus::NotConnected,
                 shadow_started_at: None,
                 created_at: Utc::now(),
+                disabled: false,
+                mailbox: None,
             };
             let fx = FixtureProvider::new(
                 dig.id.clone(),

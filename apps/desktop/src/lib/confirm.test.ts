@@ -37,6 +37,7 @@ describe('the type-count and two-step dialogs read the Action layer, not the cal
     expect(expectedCount(pending({ realArguments: { count: 8 }, args: { messageIds: ['a', 'b'] } }))).toBe(8)
     expect(expectedCount(pending({ realArguments: null, args: { messageIds: ['a', 'b'] } }))).toBe(2)
     expect(expectedCount(pending({ realArguments: {}, args: {} }))).toBeNull()
+    expect(expectedCount(pending({ realArguments: { digId: 'd', name: 'Work', count: 1100 } }))).toBe(1100)
   })
   it('reads real recipients and subject for a send', () => {
     const r = realRecipients(pending({ realArguments: { to: [{ email: 'a@x.example', name: 'A' }], cc: ['b@x.example'], bcc: [], subject: 'Hi' } }))

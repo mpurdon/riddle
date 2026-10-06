@@ -142,3 +142,18 @@ export async function call<T>(command: string, args: Record<string, unknown> = {
     inFlight.delete(id)
   }
 }
+
+/**
+ * Open a link outside the app: the opener plugin in Tauri, a new tab in the
+ * browser build. Failure is logged and swallowed; a link that did not open
+ * never fails the work around it.
+ */
+export function openExternal(href: string): void {
+  if (isTauri) {
+    void import('@tauri-apps/plugin-opener')
+      .then((m) => m.openUrl(href))
+      .catch((e) => log('warn', 'ui', `openUrl failed: ${String((e as Error)?.message ?? e)}`))
+  } else {
+    window.open(href, '_blank', 'noopener,noreferrer')
+  }
+}

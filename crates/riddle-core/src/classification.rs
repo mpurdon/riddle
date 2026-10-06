@@ -110,6 +110,17 @@ pub struct Classification {
     pub shadow: bool,
     pub created_at: DateTime<Utc>,
     pub superseded_at: Option<DateTime<Utc>>,
+    /// The `+ Replaces` series this decision belongs to (Mesh and sender):
+    /// only the newest message of a series keeps its standing; the older
+    /// ones are superseded by it.
+    #[serde(default)]
+    #[ts(optional)]
+    pub series: Option<String>,
+    /// How much the message matters, as the rule or Sift decided it. The
+    /// user's own level for the message lives beside it, not here, so a
+    /// rule re-deciding the message never overwrites it.
+    #[serde(default)]
+    pub importance: crate::importance::Importance,
 }
 
 /// Per-stage timing for one message, in milliseconds (§68).

@@ -71,7 +71,7 @@ export function TraceView({ t }: { t: DecisionTrace }) {
             {facts.map(([k, v]) => (
               <div key={k} className="flex justify-between border-b border-line/40 py-px">
                 <span className="mono text-ink-2">{k}</span>
-                <span className={cx('mono', v === true && 'text-moss', v === false && 'text-clay')}>{String(v ?? '—')}</span>
+                <span className={cx('mono truncate pl-2', v === true && 'text-moss', v === false && 'text-clay')} title={typeof v === 'object' && v ? JSON.stringify(v) : undefined}>{typeof v === 'object' && v ? `${Object.keys(v).length} fields` : String(v ?? '—')}</span>
               </div>
             ))}
             <div className="flex justify-between border-b border-line/40 py-px">

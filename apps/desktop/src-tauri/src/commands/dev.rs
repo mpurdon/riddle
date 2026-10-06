@@ -33,7 +33,7 @@ pub struct DevInfo {
 }
 
 #[tauri::command]
-pub fn dev_info(state: State<'_, AppState>) -> Result<DevInfo> {
+pub async fn dev_info(state: State<'_, AppState>) -> Result<DevInfo> {
     let stores_ref = state.stores();
     let mut stores = vec![StoreInfo {
         label: "index".into(),
@@ -72,7 +72,7 @@ pub fn dev_info(state: State<'_, AppState>) -> Result<DevInfo> {
 
 /// Webview log lines land in the backend log and the tail. Never fails.
 #[tauri::command]
-pub fn ui_log(level: String, category: String, message: String) {
+pub async fn ui_log(level: String, category: String, message: String) {
     let lvl = match level.as_str() {
         "error" => log::Level::Error,
         "warn" => log::Level::Warn,
@@ -86,7 +86,7 @@ pub fn ui_log(level: String, category: String, message: String) {
 }
 
 #[tauri::command]
-pub fn read_app_logs(
+pub async fn read_app_logs(
     limit: Option<u32>,
     category: Option<String>,
     level: Option<String>,
@@ -102,7 +102,7 @@ pub fn read_app_logs(
 }
 
 #[tauri::command]
-pub fn log_categories() -> Vec<&'static str> {
+pub async fn log_categories() -> Vec<&'static str> {
     Category::ALL.iter().map(|c| c.as_str()).collect()
 }
 
@@ -114,7 +114,7 @@ pub struct InFlight {
 }
 
 #[tauri::command]
-pub fn in_flight_calls(state: State<'_, AppState>) -> Result<Vec<InFlight>> {
+pub async fn in_flight_calls(state: State<'_, AppState>) -> Result<Vec<InFlight>> {
     let g = state.in_flight.lock();
     let mut v: Vec<InFlight> = g
         .values()
@@ -136,8 +136,8 @@ fn _assert_error_is_serializable(e: RiddleError) -> String {
 /// directories, store sizes, fault state, and the last warnings. No
 /// identifiers that could carry content, no settings values that are secrets.
 #[tauri::command]
-pub fn export_diagnostics(state: State<'_, AppState>) -> Result<String> {
-    let info = dev_info(state.clone())?;
+pub async fn export_diagnostics(state: State<'_, AppState>) -> Result<String> {
+    let info = dev_info(state.clone()).await?;
     let mut out = String::new();
     out.push_str(&format!(
         "Riddle {} ({}{}) built {} [{}]\n",
@@ -189,7 +189,7 @@ pub fn export_diagnostics(state: State<'_, AppState>) -> Result<String> {
 /// Drop derived caches (the in-memory log tail keeps its lines; SQLite
 /// caches are compacted). Stores are never touched.
 #[tauri::command]
-pub fn clear_caches(state: State<'_, AppState>) -> Result<u64> {
+pub async fn clear_caches(state: State<'_, AppState>) -> Result<u64> {
     let mut freed = 0u64;
     if state.dirs.cache.exists() {
         if let Ok(rd) = std::fs::read_dir(&state.dirs.cache) {

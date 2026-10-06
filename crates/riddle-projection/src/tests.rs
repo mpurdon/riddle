@@ -40,6 +40,8 @@ fn harness(mode: ProjectionMode) -> Harness {
         status: DigStatus::NotConnected,
         shadow_started_at: None,
         created_at: chrono::Utc::now(),
+        disabled: false,
+        mailbox: None,
     };
     repo::digs::upsert(&stores.index(), &dig).unwrap();
     let fixture = Arc::new(FixtureProvider::new(
@@ -93,6 +95,7 @@ fn sift_classification(dig: &Dig, m: &Message, d: Disposition) -> Classification
         id: ClassificationId::new(),
         message_id: m.id.clone(),
         dig_id: dig.id.clone(),
+        importance: Importance::default_for(&d),
         disposition: d,
         strata: vec![],
         notify: false,
@@ -106,6 +109,7 @@ fn sift_classification(dig: &Dig, m: &Message, d: Disposition) -> Classification
         shadow: false,
         created_at: chrono::Utc::now(),
         superseded_at: None,
+        series: None,
     }
 }
 

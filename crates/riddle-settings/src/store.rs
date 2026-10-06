@@ -116,6 +116,22 @@ impl SettingsStore {
         Ok(next)
     }
 
+    /// Use `next` for this process only: validated and announced like a
+    /// save, never written. For the CLI's offline boot and for tests. The
+    /// offline boot used to `save` its scripted-judge overrides, and one
+    /// `riddle --offline simulate` against a real profile replaced the
+    /// person's judge and model settings on disk with the test doubles.
+    pub fn override_in_memory(&self, mut next: Settings) -> Result<Settings> {
+        let _guard = self.save_lock.lock();
+        next.validate()?;
+        next.schema_version = SETTINGS_SCHEMA_VERSION;
+        apply_presence(&mut next, self.secrets.as_ref());
+        *self.settings.write() = next.clone();
+        let _ = self.tx.send(next.clone());
+        rinfo!(Category::App, "settings overridden in memory");
+        Ok(next)
+    }
+
     /// Edit in place: `f` sees the current settings and the result is saved.
     pub fn update(&self, f: impl FnOnce(&mut Settings)) -> Result<Settings> {
         let mut next = self.settings();
@@ -239,6 +255,7 @@ pub fn load_state(path: &Path) -> Result<State> {
 mod tests {
     use super::*;
     use crate::secrets::{FixedPresence, NoSecrets};
+    use crate::JudgeProvider;
     use riddle_core::{Autonomy, RecordingSink};
 
     fn open(dir: &Path, dev: bool) -> SettingsStore {
@@ -250,6 +267,35 @@ mod tests {
             Arc::new(RecordingSink::default()),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn an_in_memory_override_changes_this_run_and_leaves_the_file_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(dir.path(), true);
+        let mut on_disk = store.settings();
+        on_disk.developer_mode = false;
+        store.save(on_disk).unwrap();
+        let before = std::fs::read_to_string(store.config_path()).unwrap();
+        let mut scripted = store.settings();
+        scripted.judge.provider = JudgeProvider::Scripted;
+        scripted.developer_mode = true;
+        let effective = store.override_in_memory(scripted).unwrap();
+        assert_eq!(effective.judge.provider, JudgeProvider::Scripted);
+        assert_eq!(store.settings().judge.provider, JudgeProvider::Scripted);
+        assert!(store.subscribe().borrow().developer_mode);
+        assert_eq!(
+            std::fs::read_to_string(store.config_path()).unwrap(),
+            before,
+            "the file is the person's; an override never touches it"
+        );
+        assert_eq!(
+            load_settings(store.config_path(), true)
+                .unwrap()
+                .judge
+                .provider,
+            JudgeProvider::Jev
+        );
     }
 
     #[test]

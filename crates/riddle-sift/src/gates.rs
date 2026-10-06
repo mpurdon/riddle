@@ -14,6 +14,9 @@ use riddle_core::Facts;
 /// Why the sender can never be Spoil or Contamination, if so.
 pub fn never_hidden_reason(facts: &Facts, input: &SiftInput) -> Option<String> {
     let sender = input.message.from.email.to_ascii_lowercase();
+    if facts.from_me {
+        return Some("the message is yours".into());
+    }
     if facts.sender_in_never_hidden {
         return Some("sender is on the Never Hidden list".into());
     }
@@ -40,6 +43,11 @@ pub fn never_hidden_reason(facts: &Facts, input: &SiftInput) -> Option<String> {
 pub fn contamination_evidence(facts: &Facts, people: &crate::PeopleFacts) -> Option<String> {
     if facts.gmail_spam {
         return Some("Gmail marked it as spam".into());
+    }
+    // "I have access to your account", sent as if from the user: their own
+    // address on the From line of mail that failed authentication.
+    if facts.spoofs_me {
+        return Some("it claims to come from your own address and fails authentication".into());
     }
     if facts.lookalike_domain && !facts.dmarc_pass {
         return Some("the sender's domain imitates a known one and fails authentication".into());
@@ -69,15 +77,18 @@ pub fn contamination_evidence(facts: &Facts, people: &crate::PeopleFacts) -> Opt
 /// Whether a Find may be created for an unknown sender (§41): a
 /// deterministic fact must support it, because senders can steer Signals.
 pub fn find_supported(facts: &Facts) -> Result<(), String> {
-    let known = facts.sender_in_contacts
-        || facts.sender_replied_to_before
+    let known = facts.known()
         || facts.same_organisation
         || facts.sender_in_never_hidden
         || facts.sender_is_vip;
     if !facts.first_time_sender || known {
         return Ok(());
     }
-    let authenticated = facts.spf_pass || facts.dkim_pass || facts.dmarc_pass;
+    // At a free mailbox, authentication proves only that someone with an
+    // account there sent it: a scam opener impersonating an investor from a
+    // numbered Gmail address passed SPF, DKIM and DMARC.
+    let authenticated =
+        !facts.free_mail_sender && (facts.spf_pass || facts.dkim_pass || facts.dmarc_pass);
     if (facts.directly_addressed && authenticated)
         || facts.has_calendar_part
         || facts.has_structured_receipt

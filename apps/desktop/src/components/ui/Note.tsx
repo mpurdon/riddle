@@ -5,7 +5,7 @@ import type { Tone } from '@/lib/selectors'
 const tones: Record<Tone, string> = {
   neutral: 'border-line bg-sand text-ink-2',
   ok: 'border-moss/30 bg-moss/10 text-ink',
-  busy: 'border-ochre/30 bg-ochre/10 text-ink',
+  busy: 'border-slate/30 bg-slate/10 text-ink',
   warn: 'border-ochre/40 bg-ochre/10 text-ink',
   bad: 'border-rust/40 bg-rust/10 text-ink',
 }

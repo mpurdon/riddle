@@ -45,5 +45,13 @@ pub fn explain(dig_store: &Store, message_id: &MessageId) -> Result<Explanation>
         trace_id: classification.trace_id.clone(),
         shadow: classification.shadow,
         reason: classification.reason,
+        // Replaying the Mesh needs the index store; the app's explain does it.
+        routes: vec![],
+        importance_set_by_you: repo::importance::get(dig_store, message_id)?.is_some(),
+        verification_code: repo::facts::get(dig_store, message_id)?
+            .map(|f| f.verification_code)
+            .filter(|c| !c.is_empty()),
+        importance: repo::importance::get(dig_store, message_id)?
+            .unwrap_or(classification.importance),
     })
 }

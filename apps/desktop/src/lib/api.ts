@@ -6,6 +6,7 @@
  * with its id, which is how every confirmation tier completes.
  */
 import { call } from './ipc'
+import type { MailboxWritesState } from '@/bindings/MailboxWritesState'
 import type { ActionInvocation } from '@/bindings/ActionInvocation'
 import type { ActionMeta } from '@/bindings/ActionMeta'
 import type { ActionOutcome } from '@/bindings/ActionOutcome'
@@ -29,10 +30,16 @@ import type { PendingAction } from '@/bindings/PendingAction'
 import type { Signal } from '@/bindings/Signal'
 import type { SignalEvaluation } from '@/bindings/SignalEvaluation'
 import type { SimulationReport } from '@/bindings/SimulationReport'
+import type { MeshOrder } from '@/bindings/MeshOrder'
+import type { NamedListDef } from '@/bindings/NamedListDef'
+import type { PackInfo } from '@/bindings/PackInfo'
+import type { RuleCheckRow } from '@/bindings/RuleCheckRow'
+import type { RuleSample } from '@/bindings/RuleSample'
 import type { Stratum } from '@/bindings/Stratum'
 import type { Summary } from '@/bindings/Summary'
 import type { TaskCentre } from '@/bindings/TaskCentre'
 import type { Thread } from '@/bindings/Thread'
+import type { TrustStats } from '@/bindings/TrustStats'
 import type { UsageSummary } from '@/bindings/UsageSummary'
 import type { UserProfile } from '@/bindings/UserProfile'
 import type {
@@ -93,7 +100,7 @@ export const listPending = () => call<PendingAction[]>('list_pending')
 
 export const page = (cursor: string | null = null, limit = 50): PageRequest => ({ cursor, limit })
 
-export const summary = () => call<Summary>('summary')
+export const summary = (digId?: string | null) => call<Summary>('summary', { digId: digId ?? null })
 export const taskCentre = () => call<TaskCentre>('task_centre')
 export const listDigs = () => call<Dig[]>('list_digs')
 export const listDigGroups = () => call<DigGroup[]>('list_dig_groups')
@@ -103,8 +110,10 @@ export const listMessages = (args: { digId?: string | null; filter: MessageFilte
 export const getMessage = (digId: string, messageId: string) => call<Message>('get_message', { digId, messageId })
 export const getThread = (digId: string, threadId: string) => call<Thread>('get_thread', { digId, threadId })
 export const explain = (digId: string, messageId: string) => call<Explanation>('explain', { digId, messageId })
-export const search = (args: { query: string; digId?: string | null; page: PageRequest }) =>
-  call<Page<MessageSummary>>('search', { query: args.query, digId: args.digId ?? null, page: args.page })
+/** The Priority inbox: what `settings.priorityInbox` chooses, OR-combined; the backend reads the settings itself. */
+export const priorityInbox = (args: { digId?: string | null; page: PageRequest }) => call<Page<MessageSummary>>('priority_inbox', { digId: args.digId ?? null, page: args.page })
+export const search = (args: { query: string; digId?: string | null; page: PageRequest; shadowOnly?: boolean }) =>
+  call<Page<MessageSummary>>('search', { query: args.query, digId: args.digId ?? null, page: args.page, shadowOnly: args.shadowOnly ?? false })
 
 export const listFinds = (args: { status?: FindStatus; findType?: FindType; digId?: string | null; page: PageRequest }) =>
   call<Page<Find>>('list_finds', { status: args.status ?? null, findType: args.findType ?? null, digId: args.digId ?? null, page: args.page })
@@ -136,6 +145,17 @@ export const parseMesh = (text: string) => call<Mesh>('parse_mesh', { text })
 export const simulateMesh = (args: { text?: string; meshId?: string; version?: number; windowDays?: number }) =>
   call<SimulationReport>('simulate_mesh', { text: args.text ?? null, meshId: args.meshId ?? null, version: args.version ?? null, windowDays: args.windowDays ?? null })
 
+/** Every running Mesh with its graded spot checks. */
+export const ruleCheck = () => call<RuleCheckRow[]>('rule_check')
+/** Recent decisions a Mesh made, ungraded and one per sender first. */
+export const ruleSamples = (meshId: string, limit = 10) => call<RuleSample[]>('rule_samples', { meshId, limit })
+/** Every rule pack Riddle knows, with what it would do here. */
+export const listPacks = () => call<PackInfo[]>('list_packs')
+/** The user's named lists (`sender IN list:banks`). */
+export const listNamedLists = () => call<NamedListDef[]>('list_named_lists')
+/** Running Meshes in the order they run, with what each decides and what earlier ones take from it. */
+export const meshOrder = (windowDays: number) => call<MeshOrder>('mesh_order', { windowDays })
+
 export const listSignals = () => call<Signal[]>('list_signals')
 export const signalVersions = (name: string) => call<Signal[]>('signal_versions', { name })
 export const signalEvaluations = (digId: string, messageId: string) => call<SignalEvaluation[]>('signal_evaluations', { digId, messageId })
@@ -146,6 +166,8 @@ export const listConversations = () => call<Conversation[]>('list_conversations'
 export const getConversation = (conversationId: string) => call<Conversation>('get_conversation', { conversationId })
 export const directorSend = (args: { conversationId?: string | null; message: string; digIds?: string[] | null }) =>
   call<DirectorSendResult>('director_send', { conversationId: args.conversationId ?? null, message: args.message, digIds: args.digIds ?? null })
+
+export const directorRetry = (conversationId: string) => call<DirectorSendResult>('director_retry', { conversationId })
 
 export const listExpeditions = () => call<Expedition[]>('list_expeditions')
 export const getExpedition = (expeditionId: string) => call<Expedition>('get_expedition', { expeditionId })
@@ -160,13 +182,18 @@ export const readTrace = (digId: string, traceId: string) => call<DecisionTrace>
 export const recentTraces = (args: { digId?: string | null; limit?: number } = {}) =>
   call<DecisionTrace[]>('recent_traces', { digId: args.digId ?? null, limit: args.limit ?? null })
 export const usageSummary = (sinceDays?: number) => call<UsageSummary>('usage_summary', { sinceDays: sinceDays ?? null })
+export const trustStats = (args: { digId?: string | null; sinceDays?: number } = {}) =>
+  call<TrustStats>('trust_stats', { digId: args.digId ?? null, sinceDays: args.sinceDays ?? null })
 export const traceStats = (args: { digId?: string | null; sinceDays?: number } = {}) =>
   call<TraceStats>('trace_stats', { digId: args.digId ?? null, sinceDays: args.sinceDays ?? null })
 
 export const devInfo = () => call<DevInfo>('dev_info')
 export const devArmed = () => call<boolean>('dev_armed')
+/** The dev build's Hold / Ask / Allow and how many mailbox changes wait. */
+export const mailboxWrites = () => call<MailboxWritesState>('mailbox_writes')
 export const probeJudge = () => call<ProbeResult>('probe_judge')
 export const probeLlm = () => call<ProbeResult>('probe_llm')
+export const testNotification = () => call<{ sent: boolean }>('test_notification')
 export const probeProvider = (digId: string) => call<ProbeResult>('probe_provider', { digId })
 export const readAppLogs = (args: { limit?: number; category?: string | null; level?: string | null; text?: string | null } = {}) =>
   call<LogLine[]>('read_app_logs', { limit: args.limit ?? null, category: args.category ?? null, level: args.level ?? null, text: args.text ?? null })
@@ -184,6 +211,8 @@ export const qk = {
   digs: ['digs'] as const,
   digGroups: ['dig_groups'] as const,
   messages: ['messages'] as const,
+  /** Under `messages`, so every message Action's invalidation refreshes it too. */
+  priorityInbox: ['messages', 'priority'] as const,
   message: (digId: string, messageId: string) => ['message', digId, messageId] as const,
   thread: (digId: string, threadId: string) => ['thread', digId, threadId] as const,
   explain: (digId: string, messageId: string) => ['explain', digId, messageId] as const,
@@ -192,6 +221,13 @@ export const qk = {
   find: (id: string) => ['find', id] as const,
   activity: ['activity'] as const,
   meshes: ['meshes'] as const,
+  /** Under `meshes`, so every Mesh Action's invalidation refreshes the order too. */
+  meshOrder: (windowDays: number) => ['meshes', 'order', windowDays] as const,
+  /** Under `meshes`, so installing a pack or saving a list refreshes Meshes, order and packs together. */
+  packs: ['meshes', 'packs'] as const,
+  ruleCheck: ['meshes', 'check'] as const,
+  ruleSamples: (meshId: string) => ['meshes', 'samples', meshId] as const,
+  namedLists: ['meshes', 'lists'] as const,
   mesh: (id: string, version: number | null) => ['mesh', id, version] as const,
   meshVersions: (id: string) => ['mesh_versions', id] as const,
   signals: ['signals'] as const,
@@ -210,8 +246,10 @@ export const qk = {
   recentTraces: ['recent_traces'] as const,
   usage: ['usage'] as const,
   traceStats: ['trace_stats'] as const,
+  trustStats: ['trust_stats'] as const,
   devInfo: ['dev_info'] as const,
   devArmed: ['dev_armed'] as const,
+  mailboxWrites: ['mailbox_writes'] as const,
   logs: ['logs'] as const,
   logCategories: ['log_categories'] as const,
   inFlight: ['in_flight'] as const,

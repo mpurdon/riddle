@@ -155,7 +155,7 @@ fn harness_with(provider: Arc<dyn ProviderStateCheck>, external: bool, dev: bool
         .policy(AutonomyPolicy {
             default: Autonomy::Act,
             dev,
-            armed: false,
+            writes: ProviderWrites::Hold,
             ..Default::default()
         });
     for a in actions() {

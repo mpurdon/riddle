@@ -1,0 +1,33 @@
+id = "documents"
+name = "Documents and signatures"
+version = 1
+area = "Work and home"
+summary = "A document waiting for your signature, or a file someone wants you to see, becomes a Find; a copy of something you already signed is Filed."
+band = "specific"
+
+[detect]
+sender_domains = ["adobesign.com", "docusign.net", "docusign.com", "hellosign.com", "dropboxsign.com", "pandadoc.net"]
+min_messages = 1
+
+[[lists]]
+name = "signature_services"
+description = "E-signature services"
+question = "Which e-signature services send you documents?"
+default = ["adobesign.com", "echosign.com", "docusign.net", "docusign.com", "hellosign.com", "dropboxsign.com", "pandadoc.net", "signnow.com"]
+
+[[meshes]]
+rank = 12
+text = '''
+Mesh: Documents and signatures
+Scope:
+All Digs
+
+ROUTES
+
+IF sender_domain IN list:signature_services AND (subject CONTAINS "You signed" OR subject CONTAINS "completed" OR subject CONTAINS "has been signed")
+    → Filed + Stratum: Documents
+ELSE IF sender_domain IN list:signature_services
+    → Find: Do + Stratum: Documents
+ELSE IF sender CONTAINS "drive-shares" OR subject CONTAINS "Share request for"
+    → Find: Review + Stratum: Documents
+'''

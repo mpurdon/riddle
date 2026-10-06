@@ -11,7 +11,7 @@
 //! `docs/COMMANDS.md`; the ts-rs binding is generated from this file.
 
 use riddle_actions::policy::AutonomyPolicy;
-use riddle_core::{Autonomy, DigId, PrivacyMode, ProjectionMode};
+use riddle_core::{Autonomy, DigId, FindType, PrivacyMode, ProjectionMode};
 use riddle_errors::{Result, RiddleError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -193,6 +193,108 @@ pub struct AutonomySettings {
     pub per_action: BTreeMap<String, Autonomy>,
 }
 
+/// How Riddle interrupts (Flow 12). `Stream` notifies for every Find at or
+/// above the priority threshold as it is raised. `Brief` interrupts at once
+/// only for an allow-list (Never Hidden senders, and the Find types below
+/// when due within `due_within_hours`) and says everything else in a brief
+/// at the chosen times: "7 need you, 5 Unresolved, 41 filed." Notifications
+/// carry the reason, never the subject, so a locked screen shows nothing
+/// private.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum NotificationMode {
+    Stream,
+    #[default]
+    Brief,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct NotificationSettings {
+    pub mode: NotificationMode,
+    /// Local times as "HH:MM", at most four.
+    pub brief_times: Vec<String>,
+    /// Find types that may interrupt at once when due soon.
+    pub immediate_types: Vec<FindType>,
+    pub due_within_hours: u32,
+    /// A Find from a Never Hidden sender always interrupts at once.
+    pub never_hidden_immediate: bool,
+}
+
+impl Default for NotificationSettings {
+    fn default() -> Self {
+        Self {
+            mode: NotificationMode::Brief,
+            brief_times: vec!["09:00".into(), "16:00".into()],
+            immediate_types: vec![FindType::Pay, FindType::Respond],
+            due_within_hours: 24,
+            never_hidden_immediate: true,
+        }
+    }
+}
+
+impl NotificationSettings {
+    /// "09:00" → (9, 0); None for anything else.
+    pub fn parse_time(t: &str) -> Option<(u32, u32)> {
+        let (h, m) = t.trim().split_once(':')?;
+        let (h, m) = (h.parse::<u32>().ok()?, m.parse::<u32>().ok()?);
+        (h < 24 && m < 60).then_some((h, m))
+    }
+}
+
+/// TOML has no null, and a missing key takes the struct default (70) on
+/// load, so "no threshold" would silently come back as 70 after a restart.
+/// It is written as `0`, which means the same thing: any open Find.
+mod opt_priority {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    pub fn serialize<S: Serializer>(v: &Option<u8>, s: S) -> Result<S::Ok, S::Error> {
+        v.unwrap_or(0).serialize(s)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u8>, D::Error> {
+        let v = Option::<u8>::deserialize(d)?;
+        Ok(v.filter(|p| *p > 0))
+    }
+}
+
+/// What the Priority inbox surfaces (the `priority_inbox` read). The
+/// criteria are OR-combined: a message appears if it carries any chosen
+/// Stratum, any chosen Gmail label, is at or above `min_importance`, or is
+/// a source of an open Find at or above `min_find_priority` (of the chosen
+/// types; empty means any type).
+/// One real mailbox had 6,000 messages and 400 open Finds, and no view
+/// showed only what its owner had marked as mattering.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct PriorityInboxSettings {
+    pub strata: Vec<String>,
+    /// Provider label ids verbatim (`STARRED`, `IMPORTANT`).
+    pub labels: Vec<String>,
+    /// 0–100; `None` (written as 0) means any open Find.
+    #[serde(with = "opt_priority")]
+    #[ts(type = "number | null")]
+    pub min_find_priority: Option<u8>,
+    /// Empty means every type.
+    pub find_types: Vec<FindType>,
+    /// Messages at this level or above, whatever their decision; `None`
+    /// leaves Importance out of it.
+    pub min_importance: Option<riddle_core::Importance>,
+}
+
+impl Default for PriorityInboxSettings {
+    fn default() -> Self {
+        Self {
+            strata: vec![],
+            labels: vec!["STARRED".into()],
+            min_find_priority: Some(70),
+            find_types: vec![],
+            min_importance: Some(riddle_core::Importance::High),
+        }
+    }
+}
+
 /// The config file (`settings.toml`). See the module header.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
@@ -201,8 +303,11 @@ pub struct Settings {
     pub schema_version: u32,
     pub developer_mode: bool,
     pub log_level: LogLevel,
-    /// Finds at or above this priority (0–100) interrupt; the rest wait.
+    /// Finds at or above this priority (0–100) interrupt in Stream mode; the rest wait.
     pub notify_priority_threshold: u32,
+    pub notifications: NotificationSettings,
+    #[serde(default)]
+    pub priority_inbox: PriorityInboxSettings,
     pub shadow_period_days: u32,
     pub judge: JudgeSettings,
     pub llm: LlmSettings,
@@ -230,6 +335,8 @@ impl Settings {
             developer_mode: false,
             log_level: LogLevel::Info,
             notify_priority_threshold: 70,
+            notifications: NotificationSettings::default(),
+            priority_inbox: PriorityInboxSettings::default(),
             shadow_period_days: 7,
             judge: JudgeSettings::default(),
             llm: LlmSettings::default(),
@@ -285,6 +392,24 @@ impl Settings {
         if self.notify_priority_threshold > 100 {
             problems.push("notifyPriorityThreshold must be between 0 and 100".into());
         }
+        if self.notifications.brief_times.len() > 4 {
+            problems.push("notifications.briefTimes allows at most four times".into());
+        }
+        for t in &self.notifications.brief_times {
+            if NotificationSettings::parse_time(t).is_none() {
+                problems.push(format!("notifications.briefTimes: {t:?} is not HH:MM"));
+            }
+        }
+        if self.notifications.due_within_hours > 24 * 14 {
+            problems.push("notifications.dueWithinHours must be at most 336".into());
+        }
+        if self
+            .priority_inbox
+            .min_find_priority
+            .is_some_and(|p| p > 100)
+        {
+            problems.push("priorityInbox.minFindPriority must be between 0 and 100".into());
+        }
         if self.shadow_period_days > 365 {
             problems.push("shadowPeriodDays must be at most 365".into());
         }
@@ -319,9 +444,9 @@ impl Settings {
         }
     }
 
-    /// The Action layer's policy (§51). `dev` and `armed` are runtime facts
-    /// the integrator sets: `dev` from the build profile, `armed` preserved
-    /// from `Runtime::is_armed()` across settings reloads.
+    /// The Action layer's policy (§51). `dev` and `writes` are runtime facts
+    /// the integrator sets: `dev` from the build profile, `writes` preserved
+    /// from `Runtime::writes()` across settings reloads.
     pub fn autonomy_policy(&self) -> AutonomyPolicy {
         AutonomyPolicy {
             default: self.autonomy.default,
@@ -337,7 +462,7 @@ impl Settings {
                 .iter()
                 .map(|(k, v)| ((None, k.clone()), *v))
                 .collect(),
-            armed: false,
+            writes: riddle_core::ProviderWrites::Hold,
             dev: false,
         }
     }
@@ -492,6 +617,27 @@ mod tests {
         assert_eq!(err.kind, riddle_errors::ErrorKind::Invalid);
         let problems = err.detail.unwrap()["problems"].as_array().unwrap().len();
         assert_eq!(problems, 3);
+    }
+
+    #[test]
+    fn the_priority_inbox_defaults_to_starred_and_finds_at_70_and_no_threshold_survives_toml() {
+        let s = Settings::prod_defaults();
+        assert_eq!(s.priority_inbox.labels, vec!["STARRED".to_string()]);
+        assert!(s.priority_inbox.strata.is_empty());
+        assert_eq!(s.priority_inbox.min_find_priority, Some(70));
+        assert!(s.priority_inbox.find_types.is_empty());
+        let mut any = s.clone();
+        any.priority_inbox.min_find_priority = None;
+        let text = any.to_toml_string().unwrap();
+        assert!(text.contains("minFindPriority = 0"), "{text}");
+        let back: Settings = toml::from_str(&text).unwrap();
+        assert_eq!(back.priority_inbox.min_find_priority, None);
+        let mut high = s;
+        high.priority_inbox.min_find_priority = Some(101);
+        assert_eq!(
+            high.validate().unwrap_err().kind,
+            riddle_errors::ErrorKind::Invalid
+        );
     }
 
     #[test]

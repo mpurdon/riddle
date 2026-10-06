@@ -47,7 +47,7 @@ export default function DeveloperPage() {
       <nav className="w-52 shrink-0 overflow-auto border-r border-line bg-sand/40 py-2" aria-label="Developer Mode">
         {groups.map((g) => (
           <div key={g} className="mb-2">
-            <div className="px-3 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-clay">{g}</div>
+            <div className="px-3 pb-0.5 text-2xs font-semibold uppercase tracking-wider text-clay">{g}</div>
             {NAV.filter((n) => n.group === g).map((n) => (
               <NavLink key={n.to} to={n.to ? `/developer/${n.to}` : '/developer'} end={n.to === ''} className={({ isActive }) => cx('block px-3 py-1 text-sm text-ink-2 hover:text-ink', isActive && 'bg-sand-2 font-medium text-ink')}>
                 {n.label}

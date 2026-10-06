@@ -72,6 +72,23 @@ pub fn recent(store: &Store, limit: u32) -> Result<Vec<UsageRow>> {
     })
 }
 
+/// Spend today in USD by one provider on one task: the LLM on Sift is
+/// escalation, which has its own per-Dig cap (§55).
+pub fn spent_today_on(store: &Store, provider: &str, task: UsageTask) -> Result<f64> {
+    let start = chrono::Utc::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap_or_default()
+        .and_utc();
+    store.read(|c| {
+        c.query_row(
+            "SELECT COALESCE(SUM(cost_usd),0) FROM usage WHERE at >= ?1 AND provider = ?2 AND task = ?3",
+            params![ts(&start), provider, task.as_str()],
+            |r| r.get(0),
+        )
+    })
+}
+
 /// Spend today in USD for one or more providers (`jev`, `bedrock`), for the
 /// per-Dig daily budgets (§56): the judge and the LLM are budgeted separately
 /// whatever task used them.

@@ -7,17 +7,22 @@
  * Grammar (one statement per line, blank lines ignored):
  *   Mesh: <name> v<version>
  *   Scope:                         followed by  All Digs | <Group> Digs | Dig: <name>
+ *   Priority: <integer>               (lower runs first within a scope)
+ *   Autonomy: Observe | Suggest | Act   (the most this Mesh may do in the mailbox)
  *   ROUTES
  *   IF <cond>                      ELSE IF <cond>     ELSE
  *       AND <cond> | OR <cond>     (continuation lines)
  *       → <output> [+ <output>]    (also "->")
  *   GUARDS
  *   NEVER <Disposition> IF <cond>
- * Conditions: signal@vN [:CHOICE] <op> <number> | sender IN <list> | fact <name> <op> <value>
+ * Conditions: signal@vN [:CHOICE] <op> <number> | sender IN <list> | <fact> <op> <value> | <fact> CONTAINS <text>
+ *             | <bare bool fact> | header <Name> <op> <value>   (the older `fact <name> …` spelling still parses)
  * Outputs: Find: <Type> | Filed | Spoil | Contamination | Escalate | Stratum: <name> | Notify
  */
 import type { Expr } from '@/bindings/Expr'
+import type { Autonomy } from '@/bindings/Autonomy'
 import type { CmpOp } from '@/bindings/CmpOp'
+import { FACTS } from '@/features/meshes/meshSyntax'
 import type { Guard } from '@/bindings/Guard'
 import type { Route } from '@/bindings/Route'
 import type { MeshOutput } from '@/bindings/MeshOutput'
@@ -26,6 +31,7 @@ import type { DispositionKind } from '@/bindings/DispositionKind'
 import type { FindType } from '@/bindings/FindType'
 import type { NamedList } from '@/bindings/NamedList'
 import type { Disposition } from '@/bindings/Disposition'
+import type { Expiry } from '@/bindings/Expiry'
 import type { RiddleError } from '@/bindings/RiddleError'
 import type { MeshParseIssue } from '../types'
 
@@ -35,6 +41,10 @@ export interface ParsedMesh {
   scope: MeshScope
   routes: Route[]
   guards: Guard[]
+  /** `Autonomy:` header: the most this Mesh may do in the mailbox. */
+  autonomy?: Autonomy
+  /** `Priority:` header; lower runs first within a scope. */
+  priority?: number
 }
 
 export class MeshSyntaxError extends Error {
@@ -53,6 +63,9 @@ export class MeshSyntaxError extends Error {
   }
 }
 
+/** Mirrors `HEADER_PREFIX` in riddle-core: a kept header reads as the fact `header:<name>`. */
+const HEADER_PREFIX = 'header:'
+const isFact = (name: string) => FACTS.some((f) => f.name === name.toLowerCase())
 const OPS: Record<string, CmpOp> = { '>': 'gt', '>=': 'gte', '<': 'lt', '<=': 'lte', '=': 'eq', '==': 'eq', '!=': 'neq' }
 const LISTS: NamedList[] = ['never_hidden', 'contacts', 'vips', 'organisation', 'family']
 const FIND_TYPES: Record<string, FindType> = {
@@ -73,23 +86,56 @@ interface DigLookup {
   digIdByName: (name: string) => string | null
 }
 
+/** `end of day`, `next morning`, or a span (`18h`, `2 days`); a string is the error. Mirrors riddle-mesh `parse_expiry`. */
+function parseExpiry(raw: string): Expiry | string {
+  const t = raw.trim().toLowerCase().split(/\s+/).join(' ')
+  if (t === 'end of day' || t === 'end of the day') return { kind: 'end_of_day' }
+  if (t === 'next morning' || t === 'tomorrow morning') return { kind: 'next_morning' }
+  const mins = /^(\d+)\s*(m|min|mins|minutes?)$/.exec(t)
+  if (mins) {
+    const n = Number(mins[1])
+    if (n >= 1 && n < 60) return { kind: 'after_minutes', minutes: n }
+    if (n >= 60 && n % 60 === 0) return { kind: 'after', hours: n / 60 }
+    return 'Expires in minutes is between 1 and 59, e.g. Expires: 15m'
+  }
+  const m = /^(\d+)\s*(h|hr|hrs|hours?|d|days?)$/.exec(t)
+  if (!m) return `Expires needs minutes, hours, days, end of day or next morning, e.g. Expires: 18h or Expires: end of day, not "${raw.trim()}"`
+  const hours = Number(m[1]) * (m[2].startsWith('d') ? 24 : 1)
+  if (hours < 1 || hours > 90 * 24) return 'Expires is between 1 hour and 90 days'
+  return { kind: 'after', hours }
+}
+
 export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: () => null }): ParsedMesh {
   const issues: MeshParseIssue[] = []
   const lines = text.split('\n')
   let name = ''
   let version = 1
   let scope: MeshScope | null = null
+  let autonomy: Autonomy | undefined
+  let priority: number | undefined
   const routes: Route[] = []
   const guards: Guard[] = []
   let section: 'head' | 'scope' | 'routes' | 'guards' = 'head'
   let cur: { conds: { join: 'and' | 'or'; expr: Expr }[]; isElse: boolean; line: number; text: string[] } | null = null
   let sawElse = false
+  // The open `WHEN <condition>` block: its routes AND the condition in, and
+  // its ELSE is the condition alone (riddle-mesh `parse`).
+  // Held in an object: it is set inside closures, which control flow
+  // analysis cannot follow from the end of the function.
+  const when: { block: { expr: Expr; text: string; hasRoute: boolean } | null } = { block: null }
 
   const fail = (line: number, message: string, column?: number) => issues.push({ line, message, column })
 
+  const factExpr = (fact: string, op: string, rawValue: string): Expr => {
+    const raw = rawValue.trim()
+    const value = raw === 'true' || raw === 'false' ? { type: 'bool' as const, value: raw === 'true' } : /^-?\d+(\.\d+)?$/.test(raw) ? { type: 'number' as const, value: Number(raw) } : { type: 'text' as const, value: raw.replace(/^"|"$/g, '') }
+    return { kind: 'fact', fact, op: op.toUpperCase() === 'CONTAINS' ? 'contains' : OPS[op], value }
+  }
   const parseCond = (s: string, line: number): Expr | null => {
     const src = s.trim()
-    let m = /^sender\s+IN\s+([a-z_]+)$/i.exec(src)
+    let m = /^(sender|sender_domain)\s+IN\s+list:([a-z0-9_]+)$/i.exec(src)
+    if (m) return { kind: 'in_named_list', subject: m[1].toLowerCase(), list: m[2].toLowerCase() }
+    m = /^sender\s+IN\s+([a-z_]+)$/i.exec(src)
     if (m) {
       const list = m[1].toLowerCase() as NamedList
       if (!LISTS.includes(list)) {
@@ -98,12 +144,13 @@ export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: (
       }
       return { kind: 'in_list', subject: 'sender', list }
     }
-    m = /^fact\s+([a-z_]+)\s*(>=|<=|!=|==|>|<|=)\s*(.+)$/i.exec(src)
-    if (m) {
-      const raw = m[3].trim()
-      const value = raw === 'true' || raw === 'false' ? { type: 'bool' as const, value: raw === 'true' } : /^-?\d+(\.\d+)?$/.test(raw) ? { type: 'number' as const, value: Number(raw) } : { type: 'text' as const, value: raw.replace(/^"|"$/g, '') }
-      return { kind: 'fact', fact: m[1], op: OPS[m[2]], value }
-    }
+    // The real grammar: `header X-GitHub-Reason = ci_activity`, `subject CONTAINS "invoice"`,
+    // `sender_domain = github.com`, a bare `has_attachments`, and the older `fact <name> <op> <value>`.
+    m = /^header\s+("?[A-Za-z0-9-]+"?)\s+(CONTAINS|>=|<=|!=|==|>|<|=)\s*(.+)$/i.exec(src)
+    if (m) return factExpr(`${HEADER_PREFIX}${m[1].replace(/"/g, '').toLowerCase()}`, m[2], m[3])
+    m = /^(?:fact\s+)?([a-z_][a-z0-9_]*)\s+(CONTAINS)\s+(.+)$/i.exec(src) ?? /^(?:fact\s+)?([a-z_][a-z0-9_]*)\s*(>=|<=|!=|==|>|<|=)\s*(.+)$/i.exec(src)
+    if (m && (/^fact\s/i.test(src) || isFact(m[1]))) return factExpr(m[1], m[2], m[3])
+    if (/^[a-z_][a-z0-9_]*$/i.test(src) && isFact(src)) return { kind: 'fact', fact: src, op: 'eq', value: { type: 'bool', value: true } }
     m = /^([a-z_][a-z0-9_]*)@v(\d+)(?::([A-Za-z_]+))?\s*(>=|<=|!=|==|>|<|=)\s*(\.\d+|\d+(?:\.\d+)?)$/i.exec(src)
     if (m) {
       const threshold = Number(m[5])
@@ -119,7 +166,7 @@ export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: (
   }
 
   const parseOutput = (s: string, line: number): MeshOutput | null => {
-    const out: MeshOutput = { disposition: null, strata: [], notify: false, escalate: false }
+    const out: MeshOutput = { disposition: null, strata: [], notify: false, escalate: false, replaces: false }
     const parts = s.split('+').map((p) => p.trim()).filter(Boolean)
     if (!parts.length) {
       fail(line, 'route needs an output after →')
@@ -136,14 +183,35 @@ export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: (
         out.disposition = { kind: 'find', find_type: t }
         continue
       }
+      const expiresText = /^Expires$/i.test(p) ? '' : /^Expires:\s*(.*)$/i.exec(p)?.[1]
+      if (expiresText !== undefined) {
+        const expires = parseExpiry(expiresText)
+        if (typeof expires === 'string') {
+          fail(line, expires)
+          return null
+        }
+        out.expires = expires
+        continue
+      }
+      m = /^Importance:\s*(.+)$/i.exec(p)
+      if (m) {
+        const level = m[1].trim().toLowerCase()
+        if (level !== 'low' && level !== 'normal' && level !== 'high' && level !== 'critical') {
+          fail(line, `unknown Importance ${m[1].trim()}; use Low, Normal, High or Critical`)
+          return null
+        }
+        out.importance = level
+        continue
+      }
       m = /^Stratum:\s*(.+)$/i.exec(p)
       if (m) {
-        out.strata.push(m[1].trim())
+        for (const name of m[1].split(',').map((x) => x.trim()).filter(Boolean)) if (!out.strata.includes(name)) out.strata.push(name)
         continue
       }
       const low = p.toLowerCase()
       if (low === 'escalate') out.escalate = true
       else if (low === 'notify') out.notify = true
+      else if (low === 'replaces') out.replaces = true
       else if (low === 'filed') out.disposition = { kind: 'filed' }
       else if (low === 'spoil') out.disposition = { kind: 'spoil' }
       else if (low === 'contamination') out.disposition = { kind: 'contamination' }
@@ -154,6 +222,16 @@ export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: (
         fail(line, `unknown output "${p}"`)
         return null
       }
+    }
+    // Mirrors riddle-mesh `parse_output`: Replaces on a Find, Spoil or Filed; Expires on a Find.
+    const kind = out.disposition?.kind
+    if (out.replaces && kind !== 'find' && kind !== 'spoil' && kind !== 'filed') {
+      fail(line, 'Replaces needs a Find, Spoil or Filed, e.g. Spoil + Replaces')
+      return null
+    }
+    if (out.expires != null && kind !== 'find') {
+      fail(line, 'Expires closes Finds, so it needs a Find, e.g. Find: Do + Expires')
+      return null
     }
     return out
   }
@@ -189,6 +267,18 @@ export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: (
       if (!name) fail(line, 'Mesh needs a name')
       return
     }
+    if ((m = /^Priority:\s*(.*)$/i.exec(s)) && section === 'head') {
+      if (/^-?\d+$/.test(m[1].trim())) priority = Number(m[1].trim())
+      else fail(line, 'Priority: needs an integer')
+      return
+    }
+    if ((m = /^Autonomy:\s*(.+)$/i.exec(s)) && section === 'head') {
+      const v = m[1].trim().toLowerCase()
+      if (v === 'trusted') fail(line, 'Autonomy: a Mesh can be capped at Observe, Suggest or Act; Trusted is an account setting')
+      else if (v === 'observe' || v === 'suggest' || v === 'act') autonomy = v
+      else fail(line, `Autonomy: "${m[1].trim()}" is not one of Observe, Suggest or Act`)
+      return
+    }
     if (/^Scope:\s*$/i.test(s)) {
       section = 'scope'
       return
@@ -199,7 +289,6 @@ export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: (
       return
     }
     if (/^ROUTES$/i.test(s)) {
-      if (!name) fail(line, 'ROUTES before "Mesh: <name>"')
       section = 'routes'
       return
     }
@@ -216,45 +305,9 @@ export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: (
         if (scope) fail(line, 'Scope given twice')
         scope = parseScope(s, line)
         return
-      case 'routes': {
-        if ((m = /^(?:ELSE\s+)?IF\s+(.+)$/i.exec(s))) {
-          if (cur) closeRoute(line)
-          if (sawElse) fail(line, 'no route may follow ELSE')
-          const expr = parseCond(m[1], line)
-          cur = { conds: expr ? [{ join: 'and', expr }] : [], isElse: false, line, text: [s] }
-          return
-        }
-        if (/^ELSE$/i.test(s)) {
-          if (cur) closeRoute(line)
-          if (sawElse) fail(line, 'ELSE given twice')
-          sawElse = true
-          cur = { conds: [], isElse: true, line, text: [s] }
-          return
-        }
-        if ((m = /^(AND|OR)\s+(.+)$/i.exec(s))) {
-          if (!cur || cur.isElse) {
-            fail(line, `${m[1].toUpperCase()} outside an IF`)
-            return
-          }
-          const expr = parseCond(m[2], line)
-          if (expr) cur.conds.push({ join: m[1].toLowerCase() as 'and' | 'or', expr })
-          cur.text.push(s)
-          return
-        }
-        if ((m = /^(?:→|->)\s*(.+)$/.exec(s))) {
-          if (!cur) {
-            fail(line, '→ without an IF or ELSE')
-            return
-          }
-          const out = parseOutput(m[1], line)
-          cur.text.push(s)
-          if (out) routes.push({ condition: cur.isElse ? { kind: 'always' } : combine(cur.conds), output: out, text: cur.text.join('\n') })
-          cur = null // the route is consumed even when its output was bad
-          return
-        }
-        fail(line, `cannot read "${s}" in ROUTES; expected IF, ELSE IF, ELSE, AND, OR or →`)
+      case 'routes':
+        routeLine(s, line)
         return
-      }
       case 'guards': {
         if ((m = /^NEVER\s+([A-Za-z]+)\s+IF\s+(.+)$/i.exec(s))) {
           const never = DISPOSITIONS[m[1].toLowerCase()]
@@ -263,7 +316,7 @@ export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: (
             return
           }
           const expr = parseCond(m[2], line)
-          if (expr) guards.push({ never, condition: expr, text: s })
+          if (expr) guards.push({ never, condition: expr, text: s, words: '' })
           return
         }
         fail(line, `cannot read "${s}" in GUARDS; expected NEVER <Disposition> IF <condition>`)
@@ -272,11 +325,90 @@ export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: (
     }
   })
   if (cur) closeRoute(lines.length)
-  if (!name) issues.unshift({ line: 1, message: 'a Mesh starts with "Mesh: <name> vN"' })
+  if (when.block?.hasRoute === false) fail(lines.length, 'a WHEN block needs at least one route')
+  if (!name) name = 'Untitled Mesh'
   if (!scope) scope = { kind: 'all_digs' }
   if (!routes.length && !guards.length && !issues.length) fail(lines.length || 1, 'a Mesh needs at least one route or guard')
   if (issues.length) throw new MeshSyntaxError(issues.sort((a, b) => a.line - b.line))
-  return { name, version, scope, routes, guards }
+  return { name, version, scope, routes, guards, autonomy, priority }
+
+  function routeLine(s: string, line: number): void {
+    let m: RegExpExecArray | null
+    // `IF cond → output` on one line reads as the condition, then the arrow.
+    if ((m = /^(?!→|->)(.+?)\s*(→|->)\s*(.*)$/.exec(s))) {
+      routeLine(m[1], line)
+      routeLine(`→ ${m[3]}`, line)
+      return
+    }
+    if ((m = /^WHEN\s+(.+)$/i.exec(s))) {
+      if (cur) closeRoute(line)
+      if (when.block && !when.block.hasRoute) fail(line, 'a WHEN block needs at least one route before the next WHEN')
+      const expr = parseCond(m[1], line)
+      when.block = expr ? { expr, text: s, hasRoute: false } : null
+      sawElse = false
+      return
+    }
+    if (/^END$/i.test(s)) {
+      if (cur) closeRoute(line)
+      if (!when.block) fail(line, 'END without a WHEN')
+      else if (!when.block.hasRoute) fail(line, 'a WHEN block needs at least one route')
+      when.block = null
+      sawElse = false
+      return
+    }
+    if ((m = /^(?:ELSE\s+)?IF\s+(.+)$/i.exec(s))) {
+      if (cur) closeRoute(line)
+      if (sawElse) fail(line, 'no route may follow ELSE')
+      const expr = parseCond(m[1], line)
+      cur = { conds: expr ? [{ join: 'and', expr }] : [], isElse: false, line, text: [s] }
+      return
+    }
+    if (/^ELSE$/i.test(s)) {
+      if (cur) closeRoute(line)
+      if (sawElse) fail(line, 'ELSE given twice')
+      sawElse = true
+      cur = { conds: [], isElse: true, line, text: [s] }
+      return
+    }
+    if ((m = /^(AND|OR)\s+(.+)$/i.exec(s))) {
+      if (!cur || cur.isElse) {
+        fail(line, `${m[1].toUpperCase()} outside an IF`)
+        return
+      }
+      const expr = parseCond(m[2], line)
+      if (expr) cur.conds.push({ join: m[1].toLowerCase() as 'and' | 'or', expr })
+      cur.text.push(s)
+      return
+    }
+    if ((m = /^(?:→|->)\s*(.+)$/.exec(s))) {
+      if (!cur) {
+        fail(line, '→ without an IF or ELSE')
+        return
+      }
+      const out = parseOutput(m[1], line)
+      cur.text.push(s)
+      if (out) routes.push(route(cur, out))
+      cur = null // the route is consumed even when its output was bad
+      return
+    }
+    fail(line, `cannot read "${s}" in ROUTES; expected IF, ELSE IF, ELSE, AND, OR or →`)
+    return
+  }
+
+  function route(r: { conds: { join: 'and' | 'or'; expr: Expr }[]; isElse: boolean; text: string[] }, output: MeshOutput): Route {
+    const local = r.isElse ? null : combine(r.conds)
+    const block = when.block
+    if (!block) return { condition: local ?? { kind: 'always' }, output, text: r.text.join('\n'), when: null, local: null, words: '' }
+    block.hasRoute = true
+    return {
+      condition: local ? { kind: 'and', items: [block.expr, local] } : block.expr,
+      output,
+      text: `${block.text} ▸ ${r.text.join('\n')}`,
+      when: block.expr,
+      local,
+      words: '',
+    }
+  }
 
   function parseScope(s: string, line: number): MeshScope {
     const t = s.trim()
@@ -302,6 +434,8 @@ export interface EvalInput {
   signals: Record<string, number>
   facts: Record<string, boolean | number | string>
   lists: Record<NamedList, boolean>
+  /** Whether the sender is on each named list (`sender IN list:banks`). */
+  named?: Record<string, boolean>
 }
 
 export interface EvalResult {
@@ -330,6 +464,8 @@ function cmp(op: CmpOp, a: number | string | boolean, b: number | string | boole
       return a === b
     case 'neq':
       return a !== b
+    case 'contains':
+      return String(a).toLowerCase().includes(String(b).toLowerCase())
   }
 }
 
@@ -345,6 +481,8 @@ export function evalExpr(e: Expr, input: EvalInput, missing: string[]): boolean 
       return !evalExpr(e.item, input, missing)
     case 'in_list':
       return input.lists[e.list] ?? false
+    case 'in_named_list':
+      return input.named?.[e.list] ?? false
     case 'fact': {
       const v = input.facts[e.fact]
       if (v === undefined) return false

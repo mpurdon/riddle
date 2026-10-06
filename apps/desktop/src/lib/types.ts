@@ -3,11 +3,8 @@
  * backend will expose until a ts-rs binding exists; when one lands in
  * `src/bindings/`, the import here is swapped and nothing else moves.
  */
-import type { Autonomy } from '@/bindings/Autonomy'
 import type { BuildStamp } from '@/bindings/BuildStamp'
 import type { FindType } from '@/bindings/FindType'
-import type { PrivacyMode } from '@/bindings/PrivacyMode'
-import type { ProjectionMode } from '@/bindings/ProjectionMode'
 import type { SimulationReport } from '@/bindings/SimulationReport'
 
 export type DispositionFilter = 'find' | 'filed' | 'spoil' | 'contamination' | 'unresolved'
@@ -23,45 +20,18 @@ export interface MessageFilter {
   until?: string
   stratum?: string
   unclassifiedOnly?: boolean
+  /** The Shadow review list: only messages with a proposal, shown as the proposal. */
+  shadowOnly?: boolean
+  /** false hides mail a newer one of its `+ Replaces` series superseded; true lists only that. */
+  superseded?: boolean
 }
 
-export type LogLevelSetting = 'error' | 'warn' | 'info' | 'debug' | 'trace'
-
-export interface JudgeSettings {
-  provider: 'jev' | 'null' | 'scripted'
-  model: string
-  keySource: 'env' | 'keychain' | 'ssm'
-  ssmProfile?: string
-  ssmParameter?: string
-  apiKeyPresent: boolean
-}
-
-export interface LlmSettings {
-  provider: 'bedrock' | 'null' | 'scripted'
-  profile: string
-  region: string
-  escalationModel: string
-  directorModel: string
-}
-
-export interface Settings {
-  schemaVersion: number
-  developerMode: boolean
-  logLevel: LogLevelSetting
-  notifyPriorityThreshold: number
-  shadowPeriodDays: number
-  judge: JudgeSettings
-  llm: LlmSettings
-  budgets: { dailyJudgeUsd: number; dailyLlmUsd: number; escalationPerDigUsd: number }
-  gmail: { clientId: string; clientSecretPresent: boolean }
-  autonomy: { default: Autonomy; perDig: Record<string, Autonomy>; perAction: Record<string, Autonomy> }
-  projectionDefault: ProjectionMode
-  privacyDefault: PrivacyMode
-  launchAtLogin: boolean
-  closeToHide: boolean
-  /** Spoil digest cadence (README "Spoil"). Not in the spec table; the mock carries it. */
-  spoilDigest?: 'daily' | 'weekly' | 'off'
-}
+export type { LogLevel as LogLevelSetting } from '@/bindings/LogLevel'
+export type { JudgeSettings } from '@/bindings/JudgeSettings'
+export type { LlmSettings } from '@/bindings/LlmSettings'
+export type { NotificationMode } from '@/bindings/NotificationMode'
+export type { NotificationSettings } from '@/bindings/NotificationSettings'
+export type { Settings } from '@/bindings/Settings'
 
 export interface SignalTestSample {
   messageId: string

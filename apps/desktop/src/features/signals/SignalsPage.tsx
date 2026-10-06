@@ -27,6 +27,7 @@ import { Select } from '@/components/ui/Select'
 import { Tabs, TabPanel } from '@/components/ui/Tabs'
 import { ErrorCard } from '@/components/ErrorCard'
 import { PageHeader } from '@/components/Bits'
+import { Resizable } from '@/components/Resizable'
 
 const TONE: Record<SignalStatus, Tone> = { proposed: 'neutral', candidate: 'neutral', evaluating: 'busy', rejected: 'bad', experimental: 'warn', active: 'ok', deprecated: 'neutral' }
 
@@ -49,7 +50,7 @@ export default function SignalsPage() {
   if (list.error) return <ErrorCard error={list.error} onRetry={() => list.refetch()} />
   return (
     <div className="flex min-h-0 flex-1">
-      <section className="flex w-[380px] shrink-0 flex-col border-r border-line">
+      <Resizable as="section" id="signals" side="left" initial={380} min={280} max={720} label="Resize the Signals list" className="flex flex-col border-r border-line">
         <PageHeader title="Signals" subtitle="Riddle's semantic vocabulary: bounded questions the judge answers with probabilities." actions={<Button size="sm" icon={<Plus />} onClick={() => setProposing(true)}>Propose</Button>} />
         <div className="min-h-0 flex-1 overflow-auto" role="listbox" aria-label="Signals">
           {list.data && !signals.length ? <EmptyState icon={<Radio />} title="No Signals." body="System Signals ship with Riddle. Propose one when a Mesh needs a concept that does not exist yet." /> : null}
@@ -61,13 +62,13 @@ export default function SignalsPage() {
                 <Chip tone={TONE[s.status]}>{s.status}</Chip>
               </div>
               <div className="mt-0.5 truncate text-xs text-ink-2">{s.definition}</div>
-              <div className="mt-0.5 text-[11px] text-clay">
+              <div className="mt-0.5 text-2xs text-clay">
                 {s.primitive} · {s.calibration ? `calibrated on ${fmtInt(s.calibration.labelledCount)} · agreement ${fmtPct(s.calibration.heldOutAgreement, 1)}` : 'not calibrated'} · {s.createdBy}
               </div>
             </div>
           ))}
         </div>
-      </section>
+      </Resizable>
       <section className="flex min-w-0 flex-1 flex-col">{name ? <SignalDetail key={name} name={name} /> : <EmptyState title="Select a Signal" body="Definition, choices, calibration and the versions it has been through." />}</section>
       {proposing ? <ProposeDialog onClose={() => setProposing(false)} existing={signals} /> : null}
     </div>

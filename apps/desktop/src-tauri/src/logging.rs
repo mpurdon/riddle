@@ -1,6 +1,10 @@
 //! tauri-plugin-log configured per ARCHITECTURE.md §48: log directory and
 //! stdout in every build, rotation from day one, `[rfc3339][LEVEL][category]`
 //! form, noisy crates pinned to warn.
+//!
+//! The dispatch accepts every level and `log::set_max_level` does the
+//! filtering, so the log level saved in Settings can change while the app
+//! runs (`system`). `RIDDLE_LOG` pins the level for the whole process.
 
 use crate::paths::{AppDirs, Profile};
 use tauri_plugin_log::{Builder, RotationStrategy, Target, TargetKind, TimezoneStrategy};
@@ -11,14 +15,7 @@ pub fn plugin<R: tauri::Runtime>(
     dirs: &AppDirs,
     profile: Profile,
 ) -> tauri::plugin::TauriPlugin<R> {
-    let level = std::env::var("RIDDLE_LOG")
-        .ok()
-        .and_then(|l| l.parse::<log::LevelFilter>().ok())
-        .unwrap_or(if profile.is_dev() {
-            log::LevelFilter::Debug
-        } else {
-            log::LevelFilter::Info
-        });
+    let level = env_level().unwrap_or(log::LevelFilter::Trace);
     let file_name = match profile {
         Profile::Dev => "riddle-dev",
         Profile::Prod => "riddle",
@@ -56,4 +53,19 @@ pub fn plugin<R: tauri::Runtime>(
             ))
         })
         .build()
+}
+
+fn env_level() -> Option<log::LevelFilter> {
+    std::env::var("RIDDLE_LOG")
+        .ok()
+        .and_then(|l| l.parse::<log::LevelFilter>().ok())
+}
+
+/// The level until settings load: `RIDDLE_LOG`, else the profile default.
+pub fn initial_level(profile: Profile) -> log::LevelFilter {
+    env_level().unwrap_or(if profile.is_dev() {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    })
 }

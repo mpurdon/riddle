@@ -19,7 +19,7 @@ export function TracePicker({ traces, value, onPick, filter, title = 'Recent dec
   const list = filter ? traces.filter(filter) : traces
   return (
     <div className="flex w-72 shrink-0 flex-col border-r border-line">
-      <div className="border-b border-line px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-clay">{title} ({list.length})</div>
+      <div className="border-b border-line px-3 py-2 text-2xs font-semibold uppercase tracking-wide text-clay">{title} ({list.length})</div>
       <div className="min-h-0 flex-1 overflow-auto" role="listbox" aria-label={title}>
         {list.map((t) => (
           <div key={t.id} role="option" aria-selected={t.id === value} onClick={() => onPick(t)} className={cx('cursor-default border-b border-line/60 px-3 py-1.5 text-xs', t.id === value ? 'row-selected' : 'hover:bg-sand/60')}>
@@ -45,7 +45,7 @@ export function Section({ title, children, right }: { title: string; children: R
   return (
     <section className="mb-5">
       <div className="mb-1.5 flex items-center justify-between border-b border-line pb-1">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-clay">{title}</h3>
+        <h3 className="text-2xs font-semibold uppercase tracking-wide text-clay">{title}</h3>
         {right}
       </div>
       {children}
@@ -66,18 +66,32 @@ export function KV({ rows }: { rows: [string, React.ReactNode][] }) {
   )
 }
 
+/**
+ * A YES/NO Signal always reads the same way: YES on top in green, NO below in
+ * red. Sorting by score put whichever answer won first, so every row had to
+ * be read label by label to tell a yes from a no. Other choice sets have no
+ * natural order and stay sorted by score, coloured by the threshold.
+ */
+const NOUL: Record<string, string> = { yes: 'bg-moss', no: 'bg-rust' }
+
+export function distributionRows(d: Record<string, number>, threshold = 0.8): { label: string; value: number; bar: string }[] {
+  const entries = Object.entries(d)
+  const noul = entries.length === 2 && entries.every(([k]) => k.toLowerCase() in NOUL)
+  if (noul) return entries.sort(([a]) => (a.toLowerCase() === 'yes' ? -1 : 1)).map(([label, value]) => ({ label, value, bar: NOUL[label.toLowerCase()] }))
+  return entries.sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value, bar: value >= threshold ? 'bg-moss' : 'bg-clay' }))
+}
+
 export function Distribution({ d, threshold }: { d: Record<string, number>; threshold?: number }) {
-  const entries = Object.entries(d).sort((a, b) => b[1] - a[1])
   return (
     <div className="flex flex-col gap-0.5">
-      {entries.map(([k, v]) => (
-        <div key={k} className="flex items-center gap-2 text-xs">
-          <span className="w-16 mono">{k}</span>
+      {distributionRows(d, threshold).map(({ label, value, bar }) => (
+        <div key={label} className="flex items-center gap-2 text-xs">
+          <span className="w-16 mono">{label}</span>
           <div className="relative h-2 w-40 rounded bg-sand-2">
-            <div className={cx('h-full rounded', v >= (threshold ?? 0.8) ? 'bg-moss' : 'bg-clay')} style={{ width: `${Math.round(v * 100)}%` }} />
+            <div className={cx('h-full rounded', bar)} style={{ width: `${Math.round(value * 100)}%` }} />
             {threshold !== undefined ? <div className="absolute top-0 h-full w-px bg-ochre" style={{ left: `${threshold * 100}%` }} title={`threshold ${threshold}`} /> : null}
           </div>
-          <span className="w-8 text-right tabular-nums">{fmtScore(v)}</span>
+          <span className="w-8 text-right tabular-nums">{fmtScore(value)}</span>
         </div>
       ))}
     </div>
@@ -107,7 +121,7 @@ export function JsonBlock({ value, label }: { value: unknown; label: string }) {
       >
         {copied ? 'Copied' : 'Copy'}
       </Button>
-      <pre className="max-h-[60vh] overflow-auto rounded border border-line bg-sand p-2 mono text-[11px] leading-4 selectable">{text}</pre>
+      <pre className="max-h-[60vh] overflow-auto rounded border border-line bg-sand p-2 mono text-2xs leading-4 selectable">{text}</pre>
     </div>
   )
 }

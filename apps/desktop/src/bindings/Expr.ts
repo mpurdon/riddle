@@ -3,4 +3,4 @@ import type { CmpOp } from "./CmpOp";
 import type { FactValue } from "./FactValue";
 import type { NamedList } from "./NamedList";
 
-export type Expr = { "kind": "signal", signal: string, version: number, choice: string | null, op: CmpOp, threshold: number, } | { "kind": "fact", fact: string, op: CmpOp, value: FactValue, } | { "kind": "in_list", subject: string, list: NamedList, } | { "kind": "and", items: Array<Expr>, } | { "kind": "or", items: Array<Expr>, } | { "kind": "not", item: Expr, } | { "kind": "always" };
+export type Expr = { "kind": "signal", signal: string, version: number, choice: string | null, op: CmpOp, threshold: number, } | { "kind": "fact", fact: string, op: CmpOp, value: FactValue, } | { "kind": "in_list", subject: string, list: NamedList, } | { "kind": "in_named_list", subject: string, list: string, } | { "kind": "and", items: Array<Expr>, } | { "kind": "or", items: Array<Expr>, } | { "kind": "not", item: Expr, } | { "kind": "always" };

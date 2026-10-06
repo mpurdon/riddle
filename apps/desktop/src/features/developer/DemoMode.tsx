@@ -97,7 +97,7 @@ export function DemoMode() {
 
       <ol className="mt-5 grid grid-cols-9 gap-1">
         {STEPS.map((s, i) => (
-          <li key={s} className={cx('rounded border px-2 py-1.5 text-center text-[11px]', reached(i) ? 'border-moss/40 bg-moss/10 text-ink' : 'border-line text-clay')}>
+          <li key={s} className={cx('rounded border px-2 py-1.5 text-center text-2xs', reached(i) ? 'border-moss/40 bg-moss/10 text-ink' : 'border-line text-clay')}>
             {s}
           </li>
         ))}
@@ -148,7 +148,7 @@ export function DemoMode() {
 function Step({ n, title, on, children }: { n: number; title: string; on: boolean; children: React.ReactNode }) {
   return (
     <section className={cx('mb-3 rounded border p-3', on ? 'border-line' : 'border-line/50 opacity-60')}>
-      <div className="mb-1 flex items-center gap-2 text-xs font-semibold"><span className={cx('flex size-4 items-center justify-center rounded-full text-[10px]', on ? 'bg-moss/20 text-moss' : 'bg-sand-2 text-clay')}>{n}</span>{title}</div>
+      <div className="mb-1 flex items-center gap-2 text-xs font-semibold"><span className={cx('flex size-4 items-center justify-center rounded-full text-2xs', on ? 'bg-moss/20 text-moss' : 'bg-sand-2 text-clay')}>{n}</span>{title}</div>
       <div className="text-xs">{children}</div>
     </section>
   )

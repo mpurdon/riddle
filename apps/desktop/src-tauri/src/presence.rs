@@ -1,13 +1,50 @@
 //! Process presence (ARCHITECTURE.md §5): a tray item with Open, Refresh
 //! now, Reset window position and Quit; close hides the window; Dock
 //! reopen restores it; a focus or visibility change triggers a refresh pass.
+//!
+//! The window's size and place are saved when they settle, not only at quit.
+//! The window-state plugin writes its file on a clean exit alone, and Riddle
+//! rarely has one: close hides the window, and `tauri dev` and system
+//! restarts end the process outright. The file went unwritten for a week and
+//! every launch opened at the size it held then, nearly the whole screen.
 
 use crate::state::AppState;
 use riddle_core::{ActionInvocation, Principal};
 use riddle_observability::{rdebug, rinfo, Category};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, WindowEvent};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+
+/// What the window remembers between runs: everything but whether it was
+/// shown, since it opens shown and a hidden-at-quit window would stay lost.
+pub fn window_state_flags() -> StateFlags {
+    StateFlags::all() - StateFlags::VISIBLE
+}
+
+/// Bumped by every move or resize; a save runs only if none came after it.
+static WINDOW_CHANGES: AtomicU64 = AtomicU64::new(0);
+
+/// Save the window's size and place once it has stopped moving for half a
+/// second; a drag sends dozens of events and needs one write.
+fn save_window_state_soon(app: &AppHandle) {
+    let seen = WINDOW_CHANGES.fetch_add(1, Ordering::Relaxed) + 1;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        if WINDOW_CHANGES.load(Ordering::Relaxed) == seen {
+            save_window_state(&app);
+        }
+    });
+}
+
+fn save_window_state(app: &AppHandle) {
+    if let Err(e) = app.save_window_state(window_state_flags()) {
+        rdebug!(Category::App, "window state not saved: {e}");
+    }
+}
 
 pub fn install(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Riddle", true, None::<&str>)?;
@@ -87,11 +124,15 @@ pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
                 .unwrap_or(true);
             if close_to_hide {
                 api.prevent_close();
+                save_window_state(window.app_handle());
                 let _ = window.hide();
                 rdebug!(Category::App, "window hidden; process stays resident");
             }
         }
         WindowEvent::Focused(true) => refresh_now(window.app_handle().clone()),
+        WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+            save_window_state_soon(window.app_handle())
+        }
         _ => {}
     }
 }

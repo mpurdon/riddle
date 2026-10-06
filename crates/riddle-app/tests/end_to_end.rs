@@ -112,14 +112,14 @@ async fn a_fixture_dig_syncs_sifts_and_produces_finds_and_an_honest_summary() {
     assert!(why.signals.is_empty(), "no judge call for Contamination");
 
     let summary = app
-        .summary(chrono::Utc::now() - chrono::Duration::days(90))
+        .summary(chrono::Utc::now() - chrono::Duration::days(90), None)
         .unwrap();
     assert_eq!(summary.dig_count, 1);
     assert!(summary.caught_up);
     assert!(summary.finds_open > 0);
     assert_eq!(
         summary.finds_open,
-        repo::finds::count_open(&app.stores.index()).unwrap()
+        repo::finds::count_open(&app.stores.index(), None).unwrap()
     );
 
     // Every classification carries a trace with facts and a build stamp (§92).
@@ -225,7 +225,7 @@ async fn an_injected_review_request_arrives_and_becomes_a_review_find() {
     let dig = add_dig(&app, "Work", 40).await;
     let cancel = CancelFlag::new();
     app.full_pass(&dig.id, 500, &cancel).await.unwrap();
-    let before = repo::finds::count_open(&app.stores.index()).unwrap();
+    let before = repo::finds::count_open(&app.stores.index(), None).unwrap();
     app.runtime
         .invoke_as_user(
             "inject_fixture_message",
@@ -236,7 +236,7 @@ async fn an_injected_review_request_arrives_and_becomes_a_review_find() {
     let report = app.full_pass(&dig.id, 500, &cancel).await.unwrap();
     assert_eq!(report.sync.as_ref().unwrap().added, 1);
     assert_eq!(report.sift.processed, 1);
-    let after = repo::finds::count_open(&app.stores.index()).unwrap();
+    let after = repo::finds::count_open(&app.stores.index(), None).unwrap();
     assert_eq!(after, before + 1, "one new Find");
     let open = repo::finds::list(
         &app.stores.index(),

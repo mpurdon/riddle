@@ -1,0 +1,31 @@
+id = "accounts"
+name = "Accounts and sign-in"
+version = 2
+area = "Essentials"
+summary = "A sign-in code tells you at once, shows the code to copy, and lapses after 15 minutes; verify-your-email messages wait two days."
+band = "specific"
+
+[detect]
+always = true
+
+# v2: the code is read from the message (`has_verification_code`), not
+# guessed from the subject, and the rule runs before Security and account
+# alerts, which had taken half the code mail as plain notifications.
+[[meshes]]
+rank = 15
+text = '''
+Mesh: Sign-in and verification
+Scope:
+All Digs
+
+ROUTES
+
+WHEN NOT gmail_category = promotions AND NOT mailing_list
+    IF has_verification_code
+        → Find: Know + Stratum: Sign-in + Notify + Expires: 15m + Importance: Critical
+    ELSE IF subject CONTAINS "verification code" OR subject CONTAINS "security code" OR subject CONTAINS "one-time" OR subject CONTAINS "sign-in code" OR subject CONTAINS "login code" OR subject CONTAINS "MFA"
+        → Find: Know + Stratum: Sign-in + Expires: 1h
+    ELSE IF subject CONTAINS "verify your email" OR subject CONTAINS "confirm your email" OR subject CONTAINS "verify your account"
+        → Find: Do + Stratum: Sign-in + Expires: 2d
+END
+'''

@@ -28,6 +28,50 @@ pub struct Person {
     pub in_contacts: bool,
     pub dig_ids: Vec<DigId>,
     pub updated_at: DateTime<Utc>,
+    /// How often this sender writes, from when their mail arrived.
+    #[serde(default)]
+    #[ts(optional)]
+    pub cadence: Option<Cadence>,
+    /// At most about one message a day, nearly always within an hour of
+    /// the same local time: mail on a timer, as a reminder is. Cadence says
+    /// how often; this tells a scheduled reminder from a sender that is
+    /// daily because the user's own actions set it off (purchase
+    /// confirmations, notifications).
+    #[serde(default)]
+    pub on_schedule: bool,
+}
+
+/// How regularly a sender writes, classified from arrival dates by
+/// `riddle_people::cadence_of` in the user's timezone. A fact, not a
+/// judgment: a daily sender is daily whether it sends a journal prompt or a
+/// sale, so a Mesh pairs it with a Signal to say which one matters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Cadence {
+    /// Most days, weekends included.
+    Daily,
+    /// Most weekdays, never at weekends.
+    Weekdays,
+    /// Two to four days apart, like a store's sale mail.
+    EveryFewDays,
+    Weekly,
+    Monthly,
+    /// Often enough to judge, with no steady rhythm.
+    Irregular,
+}
+
+impl Cadence {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Cadence::Daily => "daily",
+            Cadence::Weekdays => "weekdays",
+            Cadence::EveryFewDays => "every_few_days",
+            Cadence::Weekly => "weekly",
+            Cadence::Monthly => "monthly",
+            Cadence::Irregular => "irregular",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
@@ -105,6 +149,15 @@ pub struct UserProfile {
     /// Addresses and domains (prefix `@`) that can never be Spoil or Contamination.
     pub never_hidden: Vec<String>,
     pub timezone: Option<String>,
+}
+
+/// The user's zone for "their day": a profile timezone the tz database
+/// knows, else UTC rather than a guess. One rule for every local-day reading
+/// (expiry, cadence, schedule), so they put an arrival on the same day.
+pub fn user_zone(timezone: Option<&str>) -> chrono_tz::Tz {
+    timezone
+        .and_then(|t| t.parse().ok())
+        .unwrap_or(chrono_tz::Tz::UTC)
 }
 
 impl UserProfile {

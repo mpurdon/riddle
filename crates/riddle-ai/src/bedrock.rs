@@ -401,6 +401,14 @@ type Wire = (
 /// Build the Converse request. Untrusted tool results are wrapped here so no
 /// caller can forget; consecutive same-role messages are merged because the
 /// API requires alternation; cache points mark the stable prefix.
+///
+/// Converse refuses a request whose messages carry `toolUse` or `toolResult`
+/// blocks unless it also carries a `toolConfig`, and the tool loop offers no
+/// tools on its closing call after a proposal or an exhausted budget. The
+/// Director's "go ahead and propose the change" ended in a ValidationException
+/// on exactly that call, after the proposal had been made. With no tools
+/// offered, the history's tool blocks go over as text: the model still reads
+/// what it called and what came back, and there is nothing it could call.
 pub fn build_wire(req: &LlmRequest) -> Result<Wire> {
     let mut system = vec![bt::SystemContentBlock::Text(req.system.clone())];
     if req.cache_hint {
@@ -409,10 +417,15 @@ pub fn build_wire(req: &LlmRequest) -> Result<Wire> {
 
     let merged = merge_roles(&req.messages);
     let last_user = merged.iter().rposition(|m| m.role == Role::User);
+    let to_block = if req.tools.is_empty() {
+        to_text_block
+    } else {
+        to_wire_block
+    };
     let mut messages = Vec::with_capacity(merged.len());
     for (i, m) in merged.iter().enumerate() {
         let mut content: Vec<bt::ContentBlock> =
-            m.content.iter().map(to_wire_block).collect::<Result<_>>()?;
+            m.content.iter().map(to_block).collect::<Result<_>>()?;
         if content.is_empty() {
             content.push(bt::ContentBlock::Text("(empty)".into()));
         }
@@ -477,6 +490,16 @@ pub fn merge_roles(messages: &[LlmMessage]) -> Vec<LlmMessage> {
     out
 }
 
+/// A tool result's text as the model sees it: an untrusted result wrapped in
+/// the §58 delimiters, once.
+fn result_text(content: &str, untrusted: bool) -> String {
+    if untrusted && !untrusted::is_wrapped(content) {
+        untrusted::wrap(content)
+    } else {
+        content.to_string()
+    }
+}
+
 fn to_wire_block(b: &ContentBlock) -> Result<bt::ContentBlock> {
     Ok(match b {
         ContentBlock::Text { text } => bt::ContentBlock::Text(text.clone()),
@@ -494,14 +517,9 @@ fn to_wire_block(b: &ContentBlock) -> Result<bt::ContentBlock> {
             untrusted,
             is_error,
         } => {
-            let text = if *untrusted && !untrusted::is_wrapped(content) {
-                untrusted::wrap(content)
-            } else {
-                content.clone()
-            };
-            let mut builder = bt::ToolResultBlock::builder()
-                .tool_use_id(id)
-                .content(bt::ToolResultContentBlock::Text(text));
+            let mut builder = bt::ToolResultBlock::builder().tool_use_id(id).content(
+                bt::ToolResultContentBlock::Text(result_text(content, *untrusted)),
+            );
             if *is_error {
                 builder = builder.status(bt::ToolResultStatus::Error);
             }
@@ -512,6 +530,26 @@ fn to_wire_block(b: &ContentBlock) -> Result<bt::ContentBlock> {
             )
         }
     })
+}
+
+/// A block as text only, for a request that offers no tools: what was
+/// called and what came back, with untrusted results still wrapped.
+fn to_text_block(b: &ContentBlock) -> Result<bt::ContentBlock> {
+    Ok(bt::ContentBlock::Text(match b {
+        ContentBlock::Text { text } => text.clone(),
+        ContentBlock::ToolUse { id, name, input } => {
+            format!("[called {name} ({id}) with {input}]")
+        }
+        ContentBlock::ToolResult {
+            id,
+            content,
+            untrusted,
+            is_error,
+        } => {
+            let status = if *is_error { " failed" } else { "" };
+            format!("[{id}{status}: {}]", result_text(content, *untrusted))
+        }
+    }))
 }
 
 fn from_wire_block(b: &bt::ContentBlock) -> Option<ContentBlock> {
@@ -694,6 +732,48 @@ mod tests {
         ));
         let tools = tools.unwrap();
         assert_eq!(tools.tools().len(), 2, "tool spec plus cache point");
+    }
+
+    #[test]
+    fn a_request_without_tools_sends_its_tool_history_as_text() {
+        let req = LlmRequest::new(
+            "sys",
+            vec![
+                LlmMessage::user("q"),
+                LlmMessage::assistant(vec![ContentBlock::ToolUse {
+                    id: "t1".into(),
+                    name: "propose_mesh".into(),
+                    input: json!({"text": "Mesh: Charity"}),
+                }]),
+                LlmMessage::user_blocks(vec![
+                    ContentBlock::tool_result("t1", "subject: hello", true),
+                    ContentBlock::text("Tell the user what you proposed."),
+                ]),
+            ],
+        );
+        let (_, messages, tools) = build_wire(&req).unwrap();
+        assert!(tools.is_none(), "no tools offered, so no tool config");
+        let blocks: Vec<&bt::ContentBlock> = messages.iter().flat_map(|m| m.content()).collect();
+        assert!(
+            blocks
+                .iter()
+                .all(|b| matches!(b, bt::ContentBlock::Text(_))),
+            "every block is text: Converse refuses tool blocks without a tool config"
+        );
+        let texts: Vec<&str> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                bt::ContentBlock::Text(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.iter().any(|t| t.contains("called propose_mesh (t1)")));
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.starts_with("[t1: ") && t.contains(untrusted::OPEN)),
+            "the result keeps its untrusted wrapper: {texts:?}"
+        );
     }
 
     #[test]

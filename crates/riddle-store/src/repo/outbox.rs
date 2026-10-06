@@ -77,6 +77,15 @@ pub fn mark_failed(store: &Store, id: i64, error: &str) -> Result<()> {
     })
 }
 
+/// Drop every write still waiting: the user chose not to send them, so the
+/// mailbox keeps what it has and Riddle keeps its own decisions.
+pub fn discard_pending(store: &Store) -> Result<u64> {
+    store.write(|c| {
+        c.execute("DELETE FROM outbox WHERE applied_at IS NULL", [])
+            .map(|n| n as u64)
+    })
+}
+
 pub fn pending_count(store: &Store) -> Result<u64> {
     store.read(|c| {
         c.query_row(

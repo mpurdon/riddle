@@ -54,6 +54,33 @@ pub fn active(store: &Store) -> Result<Vec<Job>> {
     })
 }
 
+/// The newest job of any of `kinds` for one Dig, whatever its status.
+pub fn latest_for_dig(
+    store: &Store,
+    dig: &riddle_core::DigId,
+    kinds: &[&str],
+) -> Result<Option<Job>> {
+    if kinds.is_empty() {
+        return Ok(None);
+    }
+    // One statement over every kind; three round trips per refresh added up.
+    let placeholders = (0..kinds.len())
+        .map(|i| format!("?{}", i + 2))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT json FROM jobs WHERE dig_id = ?1 AND kind IN ({placeholders}) ORDER BY created_at DESC LIMIT 1"
+    );
+    store.read(|c| {
+        let mut args: Vec<&dyn rusqlite::ToSql> = vec![&dig.0];
+        for k in kinds {
+            args.push(k);
+        }
+        c.query_row(&sql, args.as_slice(), |r| from_json(r.get::<_, String>(0)?))
+            .optional()
+    })
+}
+
 pub fn recent(store: &Store, limit: u32) -> Result<Vec<Job>> {
     store.read(|c| {
         let mut st = c.prepare("SELECT json FROM jobs ORDER BY updated_at DESC LIMIT ?1")?;

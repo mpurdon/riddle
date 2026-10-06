@@ -40,6 +40,7 @@ impl AppState {
             dev: profile.is_dev(),
             build: build.clone(),
             keychain_service: profile.keychain_service(),
+            offline: false,
         })?;
         Ok(Self {
             app,

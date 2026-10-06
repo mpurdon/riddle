@@ -24,10 +24,12 @@ pub enum ReadTool {
     ListSignals,
     ExplainDecision,
     ListActivity,
+    SimulateMesh,
+    MeshCorrections,
 }
 
 impl ReadTool {
-    pub const ALL: [ReadTool; 9] = [
+    pub const ALL: [ReadTool; 11] = [
         ReadTool::ListMessages,
         ReadTool::GetMessage,
         ReadTool::GetThread,
@@ -37,6 +39,8 @@ impl ReadTool {
         ReadTool::ListSignals,
         ReadTool::ExplainDecision,
         ReadTool::ListActivity,
+        ReadTool::SimulateMesh,
+        ReadTool::MeshCorrections,
     ];
 
     pub fn name(self) -> &'static str {
@@ -50,6 +54,8 @@ impl ReadTool {
             ReadTool::ListSignals => "list_signals",
             ReadTool::ExplainDecision => "explain_decision",
             ReadTool::ListActivity => "list_activity",
+            ReadTool::SimulateMesh => "simulate_mesh",
+            ReadTool::MeshCorrections => "mesh_corrections",
         }
     }
 
@@ -124,6 +130,19 @@ impl ReadTool {
                 "List the Activity ledger: what happened, who did it, why, and whether it can be undone.",
                 json!({"type":"object","properties":{"digId":{"type":"string"},"actor":{"type":"string"},"action":{"type":"string"},"since":{"type":"string"},"until":{"type":"string"},"page":page}}),
             ),
+            ReadTool::SimulateMesh => ToolSpec::new(
+                self.name(),
+                "Preview a Mesh change without saving it: run the Mesh text (or a stored version) over recent mail and report how many messages would change and to what. Call this before proposing create_mesh or update_mesh, and quote its numbers.",
+                json!({"type":"object","properties":{
+                    "meshId":{"type":"string","description":"The Mesh being changed; with text, the text is its next version."},
+                    "text":{"type":"string","description":"The full Mesh text to try."},
+                    "windowDays":{"type":"integer","minimum":1,"maximum":365}}}),
+            ),
+            ReadTool::MeshCorrections => ToolSpec::new(
+                self.name(),
+                "The user's recent corrections (dismissed Finds, retypes, moves) grouped by the Mesh that made the corrected decision, with a suggestion where three or more point the same way. Evidence for proposing a Mesh change; never a reason to change one without the user's yes.",
+                json!({"type":"object","properties":{"meshId":{"type":"string"}}}),
+            ),
         }
     }
 }
@@ -144,12 +163,14 @@ pub fn classify(name: &str) -> ToolKind {
 
 /// Actions that are operator controls, never Director tools.
 pub const NEVER_DIRECTOR: &[&str] = &[
-    "arm_dev",
+    "set_mailbox_writes",
     "apply_update_preview",
     "save_settings",
     "remove_dig",
     "update_dig",
     "save_dig_group",
+    "rename_dig_group",
+    "delete_dig_group",
     "add_fixture_dig",
     "inject_fixture_message",
     "refresh_now",
@@ -167,7 +188,7 @@ fn known_properties(name: &str) -> Option<(Vec<&'static str>, Vec<&'static str>)
             (&["digId", "messageIds"], &["digId", "messageIds"])
         }
         "set_disposition" => (
-            &["digId", "messageId", "disposition", "findType"],
+            &["digId", "messageId", "disposition", "findType", "dueAt"],
             &["digId", "messageId", "disposition"],
         ),
         "label_messages" => (
@@ -184,6 +205,7 @@ fn known_properties(name: &str) -> Option<(Vec<&'static str>, Vec<&'static str>)
         "create_mesh" => (&["text", "scope", "status"], &["text"]),
         "update_mesh" => (&["meshId", "text", "changeNote"], &["meshId", "text"]),
         "set_mesh_status" => (&["meshId", "status"], &["meshId", "status"]),
+        "apply_mesh_to_history" => (&["meshId", "windowDays"], &["meshId"]),
         "delete_mesh" | "restore_mesh" => (&["meshId"], &["meshId"]),
         "propose_signal" => (&["signal"], &["signal"]),
         "test_signal" => (&["name", "version", "definition", "sampleSize"], &["name"]),
@@ -255,6 +277,9 @@ pub fn risk_line(m: &ActionMeta) -> String {
     if m.external_side_effect {
         parts.push("leaves the machine".into());
     }
+    if m.projected {
+        parts.push("queues the matching mailbox change".into());
+    }
     if m.egress {
         parts.push("egress: approval-gated after untrusted content".into());
     }
@@ -267,7 +292,7 @@ pub fn risk_line(m: &ActionMeta) -> String {
 pub fn action_tools(metas: &[ActionMeta], allowed: Option<&[String]>) -> Vec<ToolSpec> {
     metas
         .iter()
-        .filter(|m| !NEVER_DIRECTOR.contains(&m.name.as_str()))
+        .filter(|m| !m.user_only && !NEVER_DIRECTOR.contains(&m.name.as_str()))
         .filter(|m| allowed.is_none_or(|a| a.iter().any(|n| n == &m.name)))
         .map(|m| {
             ToolSpec::new(
@@ -303,7 +328,7 @@ pub fn describe_tools(metas: &[ActionMeta]) -> String {
     }
     for m in metas
         .iter()
-        .filter(|m| !NEVER_DIRECTOR.contains(&m.name.as_str()))
+        .filter(|m| !m.user_only && !NEVER_DIRECTOR.contains(&m.name.as_str()))
     {
         s.push_str(&format!(
             "- {} ({}): {}\n",
@@ -391,7 +416,9 @@ mod tests {
         assert!(ReadTool::GetMessage.carries_mail());
         assert!(!ReadTool::ListSignals.carries_mail());
         let metas = vec![
-            riddle_actions::meta("arm_dev", "arm").mutating().build(),
+            riddle_actions::meta("set_mailbox_writes", "writes")
+                .mutating()
+                .build(),
             riddle_actions::meta("create_mesh", "create a Mesh")
                 .mutating()
                 .build(),
@@ -403,7 +430,7 @@ mod tests {
         assert!(names.contains(&"explain_decision"));
         assert!(names.contains(&"create_mesh"));
         assert!(names.contains(&"list_strata"));
-        assert!(!names.contains(&"arm_dev"));
+        assert!(!names.contains(&"set_mailbox_writes"));
         let mesh = tools.iter().find(|t| t.name == "create_mesh").unwrap();
         assert_eq!(mesh.input_schema["required"][0], "text");
         assert!(mesh.description.contains("mutating"));

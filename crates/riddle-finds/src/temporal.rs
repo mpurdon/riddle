@@ -46,7 +46,27 @@ pub struct TemporalOutcome {
     pub summary: String,
 }
 
+impl TemporalOutcome {
+    pub fn of(kind: TemporalOutcomeKind, f: &Find, summary: String) -> Self {
+        Self {
+            kind,
+            find_id: f.id.clone(),
+            dig_id: f.dig_ids.first().cloned(),
+            thread_id: f.sources.first().map(|s| s.thread_id.clone()),
+            summary,
+        }
+    }
+}
+
 impl FindService {
+    fn expire(&self, id: &FindId) -> Result<TemporalOutcome> {
+        self.transition(id, FindStatus::Expired, Some(ResolvedBy::Temporal))
+            .map(|f| {
+                let summary = format!("{} expired: {}", f.find_type.label(), f.title);
+                TemporalOutcome::of(TemporalOutcomeKind::Expired, &f, summary)
+            })
+    }
+
     /// One Temporal Sift pass. Each step is independent; a failure in one is
     /// logged and the others still run.
     pub fn tick(&self, opts: &TemporalOptions) -> Result<Vec<TemporalOutcome>> {
@@ -54,28 +74,21 @@ impl FindService {
         let now = self.clock.now();
         let index = self.stores.index();
 
-        // 1. Snoozes that ended and dated Finds past their date.
+        // 1. Finds past their `+ Expires:` time (snoozed or not), snoozes
+        //    that ended, and dated Finds past their date.
         for f in repo::finds::due_for_temporal(&index, &now)? {
+            // The query leaves kept Finds out of expiry, but a kept Find
+            // whose snooze ended comes back for that; it must not expire.
+            let past_expiry = f.kept_open_at.is_none() && f.expires_at.is_some_and(|at| at <= now);
             let result = match f.status {
-                FindStatus::Snoozed => {
-                    self.transition(&f.id, FindStatus::Open, None)
-                        .map(|f| TemporalOutcome {
-                            kind: TemporalOutcomeKind::Unsnoozed,
-                            find_id: f.id.clone(),
-                            dig_id: f.dig_ids.first().cloned(),
-                            thread_id: f.sources.first().map(|s| s.thread_id.clone()),
-                            summary: format!("Snooze ended: {}", f.title),
-                        })
+                FindStatus::Open | FindStatus::Snoozed if past_expiry => self.expire(&f.id),
+                FindStatus::Snoozed if f.snoozed_until.is_some_and(|u| u <= now) => {
+                    self.transition(&f.id, FindStatus::Open, None).map(|f| {
+                        let summary = format!("Snooze ended: {}", f.title);
+                        TemporalOutcome::of(TemporalOutcomeKind::Unsnoozed, &f, summary)
+                    })
                 }
-                FindStatus::Open if f.find_type.is_dated() => self
-                    .transition(&f.id, FindStatus::Expired, Some(ResolvedBy::Temporal))
-                    .map(|f| TemporalOutcome {
-                        kind: TemporalOutcomeKind::Expired,
-                        find_id: f.id.clone(),
-                        dig_id: f.dig_ids.first().cloned(),
-                        thread_id: f.sources.first().map(|s| s.thread_id.clone()),
-                        summary: format!("{} expired: {}", f.find_type.label(), f.title),
-                    }),
+                FindStatus::Open if f.find_type.is_dated() => self.expire(&f.id),
                 _ => continue,
             };
             match result {
@@ -90,7 +103,7 @@ impl FindService {
         }
 
         // 2. Follow Up Finds from stalled asks of mine, per Dig.
-        let digs = repo::digs::list(&index)?;
+        let digs = repo::digs::list_enabled(&index)?;
         let stale_before = now - chrono::Duration::days(opts.follow_up_after_days as i64);
         for dig in &digs {
             let store = match self.stores.dig(&dig.id) {
@@ -135,6 +148,7 @@ impl FindService {
                     .filter(|s| !s.trim().is_empty())
                     .unwrap_or_else(|| format!("Follow up: {ask}"));
                 let mut find = Find {
+                    code: None,
                     id: FindId::new(),
                     find_type: FindType::FollowUp,
                     title,
@@ -160,6 +174,10 @@ impl FindService {
                     classification_id: None,
                     trace_id: None,
                     superseded_by: None,
+                    series: None,
+                    expires_at: None,
+                    kept_open_at: None,
+                    notify: false,
                 };
                 if let Some(m) = &last_message {
                     find.sources.push(FindSource {
@@ -223,6 +241,7 @@ impl FindService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::service::Applied;
     use riddle_store::Stores;
     use std::sync::Arc;
 
@@ -243,6 +262,8 @@ mod tests {
                 status: DigStatus::Synced,
                 shadow_started_at: None,
                 created_at: clock.now(),
+                disabled: false,
+                mailbox: None,
             },
         )
         .unwrap();
@@ -260,6 +281,7 @@ mod tests {
         due_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> FindProposal {
         FindProposal {
+            code: None,
             find_type,
             title: format!("t-{pid}"),
             summary: "s".into(),
@@ -275,6 +297,9 @@ mod tests {
             confidence: None,
             classification_id: None,
             trace_id: None,
+            series: None,
+            expires_at: None,
+            notify: false,
         }
     }
 
@@ -302,7 +327,7 @@ mod tests {
         )
         .unwrap();
         // A Pay Find due yesterday and a snoozed Find whose snooze ended.
-        let (pay, _) = svc
+        let Applied { find: pay, .. } = svc
             .apply_proposal(&proposal(
                 &dig,
                 "pay",
@@ -310,7 +335,7 @@ mod tests {
                 Some(now - chrono::Duration::days(1)),
             ))
             .unwrap();
-        let (snoozed, _) = svc
+        let Applied { find: snoozed, .. } = svc
             .apply_proposal(&proposal(&dig, "snz", FindType::Respond, None))
             .unwrap();
         svc.snooze(&snoozed.id, now - chrono::Duration::minutes(1))
@@ -340,7 +365,7 @@ mod tests {
     #[test]
     fn a_respond_find_resolves_when_thread_state_shows_my_later_reply() {
         let (svc, clock, dig) = setup();
-        let (f, _) = svc
+        let Applied { find: f, .. } = svc
             .apply_proposal(&proposal(&dig, "r1", FindType::Respond, None))
             .unwrap();
         let store = svc.stores.dig(&dig).unwrap();
@@ -369,5 +394,115 @@ mod tests {
         let f = svc.get(&f.id).unwrap();
         assert_eq!(f.status, FindStatus::Resolved);
         assert_eq!(f.resolved_by, Some(ResolvedBy::ThreadState));
+    }
+
+    #[test]
+    fn a_find_of_any_type_expires_at_its_expires_time_even_while_snoozed() {
+        let (svc, clock, dig) = setup();
+        let now = clock.now();
+        let expiring = |pid: &str| FindProposal {
+            expires_at: Some(now + chrono::Duration::hours(18)),
+            ..proposal(&dig, pid, FindType::Do, None)
+        };
+        let Applied { find: open, .. } = svc.apply_proposal(&expiring("open")).unwrap();
+        let Applied { find: snoozed, .. } = svc.apply_proposal(&expiring("snz")).unwrap();
+        svc.snooze(&snoozed.id, now + chrono::Duration::days(3))
+            .unwrap();
+        let Applied { find: lasting, .. } = svc
+            .apply_proposal(&proposal(&dig, "keep", FindType::Do, None))
+            .unwrap();
+
+        assert!(svc.tick(&TemporalOptions::default()).unwrap().is_empty());
+        clock.advance(chrono::Duration::hours(18));
+        let outcomes = svc.tick(&TemporalOptions::default()).unwrap();
+        assert_eq!(outcomes.len(), 2, "{outcomes:?}");
+        assert!(outcomes
+            .iter()
+            .all(|o| o.kind == TemporalOutcomeKind::Expired));
+        for id in [&open.id, &snoozed.id] {
+            let f = svc.get(id).unwrap();
+            assert_eq!(f.status, FindStatus::Expired);
+            assert_eq!(f.resolved_by, Some(ResolvedBy::Temporal));
+        }
+        assert_eq!(svc.get(&lasting.id).unwrap().status, FindStatus::Open);
+    }
+
+    #[test]
+    fn mail_decided_after_its_expiry_makes_a_find_that_is_born_expired() {
+        let (svc, clock, dig) = setup();
+        let stale = FindProposal {
+            expires_at: Some(clock.now() - chrono::Duration::hours(2)),
+            ..proposal(&dig, "old", FindType::Do, None)
+        };
+        let Applied { find, .. } = svc.apply_proposal(&stale).unwrap();
+        assert_eq!(find.status, FindStatus::Expired);
+        assert!(svc.tick(&TemporalOptions::default()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_later_message_in_the_thread_extends_the_expiry_but_never_adds_one() {
+        let (svc, clock, dig) = setup();
+        let now = clock.now();
+        let in_thread = |pid: &str, hours: Option<i64>| FindProposal {
+            identity_key: "thread".into(),
+            expires_at: hours.map(|h| now + chrono::Duration::hours(h)),
+            ..proposal(&dig, pid, FindType::Do, None)
+        };
+        let Applied { find, .. } = svc.apply_proposal(&in_thread("a", Some(4))).unwrap();
+        svc.apply_proposal(&in_thread("b", Some(10))).unwrap();
+        assert_eq!(
+            svc.get(&find.id).unwrap().expires_at,
+            Some(now + chrono::Duration::hours(10))
+        );
+
+        let Applied { find: plain, .. } = svc
+            .apply_proposal(&FindProposal {
+                identity_key: "other".into(),
+                ..proposal(&dig, "c", FindType::Do, None)
+            })
+            .unwrap();
+        svc.apply_proposal(&FindProposal {
+            identity_key: "other".into(),
+            expires_at: Some(now + chrono::Duration::hours(1)),
+            ..proposal(&dig, "d", FindType::Do, None)
+        })
+        .unwrap();
+        assert_eq!(svc.get(&plain.id).unwrap().expires_at, None);
+    }
+
+    #[test]
+    fn a_find_the_user_kept_open_is_not_expired_again() {
+        let (svc, clock, dig) = setup();
+        let now = clock.now();
+        let Applied { find: reminder, .. } = svc
+            .apply_proposal(&FindProposal {
+                expires_at: Some(now + chrono::Duration::hours(1)),
+                ..proposal(&dig, "rem", FindType::Do, None)
+            })
+            .unwrap();
+        let Applied { find: bill, .. } = svc
+            .apply_proposal(&proposal(
+                &dig,
+                "bill",
+                FindType::Pay,
+                Some(now + chrono::Duration::hours(1)),
+            ))
+            .unwrap();
+        clock.advance(chrono::Duration::hours(2));
+        assert_eq!(svc.tick(&TemporalOptions::default()).unwrap().len(), 2);
+
+        // The user undoes both expiries, then time passes again.
+        svc.keep_open(&reminder.id).unwrap();
+        svc.keep_open(&bill.id).unwrap();
+        svc.snooze(&reminder.id, clock.now() + chrono::Duration::hours(3))
+            .unwrap();
+        clock.advance(chrono::Duration::hours(1));
+        assert!(svc.tick(&TemporalOptions::default()).unwrap().is_empty());
+        assert_eq!(
+            svc.get(&reminder.id).unwrap().status,
+            FindStatus::Snoozed,
+            "still snoozed: its snooze has not ended"
+        );
+        assert_eq!(svc.get(&bill.id).unwrap().status, FindStatus::Open);
     }
 }

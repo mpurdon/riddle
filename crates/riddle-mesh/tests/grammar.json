@@ -1,0 +1,240 @@
+{
+ "about": "Mesh texts and what they parse to, run by crates/riddle-mesh/tests/grammar.rs against the Rust parser and by apps/desktop/src/lib/mocks/dsl.grammar.test.ts against the browser mock, so the two cannot drift. `mesh` and each of `outputs` list only the fields a case is about; `error` is a substring both parsers' messages must contain.",
+ "cases": [
+  {
+   "name": "header lines",
+   "text": "Mesh: Daily reminders v3\nPriority: 15\nAutonomy: Suggest\nROUTES\nIF mailing_list → Spoil",
+   "mesh": {
+    "name": "Daily reminders",
+    "version": 3,
+    "priority": 15,
+    "autonomy": "suggest"
+   }
+  },
+  {
+   "name": "every disposition",
+   "text": "ROUTES\nIF mailing_list → Find: Follow Up\nELSE IF has_attachments → Filed\nELSE IF gmail_important → Spoil\nELSE IF reply_to_mismatch → Contamination\nELSE → Escalate",
+   "outputs": [
+    {
+     "disposition": {
+      "kind": "find",
+      "find_type": "follow_up"
+     }
+    },
+    {
+     "disposition": {
+      "kind": "filed"
+     }
+    },
+    {
+     "disposition": {
+      "kind": "spoil"
+     }
+    },
+    {
+     "disposition": {
+      "kind": "contamination"
+     }
+    },
+    {
+     "disposition": null,
+     "escalate": true
+    }
+   ]
+  },
+  {
+   "name": "strata and notify combine with a disposition",
+   "text": "ROUTES\nIF mailing_list → Find: Pay + Stratum: Finance, Bills + Notify",
+   "outputs": [
+    {
+     "disposition": {
+      "kind": "find",
+      "find_type": "pay"
+     },
+     "strata": [
+      "Finance",
+      "Bills"
+     ],
+     "notify": true,
+     "replaces": false
+    }
+   ]
+  },
+  {
+   "name": "replaces and expires on a Find",
+   "text": "ROUTES\nIF subject CONTAINS \"Time to write\" → Find: Do + Replaces + Expires: 18h\nELSE IF mailing_list → Find: Know + Expires: 2 days\nELSE IF has_attachments → Find: Review + Expires: 36 hours",
+   "outputs": [
+    {
+     "disposition": {
+      "kind": "find",
+      "find_type": "do"
+     },
+     "replaces": true,
+     "expires": {
+      "kind": "after",
+      "hours": 18
+     }
+    },
+    {
+     "replaces": false,
+     "expires": {
+      "kind": "after",
+      "hours": 48
+     }
+    },
+    {
+     "expires": {
+      "kind": "after",
+      "hours": 36
+     }
+    }
+   ]
+  },
+  {
+   "name": "a WHEN block and its ELSE",
+   "text": "ROUTES\nWHEN sender_domain = github.com\n    IF sender_name CONTAINS \"dependabot\" → Spoil\n    ELSE → Filed\nEND",
+   "outputs": [
+    {
+     "disposition": {
+      "kind": "spoil"
+     }
+    },
+    {
+     "disposition": {
+      "kind": "filed"
+     }
+    }
+   ]
+  },
+  {
+   "name": "replaces on Spoil and Filed, where only the newest matters",
+   "text": "ROUTES\nIF mailing_list → Spoil + Replaces\nELSE IF has_attachments → Filed + Stratum: Receipts + Replaces",
+   "outputs": [
+    {
+     "disposition": {
+      "kind": "spoil"
+     },
+     "replaces": true
+    },
+    {
+     "disposition": {
+      "kind": "filed"
+     },
+     "replaces": true
+    }
+   ]
+  },
+  {
+   "name": "Replaces needs a Find, Spoil or Filed",
+   "text": "ROUTES\nIF mailing_list → Contamination + Replaces",
+   "error": "Replaces needs a Find, Spoil or Filed"
+  },
+  {
+   "name": "Expires needs a Find",
+   "text": "ROUTES\nIF mailing_list → Filed + Expires: 2d",
+   "error": "Expires closes Finds, so it needs a Find"
+  },
+  {
+   "name": "expires at the end of the day or the next morning, where the user is",
+   "text": "ROUTES\nIF mailing_list → Find: Do + Replaces + Expires: end of day\nELSE IF has_attachments → Find: Do + Expires: Next  Morning",
+   "outputs": [
+    {
+     "expires": {
+      "kind": "end_of_day"
+     }
+    },
+    {
+     "expires": {
+      "kind": "next_morning"
+     }
+    }
+   ]
+  },
+  {
+   "name": "Expires is not a vague time",
+   "text": "ROUTES\nIF mailing_list → Find: Do + Expires: later",
+   "error": "Expires needs minutes, hours, days, end of day or next morning"
+  },
+  {
+   "name": "Expires without a value",
+   "text": "ROUTES\nIF mailing_list → Find: Do + Expires",
+   "error": "Expires needs minutes, hours, days, end of day or next morning"
+  },
+  {
+   "name": "Expires of zero",
+   "text": "ROUTES\nIF mailing_list → Find: Do + Expires: 0h",
+   "error": "Expires is between 1 hour and 90 days"
+  },
+  {
+   "name": "Expires past ninety days",
+   "text": "ROUTES\nIF mailing_list → Find: Do + Expires: 91d",
+   "error": "Expires is between 1 hour and 90 days"
+  },
+  {
+   "name": "a fraction of a day",
+   "text": "ROUTES\nIF mailing_list → Find: Do + Expires: 1.5d",
+   "error": "Expires needs minutes, hours, days, end of day or next morning"
+  },
+  {
+   "name": "Find without a type",
+   "text": "ROUTES\nIF mailing_list → Find",
+   "error": "Find needs a type"
+  },
+  {
+   "name": "an unknown Find type",
+   "text": "ROUTES\nIF mailing_list → Find: Ponder",
+   "error": "unknown Find type"
+  },
+  {
+   "name": "an unknown output",
+   "text": "ROUTES\nIF mailing_list → Archive",
+   "error": "unknown output"
+  },
+  {
+   "name": "a named list",
+   "text": "ROUTES\nIF sender_domain IN list:keep_promotions → Filed\nELSE IF sender IN list:Banks → Find: Pay",
+   "outputs": [
+    {
+     "disposition": {
+      "kind": "filed"
+     }
+    },
+    {
+     "disposition": {
+      "kind": "find",
+      "find_type": "pay"
+     }
+    }
+   ]
+  },
+  {
+   "name": "importance and a minute expiry",
+   "text": "ROUTES\nIF subject CONTAINS \"code\" → Find: Know + Notify + Expires: 15m + Importance: Critical\nELSE IF mailing_list → Spoil + Importance: low",
+   "outputs": [
+    {
+     "disposition": {
+      "kind": "find",
+      "find_type": "know"
+     },
+     "notify": true,
+     "expires": {
+      "kind": "after_minutes",
+      "minutes": 15
+     },
+     "importance": "critical"
+    },
+    {
+     "disposition": {
+      "kind": "spoil"
+     },
+     "importance": "low"
+    }
+   ]
+  },
+  {
+   "name": "an unknown importance",
+   "text": "ROUTES\nIF mailing_list → Spoil + Importance: urgent",
+   "error": "unknown Importance urgent; use Low, Normal, High or Critical"
+  }
+ ]
+}

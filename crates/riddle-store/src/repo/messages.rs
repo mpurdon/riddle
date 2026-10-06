@@ -213,7 +213,42 @@ pub struct MessageFilter {
     pub until: Option<chrono::DateTime<chrono::Utc>>,
     pub unclassified_only: bool,
     pub include_shadow: bool,
+    /// Only messages with a Shadow proposal, and their proposal as the
+    /// disposition: the Shadow review list.
+    pub shadow_only: bool,
     pub stratum: Option<String>,
+    /// The Priority inbox's OR group, ANDed with everything above.
+    pub priority: Option<PriorityCriteria>,
+    /// `Some(false)` hides messages a newer one of their `+ Replaces`
+    /// series superseded, `Some(true)` lists only those; `None` is both.
+    pub superseded: Option<bool>,
+    /// Only messages at this level or above (the user's own level first).
+    pub min_importance: Option<riddle_core::Importance>,
+}
+
+/// One OR group for the Priority inbox: a message matches when it carries
+/// any of these Strata, any of these provider labels, or is one of these
+/// ids. The ids are the sources of the open Finds that meet the user's
+/// priority criteria; Finds live in the index store, a different database,
+/// so the caller gathers them and hands them over. Empty criteria match
+/// nothing, so an unconfigured Priority inbox is empty rather than the
+/// whole mailbox.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct PriorityCriteria {
+    pub strata: Vec<String>,
+    pub labels: Vec<String>,
+    pub message_ids: Vec<MessageId>,
+    /// Messages at this level or above (the user's own level first).
+    pub min_importance: Option<riddle_core::Importance>,
+}
+
+impl PriorityCriteria {
+    pub fn is_empty(&self) -> bool {
+        self.strata.is_empty()
+            && self.labels.is_empty()
+            && self.message_ids.is_empty()
+            && self.min_importance.is_none()
+    }
 }
 
 pub fn list(
@@ -253,12 +288,19 @@ pub fn search(
     store.read(|c| {
         let mut sql = String::from(
             "SELECT m.id, m.thread_id, m.subject, m.from_email, m.from_name, m.date, m.snippet, m.labels_json, m.is_sent, m.attachments_json,
-                    k.json AS class_json
+                    k.json AS class_json, sr.review AS shadow_review, ms.superseded_by AS superseded_by,
+                    coalesce(io.importance, k.importance, 1) AS importance, io.importance IS NOT NULL AS importance_set_by_you
              FROM messages m
-             LEFT JOIN classifications k ON k.message_id = m.id AND k.superseded_at IS NULL AND k.shadow = 0
+             LEFT JOIN classifications k ON k.message_id = m.id AND k.superseded_at IS NULL AND k.shadow = ?
+             LEFT JOIN importance_overrides io ON io.message_id = m.id
+             LEFT JOIN shadow_reviews sr ON sr.message_id = m.id
+             LEFT JOIN message_series ms ON ms.message_id = m.id AND ms.series_key = k.series_key
              WHERE m.deleted_at IS NULL",
         );
-        let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(filter.shadow_only as i64)];
+        if filter.shadow_only {
+            sql.push_str(" AND k.json IS NOT NULL");
+        }
         if let Some(d) = &filter.disposition {
             sql.push_str(" AND k.disposition_kind = ?");
             args.push(Box::new(d.clone()));
@@ -270,6 +312,15 @@ pub fn search(
         if filter.unclassified_only {
             sql.push_str(" AND k.id IS NULL");
         }
+        match filter.superseded {
+            Some(false) => sql.push_str(" AND ms.superseded_by IS NULL"),
+            Some(true) => sql.push_str(" AND ms.superseded_by IS NOT NULL"),
+            None => {}
+        }
+        if let Some(i) = filter.min_importance {
+            sql.push_str(" AND coalesce(io.importance, k.importance, 1) >= ?");
+            args.push(Box::new(i.rank()));
+        }
         if let Some(l) = &filter.label {
             sql.push_str(" AND EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = ?)");
             args.push(Box::new(l.clone()));
@@ -277,6 +328,42 @@ pub fn search(
         if let Some(s) = &filter.stratum {
             sql.push_str(" AND EXISTS (SELECT 1 FROM message_strata ms WHERE ms.message_id = m.id AND ms.stratum = ?)");
             args.push(Box::new(s.clone()));
+        }
+        if let Some(p) = &filter.priority {
+            // One OR group: EXISTS on the (message_id, stratum) key, json_each
+            // over the label array, and an IN list for the Find sources.
+            let mut parts: Vec<String> = Vec::new();
+            if !p.strata.is_empty() {
+                let marks = vec!["?"; p.strata.len()].join(",");
+                parts.push(format!("EXISTS (SELECT 1 FROM message_strata ms WHERE ms.message_id = m.id AND ms.stratum IN ({marks}))"));
+                for s in &p.strata {
+                    args.push(Box::new(s.clone()));
+                }
+            }
+            if !p.labels.is_empty() {
+                let marks = vec!["?"; p.labels.len()].join(",");
+                parts.push(format!("EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value IN ({marks}))"));
+                for l in &p.labels {
+                    args.push(Box::new(l.clone()));
+                }
+            }
+            if !p.message_ids.is_empty() {
+                // One JSON array parameter, not one `?` per id: SQLite caps
+                // bound parameters, and the count query binds the list a
+                // second time, so 400 open Finds were 800 parameters a page.
+                let ids: Vec<&str> = p.message_ids.iter().map(|id| id.as_str()).collect();
+                parts.push("m.id IN (SELECT value FROM json_each(?))".to_string());
+                args.push(Box::new(serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into())));
+            }
+            if let Some(i) = p.min_importance {
+                parts.push("coalesce(io.importance, k.importance, 1) >= ?".to_string());
+                args.push(Box::new(i.rank()));
+            }
+            if parts.is_empty() {
+                sql.push_str(" AND 0");
+            } else {
+                sql.push_str(&format!(" AND ({})", parts.join(" OR ")));
+            }
         }
         if let Some(f) = &filter.from {
             sql.push_str(" AND m.from_email LIKE ?");
@@ -343,6 +430,13 @@ pub fn search(
                     disposition: class.as_ref().map(|k| k.disposition.clone()),
                     strata: class.as_ref().map(|k| k.strata.clone()).unwrap_or_default(),
                     find_id: None,
+                    shadow: filter.shadow_only && class.is_some(),
+                    shadow_review: r
+                        .get::<_, Option<String>>("shadow_review")?
+                        .and_then(|v| riddle_core::ShadowReview::parse(&v)),
+                    superseded_by: r.get::<_, Option<String>>("superseded_by")?.map(MessageId),
+                    importance: riddle_core::Importance::from_rank(r.get("importance")?),
+                    importance_set_by_you: r.get("importance_set_by_you")?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -515,6 +609,24 @@ pub struct AddressStats {
     pub spam_verdicts: u64,
 }
 
+/// When mail from `email` arrived since `since`, oldest first; what a
+/// sender's cadence is classified from.
+pub fn arrivals_from(
+    store: &Store,
+    email: &str,
+    since: &chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<chrono::DateTime<chrono::Utc>>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT date FROM messages WHERE from_email = ?1 AND deleted_at IS NULL AND is_sent = 0 AND date >= ?2 ORDER BY date",
+        )?;
+        let rows = st
+            .query_map(params![email, ts(since)], |r| Ok(crate::from_ts(r.get(0)?)))?
+            .collect();
+        rows
+    })
+}
+
 pub fn address_stats(store: &Store, email: &str) -> Result<AddressStats> {
     let email = email.to_lowercase();
     store.read(|c| {
@@ -610,4 +722,97 @@ pub fn summaries_for_ids(store: &Store, dig_id: &DigId, ids: &[MessageId]) -> Re
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StoreKind;
+
+    fn message(dig: &DigId, n: u32, labels: &[&str]) -> Message {
+        let now = chrono::Utc::now() - chrono::Duration::minutes(n as i64);
+        Message {
+            id: MessageId::for_provider(dig, &format!("p{n}")),
+            dig_id: dig.clone(),
+            thread_id: ThreadId::for_provider(dig, &format!("t{n}")),
+            provider_id: format!("p{n}"),
+            subject: format!("Subject {n}"),
+            from: Address::new(format!("sender{n}@example.com"), None),
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            date: now,
+            snippet: String::new(),
+            labels: labels.iter().map(|l| l.to_string()).collect(),
+            headers: MessageHeaders::default(),
+            attachments: vec![],
+            size_bytes: 0,
+            is_sent: false,
+            has_body: false,
+            body_text: None,
+            body_html: None,
+            synced_at: now,
+        }
+    }
+
+    fn ids(page: &Page<MessageSummary>) -> Vec<String> {
+        let mut v: Vec<String> = page
+            .items
+            .iter()
+            .map(|m| m.id.as_str().to_string())
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn the_priority_group_surfaces_a_label_a_stratum_or_a_find_source_and_nothing_else() {
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        let dig = DigId::from("dig-1");
+        let starred = message(&dig, 1, &["INBOX", "STARRED"]);
+        let finance = message(&dig, 2, &["INBOX"]);
+        let found = message(&dig, 3, &["INBOX"]);
+        let plain = message(&dig, 4, &["INBOX", "IMPORTANT"]);
+        for m in [&starred, &finance, &found, &plain] {
+            upsert(&store, m).unwrap();
+        }
+        set_strata(&store, &finance.id, &["Finance".to_string()]).unwrap();
+        set_strata(&store, &plain.id, &["Travel".to_string()]).unwrap();
+        let filter = MessageFilter {
+            priority: Some(PriorityCriteria {
+                strata: vec!["Finance".into()],
+                labels: vec!["STARRED".into()],
+                message_ids: vec![found.id.clone()],
+                min_importance: None,
+            }),
+            ..Default::default()
+        };
+        let page = list(&store, &dig, &filter, &PageRequest::default()).unwrap();
+        let mut want = vec![
+            starred.id.as_str().to_string(),
+            finance.id.as_str().to_string(),
+            found.id.as_str().to_string(),
+        ];
+        want.sort();
+        assert_eq!(ids(&page), want);
+        assert_eq!(page.total, Some(3));
+
+        // The group is ANDed with the other filter fields.
+        let narrowed = MessageFilter {
+            label: Some("INBOX".into()),
+            from: Some("sender1".into()),
+            ..filter.clone()
+        };
+        let page = list(&store, &dig, &narrowed, &PageRequest::default()).unwrap();
+        assert_eq!(ids(&page), vec![starred.id.as_str().to_string()]);
+
+        // Empty criteria match nothing, not everything.
+        let empty = MessageFilter {
+            priority: Some(PriorityCriteria::default()),
+            ..Default::default()
+        };
+        let page = list(&store, &dig, &empty, &PageRequest::default()).unwrap();
+        assert!(page.items.is_empty());
+        assert_eq!(page.total, Some(0));
+    }
 }

@@ -4,6 +4,7 @@
  * PendingAction whose realArguments are what the user must see, executes on
  * confirm, appends Activity, records undo information and emits events.
  */
+import type { Importance } from '@/bindings/Importance'
 import type { ActionInvocation } from '@/bindings/ActionInvocation'
 import type { ActionMeta } from '@/bindings/ActionMeta'
 import type { ActionOutcome } from '@/bindings/ActionOutcome'
@@ -16,7 +17,6 @@ import type { FindType } from '@/bindings/FindType'
 import type { Mesh } from '@/bindings/Mesh'
 import type { MeshStatus } from '@/bindings/MeshStatus'
 import type { PendingAction } from '@/bindings/PendingAction'
-import type { RiddleError } from '@/bindings/RiddleError'
 import type { SimulationReport } from '@/bindings/SimulationReport'
 import type { UndoInfo } from '@/bindings/UndoInfo'
 import type { Draft } from '@/bindings/Draft'
@@ -25,26 +25,25 @@ import type { Stratum } from '@/bindings/Stratum'
 import type { Provenance } from '@/bindings/Provenance'
 import type { ActivityResult } from '@/bindings/ActivityResult'
 import { emitMock } from '../events'
-import { u64 } from '../format'
+import { plural, u64 } from '../format'
 import { MeshSyntaxError, parseMeshText } from './dsl'
 import { buildMessage, buildTrace, DIG_WORK, ME, iso, NOW, type MessageSpec } from './fixtures'
+import type { Job } from '@/bindings/Job'
 import { nextId, type MockState } from './state'
-import { simulate, findTitleFor } from './queries'
+import { err, simulate, findTitleFor } from './queries'
 import type { Settings, SignalTestReport } from '../types'
 
-const err = (kind: RiddleError['kind'], message: string, detail: unknown = null): RiddleError => ({ kind, message, detail })
-
 type Meta = Omit<ActionMeta, 'name' | 'description'> & { description: string }
-const base: Meta = { description: '', mutating: true, reversible: false, externalSideEffect: false, risk: 'low', confirmation: 'none', minimumAutonomy: 'act', egress: false, readOnly: false }
+const base: Meta = { description: '', mutating: true, reversible: false, externalSideEffect: false, projected: false, risk: 'low', confirmation: 'none', minimumAutonomy: 'act', egress: false, readOnly: false, userOnly: false }
 const m = (description: string, o: Partial<Meta> = {}): Meta => ({ ...base, description, ...o })
 
 export const ACTIONS: Record<string, Meta> = {
-  archive_messages: m('Archive messages', { reversible: true, externalSideEffect: true, confirmation: 'in_place_undo' }),
-  move_to_spoil: m('Move messages to Spoil', { reversible: true, externalSideEffect: true, risk: 'medium', confirmation: 'in_place_undo' }),
-  mark_contamination: m('Mark messages as Contamination', { reversible: true, externalSideEffect: true, risk: 'medium', confirmation: 'in_place_undo' }),
-  restore_messages: m('Restore messages from Spoil or Contamination', { reversible: true, externalSideEffect: true, confirmation: 'in_place_undo' }),
-  set_disposition: m('Correct the disposition of one message', { reversible: true, externalSideEffect: true, confirmation: 'in_place_undo' }),
-  label_messages: m('Add Strata to messages', { reversible: true, externalSideEffect: true, confirmation: 'in_place_undo' }),
+  archive_messages: m('Archive messages', { reversible: true, projected: true, confirmation: 'in_place_undo' }),
+  move_to_spoil: m('Move messages to Spoil', { reversible: true, projected: true, risk: 'medium', confirmation: 'in_place_undo' }),
+  mark_contamination: m('Mark messages as Contamination', { reversible: true, projected: true, risk: 'medium', confirmation: 'in_place_undo' }),
+  restore_messages: m('Restore messages from Spoil or Contamination', { reversible: true, projected: true, confirmation: 'in_place_undo' }),
+  set_disposition: m('Correct the disposition of one message', { reversible: true, projected: true, confirmation: 'in_place_undo' }),
+  label_messages: m('Add Strata to messages', { reversible: true, projected: true, confirmation: 'in_place_undo' }),
   snooze_messages: m('Snooze messages', { reversible: true, confirmation: 'in_place_undo' }),
   permanent_delete: m('Delete messages permanently', { risk: 'critical', externalSideEffect: true, confirmation: 'type_count', minimumAutonomy: 'trusted' }),
   resolve_find: m('Resolve a Find', { reversible: true, confirmation: 'in_place_undo' }),
@@ -55,6 +54,16 @@ export const ACTIONS: Record<string, Meta> = {
   create_mesh: m('Create a Mesh', { reversible: true, risk: 'medium', confirmation: 'none', minimumAutonomy: 'suggest', egress: true }),
   update_mesh: m('Update a Mesh (new version)', { reversible: true, risk: 'medium', confirmation: 'none', minimumAutonomy: 'suggest', egress: true }),
   set_mesh_status: m('Change a Mesh status', { reversible: true, risk: 'medium' }),
+  set_mesh_fallback: m('Mark a Mesh a fallback', { reversible: true }),
+  remember_for_sender: m('Always decide a sender this way', { reversible: true }),
+  install_pack: m('Install or update a rule pack', { reversible: true }),
+  remove_pack: m('Remove an installed rule pack'),
+  import_pack: m('Add a rule pack from a pack file'),
+  export_pack: m('Write a rule pack as a pack file'),
+  create_pack: m('Make a rule pack from your Meshes'),
+  save_list: m('Create or replace a named list', { reversible: true }),
+  delete_list: m('Delete a named list', { reversible: true }),
+  grade_decision: m('Grade a rule decision', { reversible: true }),
   delete_mesh: m('Move a Mesh to Recently Deleted', { reversible: true, confirmation: 'in_place_undo' }),
   restore_mesh: m('Restore a Mesh from Recently Deleted', { reversible: true }),
   propose_signal: m('Propose a Signal', { minimumAutonomy: 'suggest' }),
@@ -74,11 +83,24 @@ export const ACTIONS: Record<string, Meta> = {
   remove_never_hidden: m('Remove from Never Hidden', { reversible: true, confirmation: 'in_place_undo' }),
   save_user_profile: m('Save the User Profile'),
   save_settings: m('Save settings'),
+  set_secret: m('Store a key in the OS keychain', { risk: 'medium', userOnly: true }),
+  clear_secret: m('Remove a key from the OS keychain', { risk: 'medium', userOnly: true }),
+  import_gmail_client: m('Import the Gmail OAuth client file from Google', { risk: 'medium', userOnly: true }),
   add_fixture_dig: m('Add a Fixture Dig'),
+  connect_gmail: m('Connect a Gmail account, or sign in again', { externalSideEffect: true, risk: 'high' }),
+  dismiss_pending: m('Decline a pending proposal', { userOnly: true }),
+  review_shadow: m('Agree or disagree with a Shadow proposal', { reversible: true, projected: true }),
   remove_dig: m('Remove a Dig and its store', { risk: 'critical', confirmation: 'type_count' }),
   update_dig: m('Update a Dig'),
+  set_dig_enabled: m('Disable or re-enable an account'),
   save_dig_group: m('Save a Dig Group'),
-  arm_dev: m('Arm the dev build for provider mutations', { risk: 'high', confirmation: 'press_hold' }),
+  rename_dig_group: m('Rename a Dig Group', { reversible: true }),
+  delete_dig_group: m('Delete a Dig Group (its accounts stay)', { reversible: true }),
+  apply_mesh_to_history: m('Re-decide recent mail under a Mesh\'s current version', { reversible: true, risk: 'medium', confirmation: 'two_step' }),
+  decide_again: m('Decide messages again under the current rules', { reversible: true }),
+  set_mailbox_writes: m('Choose what this dev build may write to the mailbox: hold, ask or allow', { reversible: true, risk: 'high', confirmation: 'press_hold' }),
+  send_held_changes: m('Write the mailbox changes waiting in the outbox now', { externalSideEffect: true, risk: 'medium', confirmation: 'approval', minimumAutonomy: 'trusted' }),
+  discard_held_changes: m('Drop the mailbox changes waiting in the outbox; Riddle keeps its decisions', { risk: 'medium', confirmation: 'approval', minimumAutonomy: 'trusted' }),
   refresh_now: m('Refresh now', { mutating: false }),
   cancel_job: m('Cancel a job'),
   pause_job: m('Pause a job'),
@@ -165,6 +187,14 @@ function messageTitle(state: MockState, id: string): string {
   return state.messages.find((x) => x.id === id)?.subject ?? id
 }
 
+/** What apply_mesh_to_history would do: the Mesh's latest version over the window. The preview and the execution describe the same plan. */
+function applyPlan(state: MockState, args: Args): { mesh: Mesh; windowDays: number; report: SimulationReport } {
+  const mesh = latestMesh(state, str(args, 'meshId'))
+  if (!mesh) throw err('not_found', 'Mesh not found')
+  const windowDays = Number(args.windowDays ?? 30)
+  return { mesh, windowDays, report: simulate(state, { meshId: mesh.id, windowDays }) }
+}
+
 function preview(state: MockState, action: string, args: Args): Preview {
   switch (action) {
     case 'send_message': {
@@ -182,7 +212,14 @@ function preview(state: MockState, action: string, args: Args): Preview {
     case 'remove_dig': {
       const dig = state.digs.find((d) => d.id === args.digId)
       const count = state.messages.filter((x) => x.digId === args.digId).length
-      return { summary: `Remove Dig ${dig?.name ?? args.digId} and its ${count} messages`, realArguments: { count, digId: args.digId, name: dig?.name ?? null, email: dig?.email ?? null } }
+      return { summary: `Remove account ${dig?.name ?? args.digId} and its ${count} messages`, realArguments: { count, digId: args.digId, name: dig?.name ?? null, email: dig?.email ?? null } }
+    }
+    case 'apply_mesh_to_history': {
+      const { mesh, windowDays, report } = applyPlan(state, args)
+      return {
+        summary: `Re-decide ${Number(report.changed)} messages from the last ${windowDays} days under Mesh ${mesh.name} v${mesh.version}`,
+        realArguments: { meshId: mesh.id, meshName: mesh.name, version: mesh.version, windowDays, count: Number(report.changed), keptYours: 0, transitions: report.transitions.map((t) => `${Number(t.count)} ${t.from} → ${t.to}`) },
+      }
     }
     case 'set_mesh_status': {
       const mesh = latestMesh(state, String(args.meshId))
@@ -195,8 +232,12 @@ function preview(state: MockState, action: string, args: Args): Preview {
     }
     case 'promote_signal':
       return { summary: `Promote Signal ${String(args.name)} v${String(args.version)} to active. Meshes pin versions; this triggers re-simulation and a proposal, never a silent change.`, realArguments: { name: args.name, version: args.version } }
-    case 'arm_dev':
-      return { summary: args.armed ? 'Arm this dev build: provider mutations (labels, archive, send) will reach the mailbox.' : 'Disarm this dev build.', realArguments: { armed: args.armed, profile: 'dev' } }
+    case 'set_mailbox_writes':
+      return { summary: `Mailbox writes: ${String(args.writes)}`, realArguments: { writes: args.writes } }
+    case 'send_held_changes':
+      return { summary: `Write ${plural(state.held, 'waiting change')} to the mailbox`, realArguments: { held: state.held } }
+    case 'discard_held_changes':
+      return { summary: `Drop ${plural(state.held, 'waiting change')}; the mailbox stays as it is`, realArguments: { held: state.held } }
     case 'merge_strata': {
       const from = state.strata.find((s) => s.id === args.fromId)
       const into = state.strata.find((s) => s.id === args.intoId)
@@ -221,7 +262,7 @@ export async function invokeAction(state: MockState, raw: Args): Promise<ActionO
   const args = (inv.args ?? {}) as Args
 
   if (inv.idempotencyKey && state.idempotent.has(inv.idempotencyKey)) {
-    return { result: state.idempotent.get(inv.idempotencyKey), activityId: null, replayed: true }
+    return { result: state.idempotent.get(inv.idempotencyKey), activityId: null, replayed: true, summary: '', affected: [] }
   }
 
   let confirmed = false
@@ -235,13 +276,16 @@ export async function invokeAction(state: MockState, raw: Args): Promise<ActionO
     confirmed = !!inv.confirmed && inv.principal.kind === 'user'
   }
 
-  if (state.devInfo.dev && meta.externalSideEffect && !state.armed && inv.action !== 'undo_activity') {
-    // Dev builds start in OBSERVE. The fixture provider has no real mailbox,
-    // so the mock only denies the Actions that would leave the machine.
-    if (inv.action === 'send_message' || inv.action === 'permanent_delete') throw err('policy_denied', 'dev build is not armed for provider mutations; arm it in Developer Mode')
+  // Dev builds start on Hold (riddle-actions `policy::decide`): an Action
+  // that calls the provider is refused, and on Ask it asks first. Projected
+  // Actions run; their mailbox change waits (`state.held`).
+  if (state.devInfo.dev && meta.externalSideEffect && inv.action !== 'undo_activity' && state.writes === 'hold') {
+    throw err('policy_denied', 'this dev build holds mailbox changes; choose Ask or Allow under Developer → Mailbox writes')
   }
+  const askFirst = state.devInfo.dev && meta.externalSideEffect && state.writes === 'ask'
 
-  const tier = dynamicTier(state, inv.action, args)
+  const baseTier = dynamicTier(state, inv.action, args)
+  const tier: ConfirmationPolicy = askFirst && (baseTier === 'none' || baseTier === 'in_place_undo') ? 'approval' : baseTier
   if (!meta.readOnly && !confirmed && tier !== 'none') {
     const pv = preview(state, inv.action, args)
     const pending: PendingAction = {
@@ -261,6 +305,7 @@ export async function invokeAction(state: MockState, raw: Args): Promise<ActionO
 
   await new Promise((r) => setTimeout(r, 40 + Math.random() * 80))
   const exec = execute(state, inv.action, args)
+  if (meta.projected && state.devInfo.dev && state.writes !== 'allow') state.held += Array.isArray(args.messageIds) ? args.messageIds.length : 1
   const activityId = nextId(state, 'act')
   if (!exec.silent && meta.mutating) {
     const activity: Activity = {
@@ -282,7 +327,7 @@ export async function invokeAction(state: MockState, raw: Args): Promise<ActionO
     state.activity.unshift(activity)
     emitMock({ type: 'activity_appended', activity })
   }
-  const outcome: ActionOutcome = { result: exec.result, activityId: exec.silent ? null : activityId, replayed: false }
+  const outcome: ActionOutcome = { result: exec.result, activityId: exec.silent ? null : activityId, replayed: false, summary: exec.silent ? '' : exec.summary, affected: exec.affected ?? [] }
   if (inv.idempotencyKey) state.idempotent.set(inv.idempotencyKey, exec.result)
   return outcome
 }
@@ -300,7 +345,7 @@ function redactInputs(args: Args): unknown {
 // ---------------------------------------------------------------------------
 // Execution
 
-function setDisposition(state: MockState, digId: string, messageId: string, d: Disposition | null, byUser = true, findType?: FindType | null): { before: Disposition | null } {
+function setDisposition(state: MockState, digId: string, messageId: string, d: Disposition | null, byUser = true, findType?: FindType | null, dueAt?: string | null): { before: Disposition | null } {
   const c = state.classifications.get(messageId)
   if (!c) throw err('not_found', 'message not found')
   const before = c.disposition
@@ -318,7 +363,7 @@ function setDisposition(state: MockState, digId: string, messageId: string, d: D
         summary: msg.snippet,
         priority: 60,
         status: 'open',
-        dueAt: null,
+        dueAt: dueAt ?? null,
         snoozedUntil: null,
         createdAt: iso(new Date()),
         updatedAt: iso(new Date()),
@@ -331,13 +376,15 @@ function setDisposition(state: MockState, digId: string, messageId: string, d: D
         confidence: null,
         classificationId: `cls_${messageId}`,
         traceId: `tr_${messageId}`,
-        supersededBy: null,
+        supersededBy: null, notify: false,
       }
       state.finds.unshift(find)
       emitMock({ type: 'find_created', find })
     } else {
       find.status = 'open'
       find.findType = findType ?? d.find_type
+      // A date the user picked replaces the one it had; no date keeps it.
+      if (dueAt) find.dueAt = dueAt
       find.updatedAt = iso(new Date())
       if (!find.sources.some((s) => s.messageId === messageId)) find.sources.push({ messageId, threadId: msg.threadId, digId })
       emitMock({ type: 'find_changed', find_id: find.id })
@@ -414,7 +461,7 @@ function newMeshVersion(state: MockState, meshId: string | null, text: string, n
     name: parsed.name,
     version,
     scope: parsed.scope,
-    priority: prev?.priority ?? 50,
+    priority: parsed.priority ?? prev?.priority ?? 50,
     routes: parsed.routes,
     guards: parsed.guards,
     status,
@@ -423,9 +470,11 @@ function newMeshVersion(state: MockState, meshId: string | null, text: string, n
     createdBy,
     changeNote: note,
     shadowStartedAt: status === 'shadow' ? iso(new Date()) : prev?.shadowStartedAt ?? null,
+    fallback: prev?.fallback ?? false,
     shadowAgreed: 0,
     shadowProposed: 0,
     deletedAt: null,
+    autonomy: parsed.autonomy ?? prev?.autonomy,
   }
   if (prev) for (const v of state.meshes.filter((x) => x.id === mesh.id)) v.status = status
   state.meshes.push(mesh)
@@ -469,14 +518,37 @@ function execute(state: MockState, action: string, args: Args): Exec {
       const d = args.disposition as Disposition
       if (!d || typeof d !== 'object') throw err('invalid', 'invalid arguments: disposition')
       const findType = (args.findType as FindType | undefined) ?? (d.kind === 'find' ? d.find_type : undefined)
-      const { before } = setDisposition(state, digId, messageId, d.kind === 'find' ? { kind: 'find', find_type: findType ?? d.find_type } : d, true, findType)
+      const dueAt = typeof args.dueAt === 'string' ? args.dueAt : null
+      if (dueAt && !(new Date(dueAt).getTime() > Date.now())) throw err('invalid', 'dueAt must be in the future')
+      if (dueAt && d.kind !== 'find') throw err('invalid', 'dueAt applies to a Find')
+      const { before } = setDisposition(state, digId, messageId, d.kind === 'find' ? { kind: 'find', find_type: findType ?? d.find_type } : d, true, findType, dueAt)
+      const followUp = d.kind === 'find' && (findType ?? d.find_type) === 'follow_up'
       return {
         result: { messageId, disposition: d },
-        summary: `You changed "${messageTitle(state, messageId)}" from ${dispositionLabel(before)} to ${dispositionLabel(d)}`,
+        summary: followUp
+          ? `You marked "${messageTitle(state, messageId)}" for follow-up${dueAt ? ` by ${new Date(dueAt).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}` : ''}`
+          : `You changed "${messageTitle(state, messageId)}" from ${dispositionLabel(before)} to ${dispositionLabel(d)}`,
         why: 'Recorded as a correction. Repeated corrections of the same kind lead to a Mesh proposal.',
         affected: [{ kind: 'message', id: messageId }],
         undo: { state: 'undoable', restore: { kind: 'dispositions', items: [{ digId, messageId, disposition: before }] }, label: `Put it back to ${dispositionLabel(before)} and retract the correction` },
         provenance: { mechanism: 'user', meshId: null, meshVersion: null, meshName: null, traceId: `tr_${messageId}`, note: `Correction recorded: move (${dispositionLabel(before)} → ${dispositionLabel(d)}).` },
+        digId,
+      }
+    }
+    case 'set_importance': {
+      const digId = str(args, 'digId')
+      const messageId = str(args, 'messageId')
+      const level = args.importance as Importance | null | undefined
+      if (level != null && !['low', 'normal', 'high', 'critical'].includes(level)) throw err('invalid', 'importance is low, normal, high, critical or null')
+      const prior = state.importance.get(messageId) ?? null
+      if (level == null) state.importance.delete(messageId)
+      else state.importance.set(messageId, level)
+      emitMock({ type: 'messages_changed', dig_id: digId, count: u64(1) })
+      return {
+        result: { importance: level ?? 'normal' },
+        summary: level ? `You set "${messageTitle(state, messageId)}" to ${level} importance` : `You cleared your importance for "${messageTitle(state, messageId)}"`,
+        affected: [{ kind: 'message', id: messageId }],
+        undo: { state: 'undoable', restore: { kind: 'importance', messageId, prior }, label: 'Put the importance back' },
         digId,
       }
     }
@@ -509,7 +581,7 @@ function execute(state: MockState, action: string, args: Args): Exec {
         if (msg && !msg.labels.includes('SNOOZED')) msg.labels.push('SNOOZED')
       }
       emitMock({ type: 'messages_changed', dig_id: digId, count: u64(ids.length) })
-      return { result: { count: ids.length, until: args.until }, summary: `You snoozed ${ids.length} message${ids.length === 1 ? '' : 's'} until ${String(args.until)}`, affected: ids.map((id) => ({ kind: 'message', id })), undo: { state: 'undoable', restore: { kind: 'labels_remove', digId, messageIds: ids, labels: ['SNOOZED'] }, label: 'Unsnooze' }, digId }
+      return { result: { count: ids.length, until: args.until }, summary: `You snoozed ${plural(ids.length, 'message')} until ${String(args.until)}`, affected: ids.map((id) => ({ kind: 'message', id })), undo: { state: 'undoable', restore: { kind: 'labels_remove', digId, messageIds: ids, labels: ['SNOOZED'] }, label: 'Unsnooze' }, digId }
     }
     case 'permanent_delete': {
       const digId = str(args, 'digId')
@@ -565,7 +637,9 @@ function execute(state: MockState, action: string, args: Args): Exec {
       const prev = latestMesh(state, meshId)
       if (!prev) throw err('not_found', 'Mesh not found')
       const report = simulate(state, { text, meshId })
-      const mesh = newMeshVersion(state, meshId, text, (args.changeNote as string | null) ?? null, prev.status === 'active' ? 'shadow' : prev.status, 'user')
+      // A guard-only Mesh (the user's own sender rules) keeps Active: guards veto and never hide mail.
+      const guardOnly = /^\s*GUARDS\s*$/m.test(text) && !/^\s*ROUTES\s*$/m.test(text)
+      const mesh = newMeshVersion(state, meshId, text, (args.changeNote as string | null) ?? null, prev.status === 'active' && !guardOnly ? 'shadow' : prev.status, 'user')
       return {
         result: { mesh, report } satisfies { mesh: Mesh; report: SimulationReport },
         summary: `You updated Mesh: ${mesh.name} v${prev.version} → v${mesh.version}`,
@@ -586,6 +660,52 @@ function execute(state: MockState, action: string, args: Args): Exec {
         if (status === 'shadow' && !v.shadowStartedAt) v.shadowStartedAt = now
       }
       return { result: { meshId, status }, summary: `You set Mesh: ${prev.name} from ${from} to ${status}`, affected: [{ kind: 'mesh', id: meshId }], undo: { state: 'undoable', restore: { kind: 'mesh_status', meshId, status: from }, label: `Back to ${from}` } }
+    }
+    case 'grade_decision': {
+      state.grades[`${str(args, 'meshId')}:${str(args, 'messageId')}`] = str(args, 'verdict')
+      return { result: { verdict: args.verdict }, summary: `Marked ${String(args.verdict)}`, affected: [], undo: { state: 'not_undoable', reason: 'grade it again' } }
+    }
+    case 'save_list': {
+      const name = str(args, 'name')
+      const entries = ((args.entries as string[] | undefined) ?? []).map((e) => e.trim().replace(/^@/, '').toLowerCase()).filter(Boolean)
+      const i = state.namedLists.findIndex((l) => l.name === name)
+      const list = { name, description: (args.description as string | undefined) ?? state.namedLists[i]?.description ?? '', entries: [...new Set(entries)], pack: state.namedLists[i]?.pack ?? null }
+      if (i >= 0) state.namedLists[i] = list
+      else state.namedLists.push(list)
+      return { result: list, summary: `Saved list:${name} (${list.entries.length} entries)`, affected: [], undo: { state: 'not_undoable', reason: 'edit the list again' } }
+    }
+    case 'install_pack': {
+      const id = str(args, 'packId')
+      const lists = (args.lists as Record<string, string[]> | undefined) ?? {}
+      for (const [name, entries] of Object.entries(lists)) {
+        const existing = state.namedLists.find((l) => l.name === name)
+        const merged = [...new Set([...(existing?.entries ?? []), ...entries.map((e) => e.trim().replace(/^@/, '').toLowerCase()).filter(Boolean)])]
+        if (existing) existing.entries = merged
+        else state.namedLists.push({ name, description: '', entries: merged, pack: id })
+      }
+      state.installedPacks = [...state.installedPacks.filter((p) => p.id !== id), { id, version: 1, meshes: {}, installedAt: new Date().toISOString() }]
+      return { result: { packId: id }, summary: `Installed ${id}`, affected: [], undo: { state: 'not_undoable', reason: 'remove the pack' } }
+    }
+    case 'remove_pack': {
+      const id = str(args, 'packId')
+      state.installedPacks = state.installedPacks.filter((p) => p.id !== id)
+      return { result: { packId: id }, summary: `Removed pack ${id}`, affected: [], undo: { state: 'not_undoable', reason: 'install it again' } }
+    }
+    case 'export_pack':
+      return { result: { packId: str(args, 'packId'), fileName: `${str(args, 'packId')}.riddlepack.toml`, text: `id = "${str(args, 'packId')}"\n` }, summary: 'Pack file', affected: [], undo: { state: 'not_undoable', reason: 'nothing changed' } }
+    case 'import_pack':
+      return { result: { packId: 'imported' }, summary: 'Added the pack to the catalogue', affected: [], undo: { state: 'not_undoable', reason: 'remove it' } }
+    case 'remember_for_sender': {
+      const scope = str(args, 'scope') === 'domain' ? 'domain' : 'sender'
+      const summary = `From now on, ${scope === 'domain' ? 'everything from this domain' : 'this sender'} is decided the way you decided this message`
+      return { result: { scope }, summary, affected: [], undo: { state: 'not_undoable', reason: 'edit Your corrections' } }
+    }
+    case 'set_mesh_fallback': {
+      const meshId = str(args, 'meshId')
+      const prev = latestMesh(state, meshId)
+      if (!prev) throw err('not_found', 'Mesh not found')
+      prev.fallback = Boolean(args.fallback)
+      return { result: prev, summary: prev.fallback ? `Mesh ${prev.name} is a fallback` : `Mesh ${prev.name} is a specific rule`, affected: [{ kind: 'mesh', id: meshId }], undo: { state: 'not_undoable', reason: 'mark it again' } }
     }
     case 'delete_mesh': {
       const meshId = str(args, 'meshId')
@@ -670,7 +790,7 @@ function execute(state: MockState, action: string, args: Args): Exec {
       target.calibration = target.calibration ?? { method: 'platt', labelledCount: 400, engineIdentity: 'jev:jev-1.13.0', calibratedAt: now, plattA: 1.1, plattB: -0.05, heldOutAgreement: 0.94 }
       const users = state.meshes.filter((mm) => !mm.deletedAt && mm.routes.some((r) => JSON.stringify(r.condition).includes(`"signal":"${name}"`)))
       if (users.length) emitMock({ type: 'proposal_created', pending_id: nextId(state, 'pend'), summary: `Re-simulate ${users.map((u) => u.name).join(', ')} against ${name} v${version}` })
-      return { result: target, summary: `You promoted Signal: ${name} v${version} to active`, why: users.length ? `${users.length} Mesh${users.length === 1 ? '' : 'es'} pin an older version; re-simulation proposed.` : null, affected: [{ kind: 'signal', id: target.id }], undo: { state: 'undoable', restore: { kind: 'signal_status', name, version, prevActive: prevActive?.version ?? null }, label: 'Demote again' } }
+      return { result: target, summary: `You promoted Signal: ${name} v${version} to active`, why: users.length ? `${plural(users.length, 'Mesh pins', 'Meshes pin')} an older version; re-simulation proposed.` : null, affected: [{ kind: 'signal', id: target.id }], undo: { state: 'undoable', restore: { kind: 'signal_status', name, version, prevActive: prevActive?.version ?? null }, label: 'Demote again' } }
     }
     case 'evaluate_signal': {
       const digId = str(args, 'digId')
@@ -827,6 +947,76 @@ function execute(state: MockState, action: string, args: Args): Exec {
       emitMock({ type: 'expedition_changed', expedition_id: id })
       return { result: { expeditionId: id }, summary: `You cancelled the Expedition "${exp.goal.slice(0, 60)}"`, affected: [{ kind: 'expedition', id }], undo: { state: 'not_undoable', reason: 'a cancelled Expedition keeps its checkpoint; start a new one to continue' } }
     }
+    case 'review_shadow': {
+      const digId = str(args, 'digId')
+      const messageId = str(args, 'messageId')
+      const msg = state.messages.find((x) => x.id === messageId && x.digId === digId)
+      const cls = state.classifications.get(messageId)
+      if (!msg || !(cls?.shadow || state.shadowProposals.has(messageId))) throw err('invalid', 'this message has no Shadow proposal to review')
+      const agree = args.agree !== false
+      state.shadowReviews.set(messageId, agree ? 'agreed' : 'disagreed')
+      const proposed = state.shadowProposals.get(messageId) ?? cls?.disposition
+      if (!proposed) throw err('invalid', 'this message has no Shadow proposal to review')
+      const mesh = state.meshes.filter((mm) => mm.id === state.specs.get(messageId)?.meshId).sort((a, b) => b.version - a.version)[0]
+      if (mesh) {
+        if (agree) mesh.shadowAgreed = Math.min(mesh.shadowProposed, mesh.shadowAgreed + 1)
+        else mesh.shadowProposed = Math.max(1, mesh.shadowProposed)
+      }
+      if (agree) {
+        return { result: { review: 'agreed', proposed }, summary: `Agreed with the Shadow proposal: ${dispositionLabel(proposed)}`, affected: [{ kind: 'message', id: messageId }], undo: { state: 'not_undoable', reason: 'agreement is a count the Mesh earns; disagree from the same row to record the opposite' }, digId }
+      }
+      const to = args.disposition as Disposition
+      const current = cls ?? { disposition: proposed, strata: [], findId: null, handledByUserAt: null, shadow: true }
+      const before = current.disposition
+      // The proposal stays on the review list beside the decision, as the backend's shadow row does.
+      state.shadowProposals.set(messageId, proposed)
+      state.classifications.set(messageId, { ...current, disposition: to, shadow: false, handledByUserAt: now })
+      emitMock({ type: 'message_classified', dig_id: digId, message_id: messageId, disposition: to, shadow: false })
+      return {
+        result: { review: 'disagreed' },
+        summary: `Disagreed with the Shadow proposal (${dispositionLabel(proposed)}): ${dispositionLabel(to)} instead`,
+        affected: [{ kind: 'message', id: messageId }],
+        undo: { state: 'undoable', restore: { kind: 'dispositions', items: [{ digId, messageId, disposition: before }] }, label: 'Undo' },
+        digId,
+      }
+    }
+    case 'decide_again': {
+      const digId = str(args, 'digId')
+      const ids = strList(args, 'messageIds')
+      const closed: string[] = []
+      let count = 0
+      for (const id of ids) {
+        const cls = state.classifications.get(id)
+        if (!cls || cls.handledByUserAt) continue
+        count += 1
+        for (const f of state.finds) {
+          if ((f.status === 'open' || f.status === 'snoozed') && f.sources.some((s) => s.messageId === id)) {
+            f.status = 'superseded'
+            f.updatedAt = now
+            closed.push(f.id)
+          }
+        }
+      }
+      return { result: { count, keptYours: ids.length - count, findsSuperseded: closed.length }, summary: `Sent ${plural(count, 'message')} back to Sift`, affected: ids.map((id) => ({ kind: 'message' as const, id })), undo: { state: 'undoable', restore: { kind: 'finds_reopen', findIds: closed }, label: 'Put the previous decisions back' }, digId }
+    }
+    case 'apply_mesh_to_history': {
+      const { mesh, report } = applyPlan(state, args)
+      return { result: { count: Number(report.changed), keptYours: 0, findsSuperseded: 0 }, summary: `Sent ${Number(report.changed)} messages back to Sift under Mesh ${mesh.name} v${mesh.version}`, affected: [{ kind: 'mesh' as const, id: mesh.id }], undo: { state: 'undoable', restore: { kind: 'finds_reopen', findIds: [] }, label: 'Put the previous decisions back' } }
+    }
+    case 'resift': {
+      const digs = args.digId ? state.digs.filter((d) => d.id === args.digId) : state.digs
+      const ids = new Set(digs.map((d) => d.id))
+      const count = state.messages.filter((m) => ids.has(m.digId) && state.classifications.get(m.id)?.handledByUserAt === null).length
+      return { result: { digs: digs.length, messages: count }, summary: `Sifting ${plural(count, 'message')} again across ${plural(digs.length, 'account')}`, affected: digs.map((d) => ({ kind: 'dig' as const, id: d.id })), undo: { state: 'not_undoable', reason: 'the earlier decisions stay as history; correct any message from its row' } }
+    }
+    case 'dismiss_pending': {
+      const id = str(args, 'pendingId')
+      const p = state.pending.get(id)
+      if (!p) throw err('not_found', 'that proposal was already applied, declined or expired')
+      state.pending.delete(id)
+      const reason = typeof args.reason === 'string' && args.reason.trim() ? args.reason.trim() : null
+      return { result: { pendingId: id }, summary: `Declined: ${p.summary}`, why: reason, inputs: { pendingId: id, action: p.action }, undo: { state: 'not_undoable', reason: 'the Director can propose it again' } }
+    }
     case 'add_never_hidden': {
       const entry = str(args, 'entry').trim().toLowerCase()
       if (!state.profile.neverHidden.includes(entry)) state.profile.neverHidden.push(entry)
@@ -844,17 +1034,73 @@ function execute(state: MockState, action: string, args: Args): Exec {
       emitMock({ type: 'settings_changed' })
       return { result: state.profile, summary: 'You updated your User Profile', undo: { state: 'not_undoable', reason: 'edit it again' } }
     }
+    case 'import_gmail_client': {
+      let installed: { client_id?: string; client_secret?: string } | undefined
+      try {
+        installed = (JSON.parse(str(args, 'text')) as { installed?: typeof installed }).installed
+      } catch {
+        throw err('invalid', 'that file is not the OAuth client JSON Google Auth Platform downloads')
+      }
+      const clientId = installed?.client_id?.trim() ?? ''
+      if (!clientId.endsWith('.apps.googleusercontent.com')) throw err('invalid', 'that file has no Desktop app client in it')
+      const clientSecretStored = !!installed?.client_secret?.trim()
+      state.settings = { ...state.settings, gmail: { clientId, clientSecretPresent: clientSecretStored } }
+      emitMock({ type: 'settings_changed' })
+      const projectId = (installed as { project_id?: string } | undefined)?.project_id ?? null
+      return { result: { clientId, projectId, clientSecretStored, keychainService: 'riddle-dev' }, summary: 'You imported the Gmail client', inputs: { clientId, clientSecret: clientSecretStored }, undo: { state: 'not_undoable', reason: 'the previous client is not kept' } }
+    }
+    case 'set_secret':
+    case 'clear_secret': {
+      const secret = str(args, 'secret')
+      const present = action === 'set_secret'
+      if (secret === 'jev_api_key') state.settings = { ...state.settings, judge: { ...state.settings.judge, apiKeyPresent: present } }
+      else if (secret === 'gmail_client_secret') state.settings = { ...state.settings, gmail: { ...state.settings.gmail, clientSecretPresent: present } }
+      else throw err('invalid', `${JSON.stringify(secret)} is not a secret Settings can store`)
+      emitMock({ type: 'settings_changed' })
+      return { result: { secret }, summary: present ? `You stored ${secret} in the keychain` : `You removed ${secret} from the keychain`, inputs: { secret }, undo: { state: 'not_undoable', reason: 'the previous value is not kept' } }
+    }
     case 'save_settings': {
       const before = state.settings
       state.settings = { ...state.settings, ...(args.settings as object) }
       emitMock({ type: 'settings_changed' })
       return { result: state.settings, summary: 'You changed settings', affected: [], undo: { state: 'undoable', restore: { kind: 'settings', settings: before }, label: 'Restore the previous settings' } }
     }
+    case 'connect_gmail': {
+      // Stands in for Google: the consent URL comes back at once and the
+      // account appears a moment later, as the real callback does.
+      const signedIn = (digId: string, body: string) => {
+        emitMock({ type: 'notify', title: 'Gmail connected', body, find_id: null })
+        emitMock({ type: 'gmail_sign_in', dig_id: digId, connected: true, message: null })
+        emitMock({ type: 'settings_changed' })
+      }
+      if (typeof args.digId === 'string') {
+        const dig = state.digs.find((d) => d.id === args.digId)
+        if (!dig) throw err('not_found', `dig ${String(args.digId)}`)
+        if (dig.provider !== 'gmail') throw err('invalid', 'only a Gmail account can sign in again; a test mailbox has no sign-in')
+        setTimeout(() => {
+          dig.status = { state: 'catching_up' as const, remaining: u64(0), total: u64(0) }
+          emitMock({ type: 'dig_status_changed', dig_id: dig.id, status: dig.status })
+          signedIn(dig.id, `${dig.email} is signed in again and catching up.`)
+        }, 2500)
+        // No consent page to open in browser mode: the UI treats a null URL as nothing to open.
+        return { result: { digId: dig.id, authUrl: null, reconnect: true }, summary: 'Started signing in to Gmail again', inputs: { digId: dig.id, reconnect: true }, undo: { state: 'not_undoable', reason: 'the sign-in completes in the browser' } }
+      }
+      const id = nextId(state, 'dig')
+      const name = typeof args.name === 'string' && args.name.trim() ? args.name.trim() : 'Gmail'
+      const email = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '.')}@gmail.example`
+      setTimeout(() => {
+        const at = new Date().toISOString()
+        state.digs.push({ id, name, email, provider: 'gmail' as const, group: null, privacy: (args.privacy as typeof state.settings.privacyDefault) ?? state.settings.privacyDefault, projection: (args.projection as typeof state.settings.projectionDefault) ?? state.settings.projectionDefault, status: { state: 'catching_up' as const, remaining: u64(0), total: u64(0) }, shadowStartedAt: null, disabled: false, createdAt: at })
+        ME[id] = { email, name }
+        signedIn(id, `${email} is syncing now.`)
+      }, 2500)
+      return { result: { digId: id, authUrl: null }, summary: 'Started a Gmail sign-in', inputs: { digId: id }, undo: { state: 'not_undoable', reason: 'remove the account instead' } }
+    }
     case 'add_fixture_dig': {
       const name = str(args, 'name')
       const email = str(args, 'email')
       const id = nextId(state, 'dig')
-      const dig = { id, name, email, provider: 'fixture' as const, group: null, privacy: state.settings.privacyDefault, projection: state.settings.projectionDefault, status: { state: 'catching_up' as const, remaining: u64(Number(args.count ?? 120)), total: u64(Number(args.count ?? 120)) }, shadowStartedAt: now, createdAt: now }
+      const dig = { id, name, email, provider: 'fixture' as const, group: null, privacy: (args.privacy as typeof state.settings.privacyDefault) ?? state.settings.privacyDefault, projection: (args.projection as typeof state.settings.projectionDefault) ?? state.settings.projectionDefault, status: { state: 'catching_up' as const, remaining: u64(Number(args.count ?? 120)), total: u64(Number(args.count ?? 120)) }, shadowStartedAt: now, disabled: false, createdAt: now }
       state.digs.push(dig)
       ME[id] = { email, name }
       const job = { id: `job_initial_${id}`, kind: 'initial_sync' as const, priority: 'catch_up' as const, status: { state: 'running' as const }, digId: id, label: `Initial sync: ${name}`, progress: { done: u64(0), total: u64(Number(args.count ?? 120)), unit: 'messages', step: 'Fetching headers', etaSeconds: u64(40) }, checkpoint: null, cancellable: true, attempts: 1, createdAt: now, startedAt: now, finishedAt: null, updatedAt: now }
@@ -881,12 +1127,22 @@ function execute(state: MockState, action: string, args: Args): Exec {
       const idx = state.digs.findIndex((x) => x.id === d.id)
       if (idx < 0) throw err('not_found', 'Dig not found')
       const before = state.digs[idx]
-      state.digs[idx] = { ...before, ...d }
+      // As the backend: only set_dig_enabled switches an account.
+      state.digs[idx] = { ...before, ...d, disabled: before.disabled }
       emitMock({ type: 'settings_changed' })
       return { result: state.digs[idx], summary: `You updated Dig: ${state.digs[idx].name}`, affected: [{ kind: 'dig', id: d.id }], undo: { state: 'undoable', restore: { kind: 'dig', dig: before }, label: 'Restore the previous Dig settings' } }
     }
+    case 'set_dig_enabled': {
+      const idx = state.digs.findIndex((x) => x.id === args.digId)
+      if (idx < 0) throw err('not_found', 'Dig not found')
+      const before = state.digs[idx]
+      const enabled = Boolean(args.enabled)
+      state.digs[idx] = { ...before, disabled: !enabled }
+      emitMock({ type: 'settings_changed' })
+      return { result: { digId: before.id, enabled }, summary: enabled ? `Enabled "${before.name}"; it syncs and sifts again` : `Disabled "${before.name}"; its mail is kept`, affected: [{ kind: 'dig', id: before.id }], undo: { state: 'undoable', restore: { kind: 'dig', dig: before }, label: enabled ? 'Disable it again' : 'Enable it again' } }
+    }
     case 'save_dig_group': {
-      const g = args.group as { name: string; digs: string[] }
+      const g = { ...(args.group as { name: string; digs: string[] }), usedBy: [] as string[] }
       const idx = state.digGroups.findIndex((x) => x.name === g.name)
       if (idx >= 0) state.digGroups[idx] = g
       else state.digGroups.push(g)
@@ -897,15 +1153,64 @@ function execute(state: MockState, action: string, args: Args): Exec {
       emitMock({ type: 'settings_changed' })
       return { result: g, summary: `You saved Dig Group: ${g.name}`, affected: g.digs.map((id) => ({ kind: 'dig' as const, id })), undo: { state: 'not_undoable', reason: 'edit the group again' } }
     }
-    case 'arm_dev': {
-      state.armed = !!args.armed
-      return { result: { armed: state.armed }, summary: state.armed ? 'You armed this dev build for provider mutations' : 'You disarmed this dev build', undo: { state: 'not_undoable', reason: 'disarm it from Developer Mode' } }
+    case 'rename_dig_group':
+    case 'delete_dig_group': {
+      const name = str(args, action === 'rename_dig_group' ? 'from' : 'name')
+      const g = state.digGroups.find((x) => x.name === name)
+      if (!g) throw err('not_found', `no group "${name}"`)
+      const users = [...state.meshes.filter((m) => m.scope.kind === 'dig_group' && m.scope.group === name).map((m) => `Mesh "${m.name}"`), ...state.strata.filter((s) => s.scopeGroup === name).map((s) => `Stratum "${s.name}"`)]
+      if (users.length) throw err('invalid', `${users.join(', ')} ${users.length === 1 ? 'is' : 'are'} scoped to "${name}"; change the scope first`)
+      const to = action === 'rename_dig_group' ? str(args, 'to').trim() : null
+      if (to !== null && state.digGroups.some((x) => x !== g && x.name.toLowerCase() === to.toLowerCase())) throw err('invalid', `a group called "${to}" exists`)
+      state.digGroups = to !== null ? state.digGroups.map((x) => (x === g ? { ...g, name: to } : x)) : state.digGroups.filter((x) => x !== g)
+      for (const d of state.digs) if (d.group === name) d.group = to
+      emitMock({ type: 'settings_changed' })
+      return { result: { name: to ?? name }, summary: to !== null ? `You renamed group ${name} to ${to}` : `You deleted group ${name}`, undo: { state: 'not_undoable', reason: 'mock' } }
+    }
+    case 'set_mailbox_writes': {
+      const w = args.writes
+      if (w !== 'hold' && w !== 'ask' && w !== 'allow') throw err('invalid', 'writes is hold, ask or allow')
+      state.writes = w
+      state.armed = w === 'allow'
+      if (w === 'allow') state.held = 0
+      return { result: { writes: w }, summary: `Mailbox writes: ${w}`, undo: { state: 'not_undoable', reason: 'choose again under Developer' } }
+    }
+    case 'send_held_changes': {
+      const n = state.held
+      state.held = 0
+      return { result: { applied: n, failed: 0, conflicts: 0 }, summary: `Wrote ${plural(n, 'change')} to the mailbox`, undo: { state: 'not_undoable', reason: 'mock' } }
+    }
+    case 'discard_held_changes': {
+      const n = state.held
+      state.held = 0
+      return { result: { discarded: n }, summary: `Dropped ${plural(n, 'waiting mailbox change')}`, undo: { state: 'not_undoable', reason: 'mock' } }
     }
     case 'refresh_now': {
       const digs = args.digId ? state.digs.filter((d) => d.id === args.digId) : state.digs
-      for (const d of digs) emitMock({ type: 'dig_status_changed', dig_id: d.id, status: d.status })
+      // A short sync per account: fetch, then sift, then synced, with the job row moving alongside.
+      for (const d of digs) {
+        const job: Job = { id: nextId(state, 'job'), kind: 'incremental_sync', priority: 'interactive', status: { state: 'running' }, digId: d.id, label: `Refresh ${d.name}`, progress: { done: u64(0), total: u64(12), unit: 'messages', step: 'Fetching headers', etaSeconds: null }, checkpoint: null, cancellable: true, attempts: 1, createdAt: now, startedAt: now, finishedAt: null, updatedAt: now }
+        state.jobs.unshift(job)
+        const before = d.status
+        d.status = { state: 'catching_up', remaining: u64(12), total: u64(12) }
+        emitMock({ type: 'job_changed', job })
+        emitMock({ type: 'dig_status_changed', dig_id: d.id, status: d.status })
+        setTimeout(() => {
+          job.progress = { ...job.progress, done: u64(12), step: 'sifting' }
+          d.status = { state: 'sifting', remaining: u64(12) }
+          emitMock({ type: 'job_progress', job_id: job.id, done: u64(12), total: u64(12), step: 'sifting' })
+          emitMock({ type: 'dig_status_changed', dig_id: d.id, status: d.status })
+        }, 400)
+        setTimeout(() => {
+          job.status = { state: 'completed' }
+          job.finishedAt = iso(new Date())
+          d.status = before.state === 'catching_up' || before.state === 'sifting' ? { state: 'synced' } : before
+          emitMock({ type: 'job_changed', job })
+          emitMock({ type: 'dig_status_changed', dig_id: d.id, status: d.status })
+        }, 900)
+      }
       state.logs.push({ at: now, level: 'info', category: 'sync', message: `refresh requested for ${digs.length} dig(s)`, payload: null })
-      return { result: { digs: digs.length }, summary: 'Refresh requested', silent: true }
+      return { result: { digId: args.digId ?? null, heard: true }, summary: args.digId ? 'Syncing now' : 'Syncing all accounts now', affected: digs.map((d) => ({ kind: 'dig' as const, id: d.id })), silent: true }
     }
     case 'cancel_job':
     case 'pause_job':
@@ -979,6 +1284,16 @@ function undoActivity(state: MockState, activityId: string): Exec {
       state.meshes = state.meshes.filter((mm) => !(mm.id === meshId && mm.version > version))
       if (restore.status) for (const v of state.meshes.filter((x) => x.id === meshId)) v.status = restore.status as MeshStatus
       affected.push({ kind: 'mesh', id: meshId })
+      break
+    }
+    case 'finds_reopen': {
+      for (const id of (restore.findIds as string[]) ?? []) {
+        const f = state.finds.find((x) => x.id === id)
+        if (f) {
+          f.status = 'open'
+          affected.push({ kind: 'find', id })
+        }
+      }
       break
     }
     case 'mesh_status': {
@@ -1083,6 +1398,13 @@ function undoActivity(state: MockState, activityId: string): Exec {
     case 'draft_restore':
       state.drafts.push(restore.draft as Draft)
       break
+    case 'importance': {
+      const id = String(restore.messageId)
+      if (restore.prior) state.importance.set(id, restore.prior as Importance)
+      else state.importance.delete(id)
+      affected.push({ kind: 'message', id })
+      break
+    }
     default:
       throw err('internal', `unknown restore kind ${restore.kind}`)
   }
@@ -1196,7 +1518,7 @@ function injectFixture(state: MockState, args: Args): Exec {
       c.disposition = spec.disposition
       c.strata = spec.strata ?? []
       if (spec.disposition?.kind === 'find') {
-        const find: Find = { id: nextId(state, 'find'), findType: spec.disposition.find_type, title: msg.subject.replace(/^\[.*?\]\s*/, ''), summary: msg.snippet, priority: 78, status: 'open', dueAt: null, snoozedUntil: null, createdAt: iso(new Date()), updatedAt: iso(new Date()), resolvedAt: null, resolvedBy: null, sources: [{ messageId: msg.id, threadId: msg.threadId, digId }], digIds: [digId], identityKey: msg.threadId, reason: spec.reason ?? '', confidence: 0.94, classificationId: `cls_${msg.id}`, traceId: `tr_${msg.id}`, supersededBy: null }
+        const find: Find = { id: nextId(state, 'find'), findType: spec.disposition.find_type, title: msg.subject.replace(/^\[.*?\]\s*/, ''), summary: msg.snippet, priority: 78, status: 'open', dueAt: null, snoozedUntil: null, createdAt: iso(new Date()), updatedAt: iso(new Date()), resolvedAt: null, resolvedBy: null, sources: [{ messageId: msg.id, threadId: msg.threadId, digId }], digIds: [digId], identityKey: msg.threadId, reason: spec.reason ?? '', confidence: 0.94, classificationId: `cls_${msg.id}`, traceId: `tr_${msg.id}`, supersededBy: null, notify: false }
         state.finds.unshift(find)
         c.findId = find.id
         emitMock({ type: 'find_created', find })

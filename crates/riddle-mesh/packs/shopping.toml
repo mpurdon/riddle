@@ -1,0 +1,61 @@
+id = "shopping"
+name = "Shopping and promotions"
+version = 2
+area = "Shopping"
+summary = "Promotions from stores that write daily or weekly are set aside, keeping only the newest from each; Gmail's Promotions tab is set aside too. Promotions from stores you name are Filed under Promotions instead, where you can find them."
+band = "general"
+
+[detect]
+gmail_categories = ["promotions"]
+min_messages = 20
+
+[[lists]]
+name = "keep_promotions"
+description = "Stores and services whose promotions you still want to see"
+question = "Which stores' or services' promotions do you still want to see?"
+default = []
+
+[[meshes]]
+rank = 7
+text = '''
+Mesh: Frequent promotions
+Scope:
+All Digs
+
+ROUTES
+
+IF (sender_cadence = daily OR sender_cadence = every_few_days OR sender_cadence = weekly) AND marketing@v1 > .70 AND NOT sender_domain IN list:keep_promotions
+    → Spoil + Replaces + Stratum: Promotions
+
+GUARDS
+
+NEVER Spoil IF sender IN never_hidden
+NEVER Spoil IF sender IN contacts
+NEVER Spoil IF sender_is_vip
+'''
+
+[[meshes]]
+rank = 8
+fallback = true
+text = '''
+Mesh: Promotions
+Scope:
+All Digs
+
+ROUTES
+
+IF gmail_category = promotions AND sender_domain IN list:keep_promotions
+    → Filed + Stratum: Promotions
+ELSE IF gmail_category = promotions AND (list_unsubscribe OR automated_sender)
+    → Spoil + Stratum: Promotions
+ELSE IF gmail_category = promotions AND (sender_cadence = daily OR sender_cadence = every_few_days OR sender_cadence = weekly)
+    → Spoil + Stratum: Promotions
+ELSE IF gmail_category = promotions AND marketing@v1 > .70
+    → Spoil + Stratum: Promotions
+
+GUARDS
+
+NEVER Spoil IF sender IN never_hidden
+NEVER Spoil IF sender IN contacts
+NEVER Spoil IF sender_is_vip
+'''

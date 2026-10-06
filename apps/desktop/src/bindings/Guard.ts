@@ -2,4 +2,9 @@
 import type { DispositionKind } from "./DispositionKind";
 import type { Expr } from "./Expr";
 
-export type Guard = { never: DispositionKind, condition: Expr, text: string, };
+export type Guard = { never: DispositionKind, condition: Expr, text: string, 
+/**
+ * The guard as a sentence ("Never Spoil when the sender is on your
+ * Never Hidden list.").
+ */
+words: string, };

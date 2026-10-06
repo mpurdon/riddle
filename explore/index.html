@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Riddle UX Study</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/dossier.css">
+</head>
+<body>
+<style>
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px; }
+.tile { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--sand); font-family: var(--ui); }
+.tile .big { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.tile .lab { color: var(--ink-2); font-size: 13px; margin-top: 6px; }
+.sev { display: inline-block; min-width: 20px; text-align: center; font-family: var(--mono); font-size: 11.5px; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
+.sev4 { background: var(--rust-soft); color: var(--rust); } .sev3 { background: var(--ochre-soft); color: var(--ochre); } .sev2 { background: var(--slate-soft); color: var(--slate); }
+.people { margin-top: 8px; border-top: 1px solid var(--line); }
+.person { display: grid; grid-template-columns: 220px minmax(0, 1fr); grid-template-areas: "name text" "role text" "role go"; gap: 4px 28px; padding: 16px 0; border-bottom: 1px solid var(--line); align-content: start; }
+.person h3 { grid-area: name; font-size: 18px; }
+.person .role { grid-area: role; font-family: var(--ui); font-size: 12.5px; color: var(--clay); align-self: start; }
+.person p { grid-area: text; font-size: 15.5px; margin: 0; max-width: 62ch; }
+.person .go { grid-area: go; font-family: var(--ui); font-size: 13.5px; font-weight: 600; }
+@media (max-width: 700px) { .person { grid-template-columns: 1fr; grid-template-areas: "name" "role" "text" "go"; } }
+.principles { list-style: none; padding: 0; margin: 8px 0 0; max-width: none; border-top: 1px solid var(--line); }
+.principles li { padding: 12px 0; border-bottom: 1px solid var(--line); font-family: var(--ui); font-size: 14.5px; max-width: 78ch; margin: 0; }
+.principles li b { font-size: 15.5px; margin-right: 6px; }
+.principles li i { display: block; font-style: normal; color: var(--clay); font-size: 12.5px; margin-top: 5px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+.good li { margin-bottom: 8px; }
+.cta { display: inline-block; font-family: var(--ui); font-weight: 600; font-size: 15px; background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 8px; text-decoration: none; }
+.cta:hover { background: var(--accent); color: #fff; }
+.pending { border: 1px dashed var(--line); border-radius: 8px; padding: 14px; font-family: var(--ui); color: var(--clay); font-size: 14px; }
+</style>
+<div class="wrap">
+  <div class="series">
+    <div class="crumbs"><b>Riddle UX study</b><span>›</span><span>Overview and evidence</span></div>
+    <div class="crumbs"><a href="proposals.html" data-proposals>Proposals →</a></div>
+  </div>
+
+  <header class="hero">
+    <div>
+      <div class="eyebrow">25 September 2026 · desktop client v0.1</div>
+      <h1>Riddle UX Study</h1>
+      <p class="lede">A usability audit of every Riddle flow, read against the best mail and communication clients, the research on attention and trust in automation, and seven practitioners' thinking. The proposals page turns this into choices; this page holds the evidence.</p>
+      <p style="margin-top:18px"><a class="cta" href="proposals.html" data-proposals>Read the proposals</a></p>
+    </div>
+    <dl class="card">
+      <dt>Audit</dt><dd>Every page under <code>apps/desktop/src</code> read in full; 12 flows walked step by step; Nielsen's ten heuristics scored with file references</dd>
+      <dt>Clients studied</dt><dd>17 mail clients, from Superhuman and HEY to Gmail's 2026 AI Inbox; 16 communication and task tools, from Slack to Linear and GitHub</dd>
+      <dt>Research</dt><dd>Email overload, interruption cost, trust in automation, explanatory debugging, forgiveness and learnability</dd>
+      <dt>Experts</dt><dd>Jared Spool · Luke Wroblewski · Femke van Schoonhoven · Jesse Showalter · Zander Whitehurst · Sharon Onyinye · Kole Jain</dd>
+      <dt>Source files</dt><dd><a href="research/index.html">The audit, surveys, research review and briefs</a>, as written by the research agents</dd>
+    </dl>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="On this page">
+      <div class="eyebrow">On this page</div>
+      <a href="#verdict">The verdict</a>
+      <a href="#audit">What the audit found</a>
+      <a href="#good">What to keep</a>
+      <a href="#words">The vocabulary problem</a>
+      <a href="#mail">What mail clients teach</a>
+      <a href="#comms">What communication tools teach</a>
+      <a href="#science">What the research says</a>
+      <a href="#experts">The seven experts</a>
+      <a href="#principles">Principles for the proposals</a>
+    </nav>
+
+    <main>
+      <section id="verdict">
+        <div class="eyebrow">The verdict</div>
+        <h2>Riddle's engine is honest and reversible. Its surface hides both.</h2>
+        <p>The audit found a product whose foundations are unusually good: one shortcut table drives keys and help, every disabled control says why, every automated change lands in an Activity ledger with undo, and the per-button help table computes what a click does to Gmail for the account in view. Reviewers of other clients single out exactly these properties as the basis of trust, and Riddle already has them.</p>
+        <p>What the surface does is bury them. A first-run user is told "Nothing needs your attention" with no account connected. The plain-English reason a Find exists is computed and never rendered. Nothing at the moment of acting says whether Gmail changed. The best explanation of consequences in the app is behind a small "?" button. And a new user meets about 45 domain nouns, 16 of them before the daily loop makes sense.</p>
+        <div class="tiles">
+          <div class="tile"><div class="big">45</div><div class="lab">distinct domain nouns in the primary UI; 16 needed before the daily loop makes sense</div></div>
+          <div class="tile"><div class="big">2</div><div class="lab">severity-4 problems: no way to sign in again to an expired account, and the empty first run</div></div>
+          <div class="tile"><div class="big">11</div><div class="lab">severity-3 problems, most of them about visibility: the reason, the Gmail effect, the double-click, the dead ends</div></div>
+          <div class="tile"><div class="big">0</div><div class="lab">places outside Settings where the autonomy rung of the account you are looking at is shown</div></div>
+        </div>
+      </section>
+
+      <section id="audit">
+        <div class="eyebrow">What the audit found</div>
+        <h2>The twenty problems that matter, ranked by impact and frequency</h2>
+        <p>Severity is Nielsen's scale: 4 blocks a task or destroys trust, 3 is major, 2 minor. Each row names the direction the proposals take; the proposals page has the alternatives.</p>
+        <div class="scroll"><table>
+          <thead><tr><th>#</th><th>Problem</th><th>Sev.</th><th>Where</th><th>Direction</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>No way to sign in again to an expired or revoked account. The "Sign in" affordance lands on a pane with no sign-in; recovery is Remove (wipes learned state) and re-add. Weekly for Google's External/Testing clients.</td><td><span class="sev sev4">4</span></td><td>Settings → Accounts</td><td>A "Sign in again" control on the account, and the auth error lands on it</td></tr>
+            <tr><td>2</td><td>First run asserts "Nothing needs your attention" with no accounts; the tour walks three empty pages and promises a digest that no longer exists.</td><td><span class="sev sev4">4</span></td><td>Summary, Tour</td><td>Gate Summary on zero accounts; demonstrate on the fixture before asking for Gmail</td></tr>
+            <tr><td>3</td><td>Inbox, Spoil and Contamination open on double-click only, have no preview pane, and the message page has no next or previous. Finds and Unresolved open on a single click.</td><td><span class="sev sev3">3</span></td><td>Inbox, Review, Message</td><td>One list model: single click opens a preview pane, j/k keep working</td></tr>
+            <tr><td>4</td><td>The Gmail effect of an action is invisible at the moment of acting. "Moved to Spoil" reads the same at Observe/None and at Act with archiving.</td><td><span class="sev sev3">3</span></td><td>Toasts, Dig switcher</td><td>Toast suffix "· archived in Gmail" or "· Riddle only"; rung chip in the chrome</td></tr>
+            <tr><td>5</td><td>Keyboard dead end: after resolving a Find opened with Enter, the cursor is invisible until the mouse is used.</td><td><span class="sev sev3">3</span></td><td>Finds</td><td>Fall back to the cursor when the URL's Find leaves the list</td></tr>
+            <tr><td>6</td><td>Ask Riddle routes operator queries such as <code>is:unread</code> to the Director and sends them at once, at real cost, with no chance to edit.</td><td><span class="sev sev3">3</span></td><td>Search box</td><td>Operators always search; questions are drafted, not sent</td></tr>
+            <tr><td>7</td><td>"View Jev" and "View Reasoning" dead-end on "Developer Mode is off" for normal users, and expose a vendor name.</td><td><span class="sev sev3">3</span></td><td>Why card, Activity</td><td>Hide or relabel when developer mode is off</td></tr>
+            <tr><td>8</td><td>Approve and Send are autofocused, so Enter completes the confirmation the dialog just asked the user to read.</td><td><span class="sev sev3">3</span></td><td>Approval, two-step dialogs</td><td>Focus the safe action; primary needs a deliberate press</td></tr>
+            <tr><td>9</td><td>Shadow "Review proposals" opens a plain inbox with no agree or disagree; the toolbar buttons act for real.</td><td><span class="sev sev3">3</span></td><td>Summary, Inbox</td><td>A proposal review with Agree/Disagree per row</td></tr>
+            <tr><td>10</td><td>Director proposals and the rail badge live in session memory; Dismiss never reaches the backend.</td><td><span class="sev sev3">3</span></td><td>Director</td><td>Fetch pending on mount; Dismiss is an Action</td></tr>
+            <tr><td>11</td><td>The Find's plain-English reason is never rendered; the Why card leads with a monospace route walk.</td><td><span class="sev sev3">3</span></td><td>Finds, Why card</td><td>Reason first, route walk collapsed</td></tr>
+            <tr><td>12</td><td>Director answers, Find text and Why cards cannot be selected or copied.</td><td><span class="sev sev3">3</span></td><td>Global CSS</td><td>Mark content regions selectable</td></tr>
+            <tr><td>13</td><td>"Not important" is two different Actions with two different Gmail effects.</td><td><span class="sev sev3">3</span></td><td>Finds, Why card</td><td>One name per Action</td></tr>
+            <tr><td>14</td><td>Rail badges and the Summary ignore the account filter while pages honour it.</td><td><span class="sev sev2">2</span></td><td>Rail, Summary</td><td>Summary and badges follow the switcher</td></tr>
+            <tr><td>15</td><td>"Any list" shortcuts work on five lists; <code>f</code> hard-codes a Respond Find; <code>s</code> silently snoozes 24 hours on messages.</td><td><span class="sev sev2">2</span></td><td>Lists, Unresolved, Inbox</td><td>One list behaviour everywhere; pickers, not defaults</td></tr>
+            <tr><td>16</td><td>Icon and metaphor mismatches: Spoil has a trash icon, Mesh a network icon, "Excavation" is an unexplained grab-bag, Strata implies non-overlapping layers.</td><td><span class="sev sev2">2</span></td><td>Rail</td><td>Sieve and heap icons; regroup the rail; gloss the nouns</td></tr>
+            <tr><td>17</td><td>The Google Cloud setup, the hardest step of onboarding, is a repository file path in monospace.</td><td><span class="sev sev3">3</span></td><td>Wizard</td><td>Open the guide from the wizard; show the steps inline</td></tr>
+            <tr><td>18</td><td>Finds and Unresolved cap at 200 with no paging, search, sort or bulk actions.</td><td><span class="sev sev3">3</span></td><td>Finds, Unresolved</td><td>Paging, multi-select, sort within groups</td></tr>
+            <tr><td>19</td><td>Raw enums and system strings as labels: status chips, Gmail label ids, action names, JSON arguments in dialogs.</td><td><span class="sev sev2">2</span></td><td>Everywhere</td><td>Label maps; arguments as key/value rows</td></tr>
+            <tr><td>20</td><td>Director: Enter sends, no Stop, and "Talk to the Director" auto-sends a prompt containing raw ids.</td><td><span class="sev sev2">2</span></td><td>Director</td><td>⌘↵ sends; a Stop button; prefill without sending</td></tr>
+          </tbody>
+        </table></div>
+        <p style="margin-top:14px">Below the cut and still worth fixing: the Mesh editor's line-number gutter drifts once a Mesh scrolls; "Open Personal" in the wizard opens Settings, not the mailbox; Strata promises "retire" that does not exist; "Review and relaunch" has no relaunch; Never Hidden is described as user-only although the Director can add to it after approval; expedition evidence links to a search for a raw id; the notification threshold is an unexplained number.</p>
+      </section>
+
+      <section id="good">
+        <div class="eyebrow">What to keep</div>
+        <h2>The foundations other clients lack</h2>
+        <div class="two">
+          <ul class="good">
+            <li><b>One shortcut table drives keys and help</b>, and one action-help table drives the per-row "?" and the help sheet. The "?" dialog's Riddle / Gmail / Teaches / Undo columns, computed for the account in view, are the best explanation of consequences in any mail client we studied.</li>
+            <li><b>Honest status everywhere.</b> "Catching up" instead of a false Attention Zero; progress that moves only on real events; "Nothing is hidden" on every degraded path; "Not sifted yet" instead of a fake explanation.</li>
+            <li><b>The account model.</b> Option cards with consequences, the "Right now:" sentence, "Held because…", Observe and None as defaults, Trusted behind a hold with coaching, inline type-the-count removal, groups locked while rules use them.</li>
+            <li><b>Confirmation tiers are structural and re-validated in the Action layer</b>: real recipients, the exact count, a hold with keyboard support, an approval that shows real arguments.</li>
+          </ul>
+          <ul class="good">
+            <li><b>Undo is real.</b> Toast Undo, global <kbd>u</kbd>, Activity Undo and Undo All with skipped lists, undone entries struck through, "Cannot undo: sent mail cannot be unsent."</li>
+            <li><b>Activity reads like the README promised</b>: actor chips, "Triggered by Mesh: … v7" as a link, why lines, View Messages, Edit Mesh, View Find.</li>
+            <li><b>Explanations exist for every decision.</b> The route walk with actual values, the LLM rationale as a quote, "Shadow: proposed, not applied". The content is there; it needs a plain-English layer on top.</li>
+            <li><b>Security-minded mail rendering</b>: sandboxed bodies, remote images off with the reason stated, links neutralised and listed, "auth failed" and Reply-To mismatch chips, a Contamination note that says what is disabled.</li>
+            <li><b>Director transparency</b>: tool-call cards with latency and an Activity link, per-turn cost, the untrusted-content banner, proposals previewed on real arguments.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="words">
+        <div class="eyebrow">The vocabulary problem</div>
+        <h2>Where the archaeology metaphor helps and where it hides meaning</h2>
+        <p>Jared Spool's model of intuitive design puts every user at a "current knowledge" point. For a Riddle newcomer that point is Gmail's words: label, archive, spam. The metaphor sets the target far away, and the app teaches it only through scattered page subtitles and a three-step tour. The table records what the audit found, noun by noun.</p>
+        <div class="scroll"><table>
+          <thead><tr><th>Noun</th><th>Reads as</th><th>Verdict</th></tr></thead>
+          <tbody>
+            <tr><td><b>Find</b></td><td>"Something we found that deserves attention"; the eight types are plain verbs</td><td>Works</td></tr>
+            <tr><td><b>Dig</b></td><td>An account, after one sentence the wizard provides. But Settings says "account" and the rest of the app says "Dig".</td><td>Works; pick one word per surface</td></tr>
+            <tr><td><b>Sift</b></td><td>"Sifting 41" reads naturally</td><td>Works</td></tr>
+            <tr><td><b>Spoil</b></td><td>Spoiled, or a spoiler. The rail icon is a trash can, which says "deleted", the opposite of the copy's "not deleted, still searchable".</td><td>Keep the word, fix the icon, gloss it</td></tr>
+            <tr><td><b>Contamination</b></td><td>Toxic; it covers ordinary spam too. The page explains the difference well.</td><td>Acceptable with the gloss</td></tr>
+            <tr><td><b>Strata</b></td><td>Ordered, non-overlapping layers. Riddle's Strata are overlapping tags.</td><td>Misleads; consider "Layers" or gloss as "tags"</td></tr>
+            <tr><td><b>Mesh</b></td><td>A network mesh, because the rail icon is a network. Nothing says "as in sieve".</td><td>Keep, fix the icon, gloss as "rules"</td></tr>
+            <tr><td><b>Excavation</b></td><td>An unexplained heading over two review trays, a taxonomy, two policy editors and the audit log</td><td>Regroup: "Review" and "Rules"</td></tr>
+            <tr><td><b>Signals, Escalate, Projection, Arming, Judge, Jev, Noul, Platt</b></td><td>Engineering and vendor terms, not the metaphor</td><td>Hide behind developer mode or rename</td></tr>
+          </tbody>
+        </table></div>
+        <p style="margin-top:12px">The same concept also appears under different names: Not Spoil / Restore / Correct / Decide for undoing a classification; Changes in Gmail / Projection for writing back; Judge / Jev / "Decided on Signals" for the ML model; Unsifted / Not yet sifted / Not sifted yet. The proposals treat this as one fix: one word per concept, and a gloss strategy that keeps the metaphor while showing the Gmail effect until it is learned.</p>
+      </section>
+
+      <section id="mail">
+        <div class="eyebrow">What mail clients teach</div>
+        <h2>Seventeen clients, one lesson: show the reason, scope the correction, never destroy</h2>
+        <p>Only two clients in the set show a per-message "why": Gmail's importance marker (hover for the reason since December 2010, click to correct and train) and Outlook's Copilot "Prioritize my inbox", whose headline replaces the preview line and which Microsoft's own rollout found was the thing users valued. Outlook's older Focused Inbox is the counter-example: no explanation, an override list the user cannot see, and institutions publishing "turn it off" guides after mail was missed.</p>
+        <div class="scroll"><table>
+          <thead><tr><th>Client</th><th>Triage model</th><th>Shows why?</th><th>Correction loop</th><th>Safety</th></tr></thead>
+          <tbody>
+            <tr><td>Superhuman</td><td>Split Inbox streams processed to Done; 100+ keys, ⌘K under 100 ms</td><td>No; custom splits are visible queries</td><td>Move to Important/Other for message, sender or domain</td><td>Undo send; Get Me To Zero is reversible; Auto Archive "missed crucial ones"</td></tr>
+            <tr><td>HEY</td><td>Screener consent, then Imbox / Feed / Paper Trail; no AI</td><td>Total: the user made every rule</td><td>Avatar menu; Screener History with 90-day restore</td><td>Nothing deleted; notifications off by default, no badge</td></tr>
+            <tr><td>Gmail</td><td>Markers, Priority Inbox, tabs, 2026 AI Inbox briefing</td><td>Hover the marker for the reason</td><td>Click to flip and train; drag to a tab with an Undo toast</td><td>Undo send; learning can be disabled; Gemini summaries default on</td></tr>
+            <tr><td>Outlook</td><td>Focused / Other; Copilot high/normal/low</td><td>Focused: no. Copilot: a why-headline</td><td>Move / Always move to a hidden override list</td><td>Copilot never sends or moves; mobile priority view withdrawn 2026</td></tr>
+            <tr><td>Apple Mail</td><td>Four categories; time-sensitive mail also in Primary; sender digests</td><td>No</td><td>Categorize Sender, current and future</td><td>View only; nothing moves on the server</td></tr>
+            <tr><td>Shortwave</td><td>Splits, Bundles, Todos, an assistant that proposes bulk actions</td><td>Toast per auto-label</td><td>"Apply to future messages"; every rule listed and removable in Settings</td><td>Assistant recommends and waits; ⌘Z</td></tr>
+            <tr><td>Notion Mail</td><td>Views plus prompt-defined auto labels; shut down 22 September 2026</td><td>Sample-and-tick before a label exists</td><td>Could not edit a label's prompt without recreating it</td><td>"More than half of users manage email without opening their inbox"</td></tr>
+            <tr><td>Missive / Front</td><td>Ordered rules, tags, assignment</td><td>Rule name on the conversation timeline; AI prompt log</td><td>Edit ordered, scoped rules</td><td>Rules never chain; not retroactive</td></tr>
+            <tr><td>Fyxer / Cora</td><td>Fixed labels; a twice-daily Brief that cites sources</td><td>Cora's Brief cites; Fyxer no</td><td>Whitelist after errors; plain-language rules</td><td>Drafts never send; Cora never deletes</td></tr>
+          </tbody>
+        </table></div>
+        <div class="two" style="margin-top:16px">
+          <div>
+            <h3>Patterns that consistently work</h3>
+            <ol>
+              <li>Sender-scoped corrections that persist and are visible as rules.</li>
+              <li>The reason on the row.</li>
+              <li>Undo as a toast on every automated or bulk move.</li>
+              <li>Nothing destroyed by triage: Done, not delete; recoverable screening.</li>
+              <li>AI drafts, humans send.</li>
+              <li>Propose, then confirm, for bulk actions.</li>
+              <li>Preview matches before a rule goes live.</li>
+              <li>A stable keyboard vocabulary: j/k, e, h, l, /, ⌘K.</li>
+              <li>Few buckets, whole counts: 3 to 7 streams.</li>
+              <li>Quiet by default; notify only the attention tier.</li>
+              <li>Time-sensitive overrides the category.</li>
+              <li>A digest for the non-urgent tier.</li>
+              <li>Start clean, on real mail, reversibly.</li>
+            </ol>
+          </div>
+          <div>
+            <h3>Failures on the record</h3>
+            <ol>
+              <li>Hidden overrides and no "why" (Focused Inbox).</li>
+              <li>Auto-archiving on a classifier the user cannot inspect (Superhuman Auto Archive, Fyxer's FYI).</li>
+              <li>Bundles that override the user's system (Inbox by Gmail, retired, never ported).</li>
+              <li>Forced re-screening of every sender (HEY).</li>
+              <li>Auto-labels you cannot edit or test (Notion Mail); fixed taxonomies (Fyxer).</li>
+              <li>AI that slows the core loop (Superhuman, Shortwave complaints).</li>
+              <li>Default-on summaries with known error rates (Gemini, Apple).</li>
+              <li>"Learns from you" without evidence (Fyxer, Focused).</li>
+              <li>The inbox stops being opened (Notion Mail's stated reason for shutting down). A triage app must stay the place where decisions are reviewed, or it dies.</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <section id="comms">
+        <div class="eyebrow">What communication tools teach</div>
+        <h2>Reason on the row, three exits, two lists, allow-lists above inference</h2>
+        <p>GitHub's notification inbox prints a reason label on every row (mention, review requested, subscribed), makes it a filter, and ships it as an email header. Linear's Inbox has a Priority tab that separates "needs you" from other updates; its snooze ends at the chosen time or on new activity, whichever comes first. Slack's VIPs and Apple's Focus allow-lists sit above every inference and bypass quiet modes. Android lets an app propose a notification's importance but only the user can raise it.</p>
+        <div class="two">
+          <div>
+            <h3>Ten transferable lessons</h3>
+            <ol>
+              <li>Put the reason on the row and make it a filter and a correction.</li>
+              <li>Two lists beat one ranking: a wrong call lands in the other list, visibly.</li>
+              <li>User allow-lists sit above all inference and quiet modes. That is Never Hidden; expose it with one-key add.</li>
+              <li>Snooze returns on new activity, not only on the clock.</li>
+              <li>Done is a state with a retention window and an undo, never a delete.</li>
+              <li>Three exits: handled, later, stop telling me. A single "dismiss" loses the signal.</li>
+              <li>Single-key vocabulary with a palette that prints the keys.</li>
+              <li>Latency is a feature and comes from local-first data.</li>
+              <li>AI output is labelled, per-source disable-able and pausable.</li>
+              <li>Digest what is still unread; adapt to presence without broadcasting it.</li>
+            </ol>
+          </div>
+          <div>
+            <h3>The cost of interruption, measured</h3>
+            <ul>
+              <li>Pielot, Church and de Oliveira (MobileHCI 2014): 63.5 notifications a day, viewed within minutes even on silent; more notifications, more negative emotion.</li>
+              <li>Fournier et al.: a single notification slows processing by about 7 seconds (d = 0.62); participants received over 150 a day.</li>
+              <li>Microsoft's 2025 telemetry for the top fifth of users: an interruption every two minutes, 275 a day.</li>
+              <li>Slack's own design team on threads: hiding replies from the channel was "the single most meaningful change"; unlimited nesting made the design "extremely complex". Coding Horror argues for one level at most. Riddle's new reply tree should keep collapse controls and a depth cap.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="science">
+        <div class="eyebrow">What the research says</div>
+        <h2>Email behaviour, attention, and trust in automation</h2>
+        <p>The research review covered about sixty studies. The findings below are the ones that change what Riddle should do, with the strength of the evidence stated. Two popular ideas did not survive: decision fatigue (the hungry-judge and ego-depletion effects are contested; a 23-lab replication found d ≈ 0.04) and choice overload as a general law (a meta-analysis of 50 experiments found a mean effect near zero). What replicates is interruption cost and bounded working memory.</p>
+        <div class="two">
+          <div>
+            <h3>How people actually use email</h3>
+            <ul>
+              <li><b>Half of mail is left in the inbox.</b> Dabbish et al. (CHI 2005): of 581 rated messages, 24 percent deleted, 27 percent filed, 49 percent left; 19 checks a day. Whittaker and Sidner's 1996 filers, no-filers and spring cleaners still describe people.</li>
+              <li><b>Cutting email off halves task switching.</b> Mark, Voida and Cardello (CHI 2012): window switches fell from 37 to 18 an hour and dwell time nearly doubled over five days without email. Small sample, one site.</li>
+              <li><b>77 checks a day, and checking correlates with stress.</b> Mark et al. (CHI 2016), 40 workers over 12 days. Notification-driven checkers rated their productivity lower than self-interrupting ones. Batching raised rated productivity but there was no evidence it lowered stress.</li>
+              <li><b>Three checks a day lowers stress.</b> Kushlev and Dunn (2015), within-subjects: checks fell from 12.5 to 4.7 with the same volume handled. Fitz et al. (2019), a randomised trial of 237: three notification batches a day beat hourly, which equalled no change, and no notifications at all raised anxiety.</li>
+              <li><b>Gmail's Priority Inbox saved 6 percent of reading time</b> and 13 percent on unimportant mail, with corrections as the training signal (Aberdeen et al., 2010).</li>
+              <li><b>Interruptions cost stress, not time.</b> Mark, Gudith and Klocke (CHI 2008): interrupted people finished faster with equal quality but reported more workload and frustration. The "23 minutes to recover" figure is not in that paper.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Trust in automation and AI</h3>
+            <ul>
+              <li><b>Explanations raise acceptance whether the AI is right or wrong.</b> Bansal et al. (CHI 2021), three tasks, large N: explanations added no accuracy. <b>Confidence scores calibrate trust; explanations do not.</b> Zhang, Liao and Bellamy (2020).</li>
+              <li><b>Human plus AI teams lose on decision tasks by default.</b> Vaccaro, Almaatouq and Malone (Nature Human Behaviour 2024), 106 experiments: g = −0.23 overall, −0.27 on decisions; the team wins only when the human is the stronger judge, which is exactly the borderline case.</li>
+              <li><b>One visible error costs an algorithm more trust than a human's</b> (Dietvorst, Simmons and Massey 2015), and <b>letting people adjust the output even slightly restores use</b> (Dietvorst et al. 2018).</li>
+              <li><b>Explanatory debugging</b> (Kulesza, Burnett, Wong and Stumpf, IUI 2015) is the closest study to editing Riddle's rules: a mail classifier that explains each prediction and lets users edit the explanation. Principles: be sound, be complete, do not overwhelm (ten features did as well as fifty); be actionable, be reversible, always honour feedback, change incrementally. Mental-model scores 52 percent higher; corrections up to twice as efficient. Users' top question: "what happens if I change this?"</li>
+              <li><b>Cognitive forcing</b> (Buçinca et al. 2021): showing the AI's verdict on demand, after the user decides, or after a delay cut overreliance, at a satisfaction cost.</li>
+              <li><b>Amershi et al.'s 18 guidelines</b> (CHI 2019) name the checklist: make clear what the system can do and how well; support efficient dismissal and correction; make clear why it did what it did; convey the consequences of user actions; provide global controls; notify about changes.</li>
+              <li><b>Prefer undo to confirmation</b> (Nielsen 2018; Shneiderman's rule 6): confirmations habituate; a generic "Are you sure?" protects nothing; name the action on the button.</li>
+              <li><b>Jargon hurts even with definitions</b> (Shulman et al. 2020, N = 650); bad metaphors slow learning (Carroll and Thomas 1982; Gentner and Nielsen 1996). <b>Tours are skipped and forgotten</b>; contextual, pull-based help works (NN/g 2023). <b>Visible work is valued</b> (Buell and Norton 2011) and <b>people value rules they finished themselves</b> (Norton, Mochon and Ariely 2012).</li>
+            </ul>
+          </div>
+        </div>
+        <h3 style="margin-top:8px">What that means for Riddle</h3>
+        <ul>
+          <li>Lead a Find with its confidence and the rule that fired, not a persuasive narrative. Never show a confidence the model cannot back.</li>
+          <li>Treat Unresolved as the primary human task, not an error bucket, with at most four decisions on screen and each resolution a rule-teaching moment.</li>
+          <li>Build the correction loop as explanatory debugging: show what fired, let the user edit it, re-classify at once, show the delta, keep it undoable, and never silently discard a correction.</li>
+          <li>In Spoil and Contamination, the views that can hide mail, show the message before Riddle's verdict; in Finds, verdict first.</li>
+          <li>Make the autonomy rung per rule, promote on evidence (N approvals, zero reversals), demote on a reversal, and show per-rule precision ("reversed 3 of 40 times").</li>
+          <li>Batch write-backs and notifications to a few moments a day; a count of decisions pending, not messages, is the only ambient signal; allow-listed senders bypass.</li>
+          <li>Close every review with what was resolved and learned; show partial progress Riddle already made.</li>
+          <li>Keep the metaphor only with a plain gloss on every term, Gmail's own verbs for actions, and no metaphor words in errors or confirmations.</li>
+        </ul>
+      </section>
+
+      <section id="experts">
+        <div class="eyebrow">The seven experts</div>
+        <h2>One dossier each, with their sharpest implication for Riddle</h2>
+        <div class="people">
+          <article class="person">
+            <h3>Jared Spool</h3>
+            <div class="role">Usability researcher · founder of UIE and Center Centre</div>
+            <p>The $300 million button, the seducible moment, the gap between current and target knowledge. For Riddle: reach a Find before asking for anything, put a trigger word on every row, and ask for more autonomy right after a mission is satisfied.</p>
+            <a class="go" href="experts/jared-spool.html" data-dossier="jared-spool">Read the dossier →</a>
+          </article>
+          <article class="person">
+            <h3>Luke Wroblewski</h3>
+            <div class="role">Mobile First · Web Form Design · Ask LukeW</div>
+            <p>Visible navigation wins; validate after the field; start with an answer, not a prompt; show the agent's work collapsed with each step linked to its result. For Riddle: keep the rail visible with counts, and embed the Director where the evidence is.</p>
+            <a class="go" href="experts/luke-wroblewski.html" data-dossier="luke-wroblewski">Read the dossier →</a>
+          </article>
+          <article class="person">
+            <h3>Femke van Schoonhoven</h3>
+            <div class="role">Design Lead at Gusto · Design Life podcast</div>
+            <p>A control must mean one clear thing; a pending state needs recovery; clarity beats forced simplicity. For Riddle: pair every verb with its Gmail consequence, and treat sync and write-back as pending screens with a way out.</p>
+            <a class="go" href="experts/femke-van-schoonhoven.html" data-dossier="femke-van-schoonhoven">Read the dossier →</a>
+          </article>
+          <article class="person">
+            <h3>Jesse Showalter</h3>
+            <div class="role">UI fundamentals · Rework critiques · Design Champs</div>
+            <p>Tools may be boring; one focal point per screen; a spacing ladder; states before polish. For Riddle: a boring Summary dashboard, one prominence carrier per row, and a Rework checklist on every page.</p>
+            <a class="go" href="experts/jesse-showalter.html" data-dossier="jesse-showalter">Read the dossier →</a>
+          </article>
+          <article class="person">
+            <h3>Zander Whitehurst</h3>
+            <div class="role">Founder of Memorisely · UI critique in sixty seconds</div>
+            <p>Never ask "Are you sure?"; verb plus noun; Hick's law on visible choices; motion that says where something went. For Riddle: "Archive 42 messages in Gmail?" with the verb on the button, and three to five visible row actions.</p>
+            <a class="go" href="experts/zander-whitehurst.html" data-dossier="zander-whitehurst">Read the dossier →</a>
+          </article>
+          <article class="person">
+            <h3>Sharon Onyinye</h3>
+            <div class="role">Product designer · founder of Coachli</div>
+            <p>Learn the vocabulary first; define success before designing; in a low-trust market, show people exactly what happened to the thing they care about. For Riddle: a first-run glossary and a trust ledger of "would have archived 14".</p>
+            <a class="go" href="experts/sharon-onyinye.html" data-dossier="sharon-onyinye">Read the dossier →</a>
+          </article>
+          <article class="person">
+            <h3>Kole Jain</h3>
+            <div class="role">UI/UX designer · on-camera redesigns of dashboards and SaaS</div>
+            <p>Let the data drive the form; put actions on a spectrum of explicitness; budget for the UI you cannot see; "nobody reads a screen". For Riddle: chips and right-aligned numbers in every list, rows laid out like a receipt without cards, and a tooltip and full states on every control.</p>
+            <a class="go" href="experts/kole-jain.html" data-dossier="kole-jain">Read the dossier →</a>
+          </article>
+        </div>
+      </section>
+
+      <section id="principles">
+        <div class="eyebrow">Principles for the proposals</div>
+        <h2>Thirteen rules the proposals are designed against</h2>
+        <p>Each rule names its evidence. They are the tests applied to every option on the proposals page.</p>
+        <ol class="principles">
+          <li><b>1. Reach a Find before asking for anything.</b> Everything before the first visible decision is a gate; demonstrate on the fixture, then connect Gmail in Observe.<i>Spool's $300M button; Wroblewski's gradual engagement; Superhuman's concierge on real mail</i></li>
+          <li><b>2. The reason lives on the row.</b> Every Find, Unresolved and Spoil row leads with the plain-English reason, filterable, and the correction is one action on that reason.<i>Gmail importance markers; Copilot's why-headline; GitHub reason labels; Kulesza's explanatory debugging</i></li>
+          <li><b>3. Say what reached Gmail, at the moment it happened.</b> A toast, a row, an Activity line: each states the Gmail effect or "Riddle only".<i>The audit's severity-3 finding; Focused Inbox's hidden overrides; Onyinye's low-trust lesson</i></li>
+          <li><b>4. The autonomy rung is always visible.</b> On the account chip in the chrome, on every control that can write, and one key away from stepping down.<i>Wroblewski's agent-management checklist; Android's user-owned importance; Amershi guideline "make clear what the system can do"</i></li>
+          <li><b>5. Corrections are scoped and become visible rules.</b> This message, this sender, this domain; every resulting rule listed and editable; rules outrank the model and the row says which fired.<i>Superhuman, Apple, Shortwave; Missive's rule timeline; Dietvorst's finding that letting people adjust the algorithm restores use</i></li>
+          <li><b>6. Three exits, never one dismiss.</b> Handled, later, stop telling me: each a different signal for learning.<i>GitHub Done / Saved / Unsubscribe; Linear Accept / Decline / Snooze</i></li>
+          <li><b>7. Preview before automate, approve before act, undo after everything.</b> Simulate a Mesh against history and show the counts before Apply; agent proposals cite their evidence; bulk moves get the same Undo as single ones.<i>Notion's sample-and-tick; Shortwave's assistant; Riddle's own Preview impact; Shneiderman's easy reversal</i></li>
+          <li><b>8. One list behaviour everywhere.</b> Single click opens a preview; j/k, Enter, x work on every list; keys mean one thing per object type; pickers, not silent defaults.<i>Jakob's law; the audit's double-click finding; Superhuman and Linear vocabularies</i></li>
+          <li><b>9. Keep the metaphor, gloss it until learned.</b> "Spoil (archived in Gmail)" in tooltips and rows, dropping the gloss after use; one word per concept; icons that match (sieve, heap).<i>Spool's knowledge gap; Onyinye's vocabulary-first teaching</i></li>
+          <li><b>10. The Director starts with an answer and lives where the evidence is.</b> A note of what it noticed, two proposals, citations to messages; chat collapsed by default; proposals inline on Unresolved clusters and Spoil senders.<i>Wroblewski's Ask LukeW data; Spool's seducible moment; "AI as feature vs product"</i></li>
+          <li><b>11. Quiet by default; allow-list above inference; digest the rest.</b> Never Hidden senders alert; everything else lands in a daily brief of what is still open.<i>HEY, Gmail Primary-only, Linear's unread-only digests; the interruption-cost studies</i></li>
+          <li><b>12. Basics before delight; measure outcomes, not satisfaction.</b> Reconnect, paging, selectable text and the dead ends come before any new feature. Track corrections per hundred, undo rate, time to empty Finds.<i>Spool's Kano reading and outcome metrics; Onyinye's success-first process</i></li>
+          <li><b>13. Let the data drive the form, and differentiate rather than dilute.</b> Enumerations are chips, numbers are right-aligned, time is a timeline; rows sit on two hard edges without cards; density is fixed with avatars, grouping and grey defaults, not white space; every icon has a tooltip and every control its states.<i>Kole Jain's dashboard flaws and "weirdly perfect UI"; Showalter's C.R.A.P. and spacing ladder; Whitehurst's alignment anchors</i></li>
+        </ol>
+      </section>
+
+      <div class="footer"><span>Riddle UX study · 25 September 2026</span><span>Source material: <a href="research/index.html">the audit, the two client surveys, the research review and the six expert briefs</a>.</span></div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

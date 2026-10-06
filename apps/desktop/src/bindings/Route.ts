@@ -2,8 +2,30 @@
 import type { Expr } from "./Expr";
 import type { MeshOutput } from "./MeshOutput";
 
-export type Route = { condition: Expr, output: MeshOutput, 
+export type Route = { 
+/**
+ * What the evaluator tests. For a route inside a `WHEN` block this is
+ * the block's condition AND the route's own, so evaluation, simulation
+ * and explanation need no notion of blocks.
+ */
+condition: Expr, output: MeshOutput, 
 /**
  * The source line, for the Mesh Inspector and the "Why?" answer.
  */
-text: string, };
+text: string, 
+/**
+ * The `WHEN` condition this route sits under, if any; kept so the text
+ * formats back as the block the user wrote.
+ */
+when: Expr | null, 
+/**
+ * The route's own condition inside its block; `None` is the block's
+ * `ELSE`, which matches whatever the block condition matches.
+ */
+local: Expr | null, 
+/**
+ * The route as a sentence ("When the sender's domain is github.com and
+ * review requested is very likely, it is something to review under
+ * Engineering."), written by `riddle_mesh::humanize` when parsed.
+ */
+words: string, };

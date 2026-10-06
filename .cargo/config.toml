@@ -7,3 +7,11 @@ TS_RS_EXPORT_DIR = { value = "apps/desktop/src/bindings", relative = true }
 # filled the disk twice during the first build; full rebuilds are cheap
 # enough with dependency debuginfo off.
 incremental = false
+
+# macOS: run app binaries through scripts/run-signed.sh, which signs them
+# with a stable identity so keychain permissions survive a rebuild.
+[target.aarch64-apple-darwin]
+runner = "scripts/run-signed.sh"
+
+[target.x86_64-apple-darwin]
+runner = "scripts/run-signed.sh"

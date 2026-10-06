@@ -8,8 +8,9 @@ import type { Conversation } from '@/bindings/Conversation'
 import type { ToolCall } from '@/bindings/ToolCall'
 import type { PendingAction } from '@/bindings/PendingAction'
 import { emitMock } from '../events'
-import { u64 } from '../format'
+import { plural, u64 } from '../format'
 import { iso } from './fixtures'
+import { err } from './queries'
 import { nextId, type MockState } from './state'
 import { MESH_GITHUB_V7 } from './fixtures'
 
@@ -79,7 +80,7 @@ function script(state: MockState, message: string): Script {
         { action: 'list_finds', args: { status: 'open' }, ok: true, summary: `${open.length} open Finds`, activityId: null, latencyMs: u64(9), untrusted: false, delayMs: 300 },
         { action: 'task_centre', args: {}, ok: true, summary: state.digs.some((d) => d.status.state === 'catching_up') ? 'Work catching up' : 'Caught up', activityId: null, latencyMs: u64(3), untrusted: false, delayMs: 600 },
       ],
-      text: `${open.length} Finds are open and ${unresolved} ${unresolved === 1 ? 'message is' : 'messages are'} Unresolved.\n\n${open
+      text: `${open.length} Finds are open and ${plural(unresolved, 'message is', 'messages are')} Unresolved.\n\n${open
         .slice(0, 3)
         .map((f, i) => `${i + 1}. **${f.title}** — ${f.summary}`)
         .join('\n')}${state.digs.some((d) => d.status.state === 'catching_up') ? '\n\nRiddle is still catching up on Work, so this may change.' : ''}`,
@@ -98,21 +99,13 @@ function script(state: MockState, message: string): Script {
       { action: 'search', args: { query: message, page: { cursor: null, limit: 20 } }, ok: true, summary: `${hits.length} messages`, activityId: null, latencyMs: u64(31), untrusted: true, delayMs: 400 },
       ...(hits[0] ? [{ action: 'get_message', args: { digId: hits[0].digId, messageId: hits[0].id }, ok: true, summary: 'Read 1 message', activityId: null, latencyMs: u64(7), untrusted: true, delayMs: 900 }] : []),
     ],
-    text: hits.length ? `I found ${hits.length} message${hits.length === 1 ? '' : 's'} that fit:\n\n${hits.map((h) => `- **${h.subject}** from ${h.from.name ?? h.from.email} (${new Date(h.date).toLocaleDateString()})`).join('\n')}\n\nI read mail content to answer this, so sending or creating a Mesh in this conversation now needs your approval.` : 'I searched your Digs and found nothing that matches. Try a sender, a subject word, or ask me to look further with an Expedition.',
+    text: hits.length ? `I found ${plural(hits.length, 'message')} that fit:\n\n${hits.map((h) => `- **${h.subject}** from ${h.from.name ?? h.from.email} (${new Date(h.date).toLocaleDateString()})`).join('\n')}\n\nI read mail content to answer this, so sending or creating a Mesh in this conversation now needs your approval.` : 'I searched your Digs and found nothing that matches. Try a sender, a subject word, or ask me to look further with an Expedition.',
   }
 }
 
-export function directorSend(state: MockState, args: { conversationId?: string | null; message: string; digIds?: string[] | null }): { conversationId: string } {
-  let conv = args.conversationId ? state.conversations.find((c) => c.id === args.conversationId) : undefined
-  const now = iso(new Date())
-  if (!conv) {
-    conv = { id: nextId(state, 'conv'), title: args.message.slice(0, 60), turns: [], readUntrusted: false, digIds: args.digIds ?? state.digs.map((d) => d.id), modelId: 'bedrock:us.anthropic.claude-sonnet-5', promptVersion: 'director/v3', createdAt: now, updatedAt: now }
-    state.conversations.unshift(conv)
-  }
-  const c: Conversation = conv
-  c.turns.push({ role: 'user', content: args.message, toolCalls: [], createdAt: now, inputTokens: u64(0), outputTokens: u64(0), costUsd: null })
-  c.updatedAt = now
-  const s = script(state, args.message)
+/** Play the scripted answer for `message` into conversation `c`: tool calls, deltas, the turn, then done. */
+function runScript(state: MockState, c: Conversation, message: string) {
+  const s = script(state, message)
   const calls: ToolCall[] = []
   for (const t of s.tools) {
     const { delayMs, ...rest } = t
@@ -138,7 +131,7 @@ export function directorSend(state: MockState, args: { conversationId?: string |
   }
   setTimeout(chunk, start)
   const finish = () => {
-    const tokensIn = 2400 + args.message.length * 4 + calls.length * 900
+    const tokensIn = 2400 + message.length * 4 + calls.length * 900
     const tokensOut = Math.round(s.text.length / 4)
     c.turns.push({ role: 'director', content: s.text, toolCalls: calls, createdAt: iso(new Date()), inputTokens: u64(tokensIn), outputTokens: u64(tokensOut), costUsd: Math.round(((tokensIn * 3 + tokensOut * 15) / 1_000_000) * 10000) / 10000 })
     c.updatedAt = iso(new Date())
@@ -160,8 +153,8 @@ export function directorSend(state: MockState, args: { conversationId?: string |
     }
     if (s.expedition) {
       const id = nextId(state, 'exp')
-      state.expeditions.unshift({ id, goal: args.message, scope: { digIds: c.digIds, since: null, until: null, toolsAllowed: ['search', 'get_thread', 'get_message'] }, budget: { costUsd: 1, seconds: u64(900), toolCalls: 60 }, spent: { costUsd: 0.04, seconds: u64(12), toolCalls: 2 }, status: 'running', plan: [{ n: 1, text: 'Search the Digs in scope for relevant threads.', done: true }, { n: 2, text: 'Read the candidates and extract evidence.', done: false }, { n: 3, text: 'Report findings as Finds.', done: false }], checkpoint: { step: 1 }, evidence: [], findings: [], error: null, createdAt: iso(new Date()), updatedAt: iso(new Date()), finishedAt: null })
-      const job = { id: `job_${id}`, kind: 'expedition' as const, priority: 'interactive' as const, status: { state: 'running' as const }, digId: null, label: `Expedition: ${args.message.slice(0, 40)}`, progress: { done: u64(1), total: u64(3), unit: 'steps', step: 'Reading candidates', etaSeconds: u64(90) }, checkpoint: null, cancellable: true, attempts: 1, createdAt: iso(new Date()), startedAt: iso(new Date()), finishedAt: null, updatedAt: iso(new Date()) }
+      state.expeditions.unshift({ id, goal: message, scope: { digIds: c.digIds, since: null, until: null, toolsAllowed: ['search', 'get_thread', 'get_message'] }, budget: { costUsd: 1, seconds: u64(900), toolCalls: 60 }, spent: { costUsd: 0.04, seconds: u64(12), toolCalls: 2 }, status: 'running', plan: [{ n: 1, text: 'Search the Digs in scope for relevant threads.', done: true }, { n: 2, text: 'Read the candidates and extract evidence.', done: false }, { n: 3, text: 'Report findings as Finds.', done: false }], checkpoint: { step: 1 }, evidence: [], findings: [], error: null, createdAt: iso(new Date()), updatedAt: iso(new Date()), finishedAt: null })
+      const job = { id: `job_${id}`, kind: 'expedition' as const, priority: 'interactive' as const, status: { state: 'running' as const }, digId: null, label: `Expedition: ${message.slice(0, 40)}`, progress: { done: u64(1), total: u64(3), unit: 'steps', step: 'Reading candidates', etaSeconds: u64(90) }, checkpoint: null, cancellable: true, attempts: 1, createdAt: iso(new Date()), startedAt: iso(new Date()), finishedAt: null, updatedAt: iso(new Date()) }
       state.jobs.unshift(job)
       emitMock({ type: 'expedition_changed', expedition_id: id })
       emitMock({ type: 'job_changed', job })
@@ -171,5 +164,30 @@ export function directorSend(state: MockState, args: { conversationId?: string |
     }
     emitMock({ type: 'director_done', conversation_id: c.id, error: null })
   }
+}
+
+export function directorSend(state: MockState, args: { conversationId?: string | null; message: string; digIds?: string[] | null }): { conversationId: string } {
+  let conv = args.conversationId ? state.conversations.find((c) => c.id === args.conversationId) : undefined
+  const now = iso(new Date())
+  if (!conv) {
+    conv = { id: nextId(state, 'conv'), title: args.message.slice(0, 60), turns: [], readUntrusted: false, digIds: args.digIds ?? state.digs.map((d) => d.id), modelId: 'bedrock:us.anthropic.claude-sonnet-5', promptVersion: 'director/v3', createdAt: now, updatedAt: now }
+    state.conversations.unshift(conv)
+  }
+  const c: Conversation = conv
+  c.turns.push({ role: 'user', content: args.message, toolCalls: [], createdAt: now, inputTokens: u64(0), outputTokens: u64(0), costUsd: null })
+  c.updatedAt = now
+  runScript(state, c, args.message)
+  return { conversationId: c.id }
+}
+
+/** The failed Director turns at the end come off and the last message runs again. */
+export function directorRetry(state: MockState, args: { conversationId: string }): { conversationId: string } {
+  const c = state.conversations.find((x) => x.id === args.conversationId)
+  if (!c) throw err('not_found', 'no such conversation')
+  while (c.turns.length && c.turns.at(-1)!.role === 'director' && c.turns.at(-1)!.failure) c.turns.pop()
+  const last = c.turns.at(-1)
+  if (!last || last.role !== 'user') throw err('invalid', 'nothing to retry: the last turn is not a message of yours that failed')
+  c.updatedAt = iso(new Date())
+  runScript(state, c, last.content)
   return { conversationId: c.id }
 }

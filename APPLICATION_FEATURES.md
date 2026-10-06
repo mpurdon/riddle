@@ -470,6 +470,44 @@ Each of these was recorded in at least one repo. Treat them as pre-emptive fixes
 
 ---
 
+## 18. Learnings from Riddle (September 2026)
+
+Riddle was the first of these apps to be used daily on a real mailbox while it was being built, and the first to run a full UX study (`explore/`) against itself. What follows is what changed our minds, each with the incident behind it.
+
+**Lists lead with the subject; the reason goes under it.** The study said "reason first" and the first build did it; the person reading a Find wants the subject first and the reason as the second line. The same wording appears in the row and in the detail header, so nothing has to be learnt twice.
+
+**Say rules in words where people read, keep the grammar where they debug.** A rule like `payment_related@v1 > .80 AND requires_action@v1 > .70` is written once by a deterministic humanizer ("It appears payment related is very likely and requires action is likely, so it is something to pay under Finance") with calibrated probability words (Kent / ICD 203 / IPCC bands). Lists, headers and toasts show the sentence; the Why panel shows the grammar and every clause's actual value, because its job is to show exactly what happened. No model call for formatting.
+
+**The detail view is for acting, not for being a mail client.** The mail you must read sits at the top, formatted; the raw thread is folded under "Sources"; Why is a drawer that slides in on demand. When a pane starts wanting reply-all and labels, that is the signal the two views are merging.
+
+**Do not tell the person to re-run things to see a fix.** When stored text changed shape (reasons in words, a new fact on old mail), the app rewrote its own rows once per account at boot, off the boot path. "Re-sift and it will look right" is the wrong answer to hand a person.
+
+**The store answers; the client renders.** Five things the client derived from dates, settings and string matches (what an account does to its mailbox, which rules use a group, whether a rule stepped back, whether a row is a Shadow proposal, what an action touched) were wrong in some state. Each became a typed field, and the client's cache invalidation now follows the backend's list of affected entities instead of per-action tables.
+
+**Facts before Signals.** Three quarters of a real mailbox came back Unresolved because rules ended in "ask the model" and the account could not. A header is a fact, not a judgement: route on it, and only ask a Signal for what no fact states. A simulation must apply the same confidence policy as the decision, or it promises what the pipeline will hold back.
+
+**Automatic recovery has a countdown.** A tripped circuit breaker names its wait; the failed turn shows it counting down, retries by itself and clears. A conversation never feeds its own error back to the model as if the model said it.
+
+**Chat conventions are conventions.** Enter sends, Shift+Enter adds a line, the composer grows with the text. The one place that inverted this was the one place people mistyped.
+
+**Chips do not scale.** A row of toggles is fine for two labels or eight Find types and wrong for a hundred Strata: show the chosen ones, each removable, and add through a filtering picker. The same editor serves the page and Settings so they cannot disagree.
+
+**Panes resize and remember.** Fixed 420 px lists and 46% previews are wrong at every window size but one. A separator you can drag, move with arrow keys and reset with Home, remembered per pane in localStorage.
+
+**Keychain: presence must never decrypt, and dev builds need a stable identity.** Checking whether a secret exists by reading it raised a permission dialog on every settings read; an ad-hoc-signed debug binary is a new app to macOS after every rebuild, so "Always Allow" never stuck. Existence is an attribute-only search; concurrent first reads share one trip; a cargo runner signs the dev binary with the developer's own identity before launching it.
+
+**Offline means no network and no keychain, and never writes.** The CLI's offline boot once saved its scripted-judge override into the person's real settings file. Overrides are applied in memory; the offline profile blanks the model, the judge and the Gmail client in that process only.
+
+**Two-step actions confirm from scripts too.** `--yes` has to answer the pending step, not just the first call, or a script stops at "Proceed?".
+
+**Undo has to understand its own consequences.** An action that queues a Sift pass must not have that pass counted as "handled since" against its own undo; the general rule is that a system actor's later Activity is never a hand-edit.
+
+**Tests count from the store, not from a page.** An assertion that compared one page of fifty rows to the whole mailbox passed until the fixture grew. Sync budgets in test fixtures need headroom for a parallel test run. Shared jsdom shims and one mount helper live in the test setup, not at the top of every page test.
+
+**Delegated work needs disjoint file ownership and a coordinator who runs the gates.** Four agents in parallel worked when each owned a path list and reported cross-file needs instead of editing them; the coordinator applied those and ran clippy, the workspace suite and the client suite once over the combined tree.
+
+---
+
 ## Appendix: source index
 
 Files worth opening first when lifting a pattern.

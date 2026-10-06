@@ -39,9 +39,11 @@ tokio = { workspace = true, features = ["io-util", "net"] }
 async-trait.workspace = true
 parking_lot.workspace = true
 chrono.workspace = true
+iana-time-zone.workspace = true
 uuid.workspace = true
 dirs.workspace = true
 reqwest.workspace = true
 
 [dev-dependencies]
+chrono-tz.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

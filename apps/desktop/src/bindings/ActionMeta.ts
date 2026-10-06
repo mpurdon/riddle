@@ -3,7 +3,20 @@ import type { Autonomy } from "./Autonomy";
 import type { ConfirmationPolicy } from "./ConfirmationPolicy";
 import type { Risk } from "./Risk";
 
-export type ActionMeta = { name: string, description: string, mutating: boolean, reversible: boolean, externalSideEffect: boolean, risk: Risk, confirmation: ConfirmationPolicy, 
+export type ActionMeta = { name: string, description: string, mutating: boolean, reversible: boolean, 
+/**
+ * Calls the provider while it runs (send, permanent delete,
+ * unsubscribe): the dev build's Hold / Ask / Allow gates the Action.
+ */
+externalSideEffect: boolean, 
+/**
+ * Changes Riddle, and queues the matching mailbox change in the
+ * outbox (corrections, archive, Strata). The Action always runs; the
+ * queued write waits for the dev build's Hold / Ask / Allow. A
+ * correction was refused outright when it shared the flag above, though
+ * it never touched the mailbox itself.
+ */
+projected: boolean, risk: Risk, confirmation: ConfirmationPolicy, 
 /**
  * The lowest autonomy at which a non-user principal may run it unprompted.
  */
@@ -15,4 +28,10 @@ egress: boolean,
 /**
  * Read-only Actions are exposed to MCP first (§10).
  */
-readOnly: boolean, };
+readOnly: boolean, 
+/**
+ * Only a person (the app or the CLI) may run it: agents never see it
+ * and are refused before a pending confirmation could store its
+ * arguments. For Actions whose arguments are secrets.
+ */
+userOnly: boolean, };

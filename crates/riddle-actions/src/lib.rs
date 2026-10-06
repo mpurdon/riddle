@@ -176,11 +176,13 @@ pub fn meta(name: &str, description: &str) -> ActionMetaBuilder {
         mutating: false,
         reversible: false,
         external_side_effect: false,
+        projected: false,
         risk: riddle_core::Risk::Low,
         confirmation: riddle_core::ConfirmationPolicy::None,
         minimum_autonomy: riddle_core::Autonomy::Observe,
         egress: false,
         read_only: true,
+        user_only: false,
     })
 }
 
@@ -199,6 +201,11 @@ impl ActionMetaBuilder {
         self.0.external_side_effect = true;
         self
     }
+    /// The mailbox change goes through the outbox (see `ActionMeta::projected`).
+    pub fn projected(mut self) -> Self {
+        self.0.projected = true;
+        self
+    }
     pub fn risk(mut self, r: riddle_core::Risk) -> Self {
         self.0.risk = r;
         self
@@ -209,6 +216,11 @@ impl ActionMetaBuilder {
     }
     pub fn autonomy(mut self, a: riddle_core::Autonomy) -> Self {
         self.0.minimum_autonomy = a;
+        self
+    }
+    /// Refused for every principal but the user and the CLI; see `ActionMeta::user_only`.
+    pub fn user_only(mut self) -> Self {
+        self.0.user_only = true;
         self
     }
     pub fn egress(mut self) -> Self {

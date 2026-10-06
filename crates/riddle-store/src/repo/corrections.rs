@@ -69,3 +69,74 @@ pub fn active_moves(store: &Store, limit: u32) -> Result<Vec<Correction>> {
         .filter(|k| k.to_disposition.is_some())
         .collect())
 }
+
+/// Counts per Mesh version: `(mesh id, version, count)`.
+pub type MeshCounts = Vec<(String, u32, u64)>;
+
+/// Corrections that still stand, made since a time: the total and the count
+/// per Mesh version they were held against. Aggregated in SQL for the
+/// trust card.
+pub fn active_since_by_mesh(
+    store: &Store,
+    after: &chrono::DateTime<chrono::Utc>,
+) -> Result<(u64, MeshCounts)> {
+    store.read(|c| {
+        let total: i64 = c.query_row(
+            "SELECT count(*) FROM corrections WHERE retracted_at IS NULL AND created_at > ?1",
+            [ts(after)],
+            |r| r.get(0),
+        )?;
+        let mut st = c.prepare(
+            "SELECT json_extract(json, '$.meshId'), json_extract(json, '$.meshVersion'), count(*) FROM corrections
+             WHERE retracted_at IS NULL AND created_at > ?1 AND json_extract(json, '$.meshId') IS NOT NULL
+             GROUP BY 1, 2",
+        )?;
+        let rows: rusqlite::Result<MeshCounts> = st
+            .query_map([ts(after)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u32, r.get::<_, i64>(2)? as u64)))?
+            .collect();
+        Ok((total as u64, rows?))
+    })
+}
+
+/// Messages whose standing corrections reversed a Spoil decision.
+pub fn reversed_from_spoil(store: &Store) -> Result<Vec<MessageId>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT DISTINCT message_id FROM corrections
+             WHERE retracted_at IS NULL AND json_extract(json, '$.fromDisposition.kind') = 'spoil'",
+        )?;
+        let rows = st
+            .query_map([], |r| Ok(MessageId(r.get::<_, String>(0)?)))?
+            .collect();
+        rows
+    })
+}
+
+/// For one Mesh version on this Dig: how many distinct messages it decided
+/// (still standing, or since reversed) and how many of those the user
+/// reversed. Two aggregates, so a correction inside a bulk move costs two
+/// counts rather than a parse of every correction and classification.
+pub fn decided_and_reversed_by_mesh(
+    store: &Store,
+    mesh_id: &str,
+    version: u32,
+) -> Result<(usize, usize)> {
+    store.read(|c| {
+        let reversed: i64 = c.query_row(
+            "SELECT count(DISTINCT message_id) FROM corrections
+             WHERE retracted_at IS NULL AND json_extract(json, '$.meshId') = ?1 AND json_extract(json, '$.meshVersion') = ?2",
+            params![mesh_id, version],
+            |r| r.get(0),
+        )?;
+        let decided: i64 = c.query_row(
+            "SELECT count(*) FROM (
+                SELECT message_id FROM classifications WHERE mesh_id = ?1 AND mesh_version = ?2 AND superseded_at IS NULL AND shadow = 0
+                UNION
+                SELECT message_id FROM corrections WHERE retracted_at IS NULL AND json_extract(json, '$.meshId') = ?1 AND json_extract(json, '$.meshVersion') = ?2
+             )",
+            params![mesh_id, version],
+            |r| r.get(0),
+        )?;
+        Ok((decided as usize, reversed as usize))
+    })
+}

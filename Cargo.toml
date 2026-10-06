@@ -83,6 +83,9 @@ futures = "0.3"
 async-trait = "0.1"
 ts-rs = { version = "10", features = ["serde-compat", "chrono-impl", "serde-json-impl", "no-serde-warnings"] }
 chrono = { version = "0.4", features = ["serde"] }
+# "Expires: end of day" is midnight where the user is, daylight saving included.
+chrono-tz = "0.10"
+iana-time-zone = "0.1"
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
 rusqlite = { version = "0.37", features = ["bundled", "chrono", "serde_json", "backup"] }
 r2d2 = "0.8"

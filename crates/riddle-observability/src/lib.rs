@@ -220,15 +220,48 @@ impl Drop for Timed {
     }
 }
 
+/// Log where a panic happened, then run the default hook. The log gets the
+/// file, line and thread only: a panic message can quote the mail being
+/// processed (a slice error prints the string it was cutting). Without this
+/// a crashed job said only "job handler panicked" and the location went to
+/// a terminal nobody was watching.
+pub fn install_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let at = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "unknown location".into());
+        let thread = std::thread::current();
+        emit(
+            log::Level::Error,
+            Category::App,
+            format_args!(
+                "panic at {at} on thread {}",
+                thread.name().unwrap_or("unnamed")
+            ),
+        );
+        default(info);
+    }));
+}
+
 /// Redaction helper for identifiers that may carry content: keeps a prefix and
 /// a length so two log lines can be correlated without revealing the value.
 pub fn redact(s: &str) -> String {
-    let keep = s.len().min(4);
+    let mut keep = s.len().min(4);
+    while !s.is_char_boundary(keep) {
+        keep -= 1;
+    }
     format!("{}…({})", &s[..keep], s.len())
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn redacting_non_ascii_keeps_whole_characters() {
+        assert_eq!(redact("éééé"), "éé…(8)");
+    }
+
     use super::*;
 
     #[test]

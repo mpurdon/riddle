@@ -74,6 +74,8 @@ escalation, so Finds, Unresolved, Activity and traces are populated.
   but the prompt could be trimmed (it sends all 27 definitions).
 - No SQLCipher yet; the store has the seam.
 
+Future work that is agreed but not scheduled is in `ROADMAP.md`.
+
 ## Deferred until the user is back
 
 Things that need input, a secret, or a decision that is theirs:

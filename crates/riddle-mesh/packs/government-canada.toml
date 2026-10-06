@@ -1,0 +1,27 @@
+id = "government-canada"
+name = "Government (Canada)"
+version = 1
+area = "Essentials"
+summary = "Authenticated mail from the CRA, the RCMP, the Government of Canada, the provinces and other governments: the most urgent thing on the list, never hidden."
+band = "safety"
+
+[detect]
+sender_domains = ["canada.ca", "gc.ca", "ontario.ca", "gov.on.ca"]
+min_messages = 1
+
+[[meshes]]
+rank = 30
+text = '''
+Mesh: Government
+Scope:
+All Digs
+
+ROUTES
+
+IF government_sender
+    → Find: Do + Notify + Stratum: Government
+
+GUARDS
+
+NEVER Spoil IF government_sender
+'''

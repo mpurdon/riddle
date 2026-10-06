@@ -101,6 +101,8 @@ pub fn set_status(store: &Store, id: &MeshId, version: u32, status: MeshStatus) 
         return Err(riddle_errors::RiddleError::not_found("mesh version"));
     };
     m.status = status;
+    // A status the user chose is not a demotion.
+    m.demoted = None;
     if status == MeshStatus::Deleted {
         m.deleted_at = Some(chrono::Utc::now());
     }
@@ -129,4 +131,22 @@ pub fn remove_version(store: &Store, id: &MeshId, version: u32) -> Result<bool> 
             params![id.as_str(), version],
         )? > 0)
     })
+}
+
+/// Step a version back to Shadow on evidence and record why.
+pub fn demote(
+    store: &Store,
+    id: &MeshId,
+    version: u32,
+    demotion: riddle_core::Demotion,
+) -> Result<()> {
+    let Some(mut m) = get(store, id, version)? else {
+        return Err(riddle_errors::RiddleError::not_found("mesh version"));
+    };
+    m.status = MeshStatus::Shadow;
+    if m.shadow_started_at.is_none() {
+        m.shadow_started_at = Some(demotion.at);
+    }
+    m.demoted = Some(demotion);
+    upsert(store, &m)
 }

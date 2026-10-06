@@ -1,0 +1,126 @@
+id = "money"
+name = "Money"
+version = 3
+area = "Money"
+summary = "Bills, renewals and amounts due become Pay or Do Finds; transfers and credit alerts are Know Finds; receipts and charges are Filed; donation appeals are kept apart from bills."
+band = "general"
+
+[detect]
+gmail_categories = ["updates"]
+min_messages = 5
+
+[[lists]]
+name = "money_transfers"
+description = "Services that send or receive money for you"
+question = "Which services tell you money arrived or left (e-Transfer, PayPal, Wise)?"
+default = ["payments.interac.ca", "paypal.com", "wise.com"]
+
+[[lists]]
+name = "invoice_senders"
+description = "Senders whose invoices you pay yourself"
+question = "Who sends you invoices you pay by hand (a domain registrar, a contractor)?"
+default = []
+
+[[lists]]
+name = "credit_bureaus"
+description = "Credit monitoring services"
+question = "Which credit-monitoring services do you use?"
+default = ["transunion.com", "equifax.com", "equifax.ca", "experian.com", "borrowell.com", "creditkarma.com", "creditkarma.ca"]
+
+# v3: "Payment is Due" counts as a payment due; a store's reminder of one
+# had been read as its promotions and spoiled.
+# v2: a payment that did not go through interrupts, ahead of Security
+# alerts, Receipts and Payments, which had made each one a Pay Find at a
+# bill's priority. Only from an authenticated sender: "your payment failed"
+# is the commonest phishing opener. A charge that fell back to a backup
+# card is a heads-up, not a bill.
+[[meshes]]
+band = "specific"
+rank = 18
+text = '''
+Mesh: Payment problems
+Scope:
+All Digs
+
+ROUTES
+
+WHEN NOT gmail_category = promotions AND NOT mailing_list AND (dkim_pass OR dmarc_pass)
+    IF payment_failed
+        → Find: Pay + Stratum: Finance + Notify + Importance: High
+    ELSE IF payment_recovered
+        → Find: Know + Stratum: Finance
+END
+'''
+
+[[meshes]]
+band = "specific"
+rank = 38
+text = '''
+Mesh: Bank and transfers
+Scope:
+All Digs
+
+ROUTES
+
+IF sender_domain IN list:money_transfers
+    → Find: Know + Stratum: Finance
+ELSE IF sender_domain IN list:invoice_senders AND subject CONTAINS "Invoice"
+    → Find: Pay + Stratum: Finance
+ELSE IF sender_domain IN list:credit_bureaus
+    → Find: Know + Stratum: Finance
+'''
+
+[[meshes]]
+rank = 0
+text = '''
+Mesh: Receipts
+Scope:
+All Digs
+
+ROUTES
+
+IF has_structured_receipt AND marketing@v1 < .90
+    → Filed + Stratum: Purchases + Stratum: Receipts
+ELSE IF receipt@v1 > .85
+    → Filed + Stratum: Purchases + Stratum: Receipts
+'''
+
+[[meshes]]
+rank = 3
+text = '''
+Mesh: Bills and renewals
+Scope:
+All Digs
+
+ROUTES
+
+WHEN NOT gmail_category = promotions AND NOT gmail_category = social
+    IF subject CONTAINS "past due" OR subject CONTAINS "overdue"
+        → Find: Pay + Stratum: Finance + Notify + Importance: High
+    ELSE IF subject CONTAINS "payment due" OR subject CONTAINS "payment is due" OR subject CONTAINS "balance is due"
+        → Find: Pay + Stratum: Finance
+    ELSE IF subject CONTAINS "bill is ready" OR subject CONTAINS "ebill" OR subject CONTAINS "e-bill" OR subject CONTAINS "statement is ready"
+        → Find: Pay + Stratum: Finance
+    ELSE IF subject CONTAINS "expire soon" OR subject CONTAINS "expiring soon" OR subject CONTAINS "renewing" OR subject CONTAINS "payment date for"
+        → Find: Do + Stratum: Finance
+END
+'''
+
+[[meshes]]
+rank = 5
+text = '''
+Mesh: Payments
+Scope:
+All Digs
+
+ROUTES
+
+IF marketing@v1 > .60 AND payment_related@v1 > .50 AND donation_appeal@v1 > .80
+    → Find: Know + Stratum: Charity
+ELSE IF invoice@v1 > .80 AND requires_action@v1 > .60 AND marketing@v1 < .90
+    → Find: Pay + Stratum: Finance
+ELSE IF payment_related@v1 > .80 AND requires_action@v1 > .70 AND marketing@v1 < .90
+    → Find: Pay + Stratum: Finance
+ELSE IF represents_charge@v1 > .80
+    → Filed + Stratum: Finance
+'''

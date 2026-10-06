@@ -17,7 +17,7 @@ use riddle_actions::runtime::Runtime;
 use riddle_actions::{meta, Action, ActionContext, ActionResult, Preview};
 use riddle_core::{
     Autonomy, ConfirmationPolicy, Correction, CorrectionId, CorrectionKind, DigId, EntityKind,
-    EntityRef, MessageId, Risk, UserProfile,
+    EntityRef, MessageId, ProviderWrites, Risk, UserProfile,
 };
 use riddle_errors::{Result, RiddleError};
 use riddle_observability::{rerror, rinfo, Category};
@@ -26,7 +26,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Weak};
 
-/// How `arm_dev` reaches the runtime's policy without a reference cycle:
+/// How `set_mailbox_writes` reaches the runtime's policy without a reference cycle:
 /// the integrator registers `ArmControl::new(&runtime)` in `Services`.
 pub struct ArmControl {
     runtime: Weak<Runtime>,
@@ -48,7 +48,7 @@ impl ArmControl {
 pub fn actions() -> Vec<Arc<dyn Action>> {
     vec![
         Arc::new(SaveSettings),
-        Arc::new(ArmDev),
+        Arc::new(SetMailboxWrites),
         Arc::new(AddNeverHidden),
         Arc::new(RemoveNeverHidden),
         Arc::new(SaveUserProfile),
@@ -161,91 +161,97 @@ impl Action for SaveSettings {
     }
 }
 
-// ---------------------------------------------------------------------- arm_dev
+// ---------------------------------------------------------- set_mailbox_writes
 
 #[derive(Deserialize)]
-struct ArmArgs {
-    armed: bool,
+struct WritesArgs {
+    writes: ProviderWrites,
 }
 
-pub struct ArmDev;
+/// What this dev build may write to the connected mailbox: Hold, Ask or
+/// Allow (`ProviderWrites`). It replaced `arm_dev`, a single armed switch.
+/// Allow is the only setting that lets writes go unattended, so it alone
+/// needs press and hold.
+pub struct SetMailboxWrites;
+
+fn writes_summary(w: ProviderWrites) -> &'static str {
+    match w {
+        ProviderWrites::Hold => {
+            "Hold: nothing is written to the mailbox; changes wait in the outbox"
+        }
+        ProviderWrites::Ask => {
+            "Ask: waiting mailbox changes go when you send them, and sending or deleting asks first"
+        }
+        ProviderWrites::Allow => "Allow: mailbox changes are written as they happen",
+    }
+}
 
 #[async_trait]
-impl Action for ArmDev {
+impl Action for SetMailboxWrites {
     fn meta(&self) -> riddle_core::ActionMeta {
-        meta("arm_dev", "Arm this dev build for provider mutations")
-            .mutating()
-            .reversible()
-            .risk(Risk::High)
-            .confirm(ConfirmationPolicy::PressHold)
-            .autonomy(Autonomy::Trusted)
-            .build()
+        meta(
+            "set_mailbox_writes",
+            "Choose what this dev build may write to the mailbox: hold, ask or allow",
+        )
+        .mutating()
+        .reversible()
+        .risk(Risk::High)
+        .confirm(ConfirmationPolicy::PressHold)
+        .autonomy(Autonomy::Trusted)
+        .build()
     }
 
     fn confirmation_for(&self, _ctx: &ActionContext, args: &Value) -> ConfirmationPolicy {
-        match serde_json::from_value::<ArmArgs>(args.clone()) {
-            Ok(a) if a.armed => ConfirmationPolicy::PressHold,
+        match serde_json::from_value::<WritesArgs>(args.clone()) {
+            Ok(a) if a.writes == ProviderWrites::Allow => ConfirmationPolicy::PressHold,
             _ => ConfirmationPolicy::None,
         }
     }
 
     async fn preview(&self, _ctx: &ActionContext, args: &Value) -> Result<Preview> {
-        let a: ArmArgs = ensure_args(args)?;
-        let summary = if a.armed {
-            "Arm the dev build: Actions may change the connected mailbox".to_string()
-        } else {
-            "Disarm the dev build".to_string()
-        };
+        let a: WritesArgs = ensure_args(args)?;
         Ok(Preview {
-            summary,
-            real_arguments: json!({ "armed": a.armed }),
+            summary: writes_summary(a.writes).to_string(),
+            real_arguments: json!({ "writes": a.writes }),
         })
     }
 
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
-        let a: ArmArgs = ensure_args(&args)?;
+        let a: WritesArgs = ensure_args(&args)?;
         let control = ctx.services.require::<ArmControl>()?;
         let runtime = control.runtime()?;
         if !runtime.policy.read().dev {
             return Err(RiddleError::policy_denied(
-                "arming applies to dev builds only",
+                "mailbox writes are chosen in dev builds only",
             ));
         }
-        let previous = runtime.is_armed();
-        runtime.arm(a.armed);
+        let previous = runtime.writes();
+        runtime.set_writes(a.writes);
         rinfo!(
             Category::App,
-            "dev build {}",
-            if a.armed { "armed" } else { "disarmed" }
+            "dev build mailbox writes: {}",
+            a.writes.as_str()
         );
-        let summary = if a.armed {
-            "You armed the dev build"
-        } else {
-            "You disarmed the dev build"
-        };
-        Ok(ActionResult::ok(json!({ "armed": a.armed }), summary)
-            .with_inputs(json!({ "armed": a.armed }))
-            .with_undo(
-                json!({ "armed": previous }),
-                if previous { "Re-arm" } else { "Disarm" },
-            ))
+        Ok(
+            ActionResult::ok(json!({ "writes": a.writes }), writes_summary(a.writes))
+                .with_inputs(json!({ "writes": a.writes }))
+                .with_undo(
+                    json!({ "writes": previous }),
+                    format!("Back to {}", previous.as_str()),
+                ),
+        )
     }
 
     async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
-        let a: ArmArgs = ensure_args(&restore)?;
+        let a: WritesArgs = ensure_args(&restore)?;
         let control = ctx.services.require::<ArmControl>()?;
         let runtime = control.runtime()?;
-        let previous = runtime.is_armed();
-        runtime.arm(a.armed);
-        Ok(ActionResult::ok(
-            json!({ "armed": a.armed }),
-            if a.armed {
-                "Re-armed the dev build"
-            } else {
-                "Disarmed the dev build"
-            },
+        let previous = runtime.writes();
+        runtime.set_writes(a.writes);
+        Ok(
+            ActionResult::ok(json!({ "writes": a.writes }), writes_summary(a.writes))
+                .with_undo(json!({ "writes": previous }), "Undo"),
         )
-        .with_undo(json!({ "armed": previous }), "Undo"))
     }
 }
 
@@ -650,11 +656,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn arming_needs_press_and_hold_in_a_dev_build_and_is_denied_in_prod() {
+    async fn allowing_mailbox_writes_needs_press_and_hold_in_a_dev_build_and_is_denied_in_prod() {
         let dir = tempfile::tempdir().unwrap();
         let (rt, _) = runtime(dir.path(), true);
+        assert_eq!(rt.writes(), ProviderWrites::Hold);
         let err = rt
-            .invoke(user("arm_dev", json!({ "armed": true })))
+            .invoke(user("set_mailbox_writes", json!({ "writes": "allow" })))
             .await
             .unwrap_err();
         assert_eq!(err.kind, riddle_errors::ErrorKind::NeedsConfirmation);
@@ -662,22 +669,23 @@ mod tests {
         assert_eq!(pending.confirmation, ConfirmationPolicy::PressHold);
         rt.invoke(ActionInvocation {
             pending_id: Some(pending.id),
-            ..user("arm_dev", json!({ "armed": true }))
+            ..user("set_mailbox_writes", json!({ "writes": "allow" }))
         })
         .await
         .unwrap();
         assert!(rt.is_armed());
-        rt.invoke(user("arm_dev", json!({ "armed": false })))
+        // Ask and Hold are safer than Allow, so they need no press and hold.
+        rt.invoke(user("set_mailbox_writes", json!({ "writes": "ask" })))
             .await
             .unwrap();
-        assert!(!rt.is_armed());
+        assert_eq!(rt.writes(), ProviderWrites::Ask);
 
         let dir = tempfile::tempdir().unwrap();
         let (prod, _) = runtime(dir.path(), false);
         let err = prod
             .invoke(ActionInvocation {
                 confirmed: true,
-                ..user("arm_dev", json!({ "armed": false }))
+                ..user("set_mailbox_writes", json!({ "writes": "hold" }))
             })
             .await
             .unwrap_err();

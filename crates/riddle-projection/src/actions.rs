@@ -91,6 +91,7 @@ fn record_user_classification(
         id: ClassificationId::new(),
         message_id: m.id.clone(),
         dig_id: dig.id.clone(),
+        importance: Importance::default_for(&disposition),
         disposition,
         strata,
         notify: false,
@@ -104,6 +105,7 @@ fn record_user_classification(
         shadow: false,
         created_at: now,
         superseded_at: None,
+        series: None,
     };
     store.write(|c| {
         repo::traces::record_in(c, &trace)?;
@@ -135,6 +137,7 @@ fn restore_snapshot(
                 id: ClassificationId::new(),
                 created_at: ctx.services.clock.now(),
                 superseded_at: None,
+                series: None,
                 ..k.clone()
             };
             repo::classifications::record(store, &restored)?;
@@ -237,7 +240,7 @@ fn user_move_meta(name: &str, description: &str) -> ActionMeta {
     meta(name, description)
         .mutating()
         .reversible()
-        .external()
+        .projected()
         .risk(Risk::Medium)
         .confirm(ConfirmationPolicy::InPlaceUndo)
         .autonomy(Autonomy::Act)
@@ -448,6 +451,7 @@ impl Action for LabelMessages {
                         strata: merged.clone(),
                         created_at: ctx.services.clock.now(),
                         superseded_at: None,
+                        series: None,
                         ..k.clone()
                     };
                     repo::classifications::record(&store, &updated)?;
@@ -512,6 +516,7 @@ impl Action for LabelMessages {
                         strata: snap.strata.clone(),
                         created_at: ctx.services.clock.now(),
                         superseded_at: None,
+                        series: None,
                         ..k
                     },
                 )?,
@@ -563,10 +568,7 @@ impl Action for SnoozeMessages {
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
         let (dig, store) = dig_and_store(ctx, &args)?;
         let ids = message_ids(&args)?;
-        let until: chrono::DateTime<chrono::Utc> = arg(&args, "until")?;
-        if until <= ctx.services.clock.now() {
-            return Err(RiddleError::invalid("until must be in the future"));
-        }
+        let until = required_future_timestamp(&args, "until", ctx.services.clock.now())?;
         let (messages, skipped) = load(&store, &dig, &ids)?;
         let mut items = Vec::new();
         for m in &messages {

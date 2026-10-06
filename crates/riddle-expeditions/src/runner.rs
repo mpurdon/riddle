@@ -136,7 +136,7 @@ impl ExpeditionRunner {
             }
         }
         let index = self.stores.index();
-        let digs = repo::digs::list(&index).unwrap_or_default();
+        let digs = repo::digs::list_enabled(&index).unwrap_or_default();
         for id in &scope.dig_ids {
             let d = digs.iter().find(|d| &d.id == id).ok_or_else(|| {
                 RiddleError::not_found(format!(
@@ -308,7 +308,7 @@ impl ExpeditionRunner {
     }
 
     fn privacy_and_scope(&self, e: &Expedition) -> Result<(PrivacyMode, ReadScope)> {
-        let digs = repo::digs::list(&self.stores.index()).unwrap_or_default();
+        let digs = repo::digs::list_enabled(&self.stores.index()).unwrap_or_default();
         let chosen: Vec<&Dig> = if e.scope.dig_ids.is_empty() {
             digs.iter()
                 .filter(|d| riddle_privacy::allowed(d.privacy, riddle_privacy::Purpose::Llm))

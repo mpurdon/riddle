@@ -21,6 +21,7 @@ import { Field, Input, TextArea } from '@/components/ui/Field'
 import { ProgressBar } from '@/components/ui/Progress'
 import { ErrorCard } from '@/components/ErrorCard'
 import { PageHeader } from '@/components/Bits'
+import { Resizable } from '@/components/Resizable'
 
 const TONE: Record<ExpeditionStatus, Tone> = { planned: 'neutral', running: 'busy', paused: 'warn', completed: 'ok', partial: 'warn', cancelled: 'neutral', failed: 'bad' }
 
@@ -33,7 +34,7 @@ export default function ExpeditionsPage() {
   const items = list.data ?? []
   return (
     <div className="flex min-h-0 flex-1">
-      <section className="flex w-[380px] shrink-0 flex-col border-r border-line">
+      <Resizable as="section" id="expeditions" side="left" initial={380} min={280} max={720} label="Resize the Expeditions list" className="flex flex-col border-r border-line">
         <PageHeader title="Expeditions" subtitle="Delegated work with a budget. Results become Finds." actions={<Button size="sm" icon={<Plus />} onClick={() => setStarting(true)}>Start</Button>} />
         <div className="min-h-0 flex-1 overflow-auto" role="listbox" aria-label="Expeditions">
           {list.data && !items.length ? <EmptyState icon={<Compass />} title="No Expeditions yet." body='Ask the Director for something that needs more than a search: "Find every subscription I have paid for this year." It declares scope and budget before it starts.' actions={<Button size="sm" onClick={() => setStarting(true)}>Start one</Button>} /> : null}
@@ -48,7 +49,7 @@ export default function ExpeditionsPage() {
                 <div className="mt-1">
                   <ProgressBar done={done} total={e.plan.length} label={e.goal} />
                 </div>
-                <div className="mt-0.5 flex justify-between text-[11px] text-clay">
+                <div className="mt-0.5 flex justify-between text-2xs text-clay">
                   <span>{done}/{e.plan.length} steps · {fmtUsd(e.spent.costUsd)} of {fmtUsd(e.budget.costUsd)}</span>
                   <span>{fmtRelative(e.updatedAt)}</span>
                 </div>
@@ -56,7 +57,7 @@ export default function ExpeditionsPage() {
             )
           })}
         </div>
-      </section>
+      </Resizable>
       <section className="flex min-w-0 flex-1 flex-col">{expeditionId ? <Detail key={expeditionId} id={expeditionId} /> : <EmptyState title="Select an Expedition" body="Plan, evidence, findings and budget." />}</section>
       {starting ? <StartDialog onClose={() => setStarting(false)} /> : null}
     </div>
@@ -111,20 +112,36 @@ function Detail({ id }: { id: string }) {
         <ol className="mt-1 flex flex-col gap-1">
           {e.plan.map((p) => (
             <li key={p.n} className={cx('flex items-start gap-2', p.done ? 'text-ink-2' : '')}>
-              <span className={cx('mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full text-[10px]', p.done ? 'bg-moss/20 text-moss' : 'bg-sand-2 text-clay')}>{p.done ? '✓' : p.n}</span>
+              <span className={cx('mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full text-2xs', p.done ? 'bg-moss/20 text-moss' : 'bg-sand-2 text-clay')}>{p.done ? '✓' : p.n}</span>
               <span>{p.text}</span>
             </li>
           ))}
         </ol>
         <h3 className="mt-5 text-xs font-semibold uppercase tracking-wide text-clay">Evidence ({e.evidence.length})</h3>
         <ul className="mt-1 flex flex-wrap gap-1">
-          {e.evidence.map((ev, i) => (
-            <li key={`${ev.kind}-${ev.id}-${i}`}>
-              <button type="button" className="rounded border border-line bg-sand px-2 py-0.5 text-xs hover:bg-sand-2" onClick={() => nav(ev.kind === 'message' ? `/inbox?q=${ev.id}` : '/inbox')}>
-                {ev.kind} {ev.id}
-              </button>
-            </li>
-          ))}
+          {e.evidence.map((ev, i) => {
+            // An EntityRef carries no account. With one account in scope the
+            // message can be opened directly; otherwise the chip searches for
+            // the id and says so, rather than pretending to be a link.
+            const onlyDig = e.scope.digIds.length === 1 ? e.scope.digIds[0] : null
+            const opens = ev.kind === 'message' && onlyDig
+            const to = ev.kind === 'message' ? (onlyDig ? `/inbox/${onlyDig}/${ev.id}` : `/inbox?q=${encodeURIComponent(ev.id)}`) : ev.kind === 'thread' ? `/inbox?q=${encodeURIComponent(ev.id)}` : ev.kind === 'find' ? `/finds/${ev.id}` : null
+            const label = ev.kind === 'message' ? (opens ? `Open message ${ev.id}` : `Search for message ${ev.id}`) : ev.kind === 'thread' ? `Search for thread ${ev.id}` : ev.kind === 'find' ? `Open Find ${ev.id}` : `${ev.kind} ${ev.id}`
+            return (
+              <li key={`${ev.kind}-${ev.id}-${i}`}>
+                {to ? (
+                  <button type="button" title={label} className="rounded border border-line bg-sand px-2 py-0.5 text-xs hover:bg-sand-2" onClick={() => nav(to)}>
+                    {ev.kind} {ev.id}
+                    {ev.kind === 'message' && !opens ? <span className="ml-1 text-clay">(search)</span> : null}
+                  </button>
+                ) : (
+                  <span className="rounded border border-line bg-sand px-2 py-0.5 text-xs text-ink-2" title="Riddle has no page for this yet">
+                    {ev.kind} {ev.id}
+                  </span>
+                )}
+              </li>
+            )
+          })}
           {!e.evidence.length ? <li className="text-xs text-clay">Nothing read yet.</li> : null}
         </ul>
         <h3 className="mt-5 text-xs font-semibold uppercase tracking-wide text-clay">Findings</h3>
@@ -164,7 +181,7 @@ function StartDialog({ onClose }: { onClose: () => void }) {
         <Field label="Tool calls"><Input value={calls} onChange={(e) => setCalls(e.target.value)} inputMode="numeric" /></Field>
       </div>
       <div className="mt-3">
-        <div className="mb-1 text-xs font-medium text-ink-2">Digs in scope</div>
+        <div className="mb-1 text-xs font-medium text-ink-2">Accounts in scope</div>
         <div className="flex flex-wrap gap-2">
           {digs.map((d) => (
             <label key={d.id} className="flex items-center gap-1 text-sm">
@@ -178,7 +195,7 @@ function StartDialog({ onClose }: { onClose: () => void }) {
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
         <Button
           variant="primary"
-          disabledReason={!goal.trim() ? 'Describe the goal' : !picked.length ? 'Pick at least one Dig' : null}
+          disabledReason={!goal.trim() ? 'Describe the goal' : !picked.length ? 'Pick at least one account' : null}
           onClick={async () => {
             const out = await run<Expedition>('start_expedition', { goal: goal.trim(), scope: { digIds: picked, since: null, until: null, toolsAllowed: ['search', 'get_thread', 'get_message', 'list_finds'] }, budget: { costUsd: Number(cost) || 1, seconds: (Number(minutes) || 15) * 60, toolCalls: Number(calls) || 60 } })
             if (out) {

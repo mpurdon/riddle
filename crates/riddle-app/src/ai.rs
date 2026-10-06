@@ -21,7 +21,7 @@ use riddle_observability::{rerror, rinfo, Category};
 use riddle_store::{repo, Stores};
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AiConfig {
     /// `bedrock`, `scripted` or `null`.
     pub provider: String,
@@ -118,9 +118,9 @@ impl App {
             )
             .with_privacy(PrivacyMode::CloudReasoning),
         );
-        if cfg.provider != "null" {
-            *self.services.refiner.write() = Some(refiner);
-        }
+        // Re-run on a settings change, so "null" must also clear a refiner
+        // an earlier provider installed.
+        *self.services.refiner.write() = (cfg.provider != "null").then_some(refiner);
         let reads: Arc<dyn riddle_agent::reads::DirectorReads> = Arc::new(AppReads(self.clone()));
         self.services
             .insert(Arc::new(DirectorReadsHandle(reads.clone())));

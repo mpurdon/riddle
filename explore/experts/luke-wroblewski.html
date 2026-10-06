@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Luke Wroblewski Dossier</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../assets/dossier.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="series">
+    <div class="crumbs"><a href="../index.html" data-hub>Riddle UX study</a><span>›</span><span>Expert dossiers</span><span>›</span><b>2 of 7</b></div>
+    <div class="crumbs" data-nav><a href="jared-spool.html">← Jared Spool</a><span>·</span><a href="../index.html#experts">All seven</a><span>·</span><a href="femke-van-schoonhoven.html">Femke van Schoonhoven →</a><span>·</span><a href="../proposals.html">Proposals</a></div>
+  </div>
+
+  <header class="hero">
+    <div>
+      <div class="eyebrow">Product designer · researcher of forms, mobile and AI products</div>
+      <h1>Luke Wroblewski</h1>
+      <p class="lede">The designer who named Mobile First, measured what hiding navigation costs, and now runs a live AI product on his own writing. His argument for Riddle: show what the system can do, start with an answer, and put the person at review rather than at a prompt.</p>
+    </div>
+    <dl class="card">
+      <dt>Now</dt><dd>Managing Director and head of product, Sutter Hill Ventures</dd>
+      <dt>Before</dt><dd>Product Director at Google; CEO of Polar (acquired by Google, 2014); co-founder of Bagcheck (acquired by Twitter, 2011); VP Design at Yahoo!; lead UI designer at eBay; NCSA</dd>
+      <dt>Books</dt><dd>Site-Seeing (2002) · Web Form Design (2008) · Mobile First (2011)</dd>
+      <dt>Running product</dt><dd>Ask LukeW, a conversational interface over 2,012 of his own articles: 27,000 answers in its first two years</dd>
+    </dl>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="On this page">
+      <div class="eyebrow">On this page</div>
+      <a href="#ideas">Major ideas</a>
+      <a href="#work">Contributions</a>
+      <a href="#quotes">In his words</a>
+      <a href="#riddle">Applied to Riddle</a>
+      <a href="#caveats">What we could not confirm</a>
+      <a href="#sources">Sources</a>
+    </nav>
+
+    <main>
+      <section id="ideas">
+        <div class="eyebrow">Major ideas</div>
+        <h2>Thirteen ideas, each with its evidence</h2>
+        <p>Wroblewski argues from measurement: eye-tracking studies, engagement deltas after a redesign, usage logs from his own products. Every idea below names the study or the product it came from.</p>
+        <div class="ideas">
+          <article class="idea">
+            <div class="tag">2009 · 2011</div>
+            <h3>Mobile First: constraints as clarity</h3>
+            <p>A 320 by 480 screen has no room for "extraneous, unnecessary elements", so designing for it first forces a team to agree on what matters most. His question: if you can agree on the most important content and features for a small screen, why should that priority change when there is more room? The book turns this into a discipline with chapters on Organization, Actions, Inputs and Layout.</p>
+            <div class="ex"><b>Example.</b> The talk ran at 50 events from An Event Apart Seattle (April 2010) to 2013, and the A Book Apart book followed in October 2011.</div>
+            <div class="riddle">Riddle's dense single window carries 45 domain nouns. Mobile First asks which six a person needs in the first minute.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2015</div>
+            <h3>Obvious always wins</h3>
+            <p>When Polar replaced its segmented control with a toggle menu, people stopped moving between the app's sections. Zeebox saw the same drop after moving to a navigation drawer; Facebook and Redbooth saw engagement rise after moving from a hamburger to a bottom tab bar. Navigation is how an app shows what is possible. Hide it and people do not know what they can do.</p>
+            <div class="ex"><b>Example.</b> The 2015 article became a talk delivered nine times in 2017 and 2018, including An Event Apart Denver.</div>
+            <div class="riddle">Keep the rail visible with counts. Never collapse it to icons. Shrink type before hiding labels.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2007 · 2008</div>
+            <h3>Form design from eye-tracking</h3>
+            <p>With the London firm Etre he measured label placement and button layout. Top-aligned labels are captured with the input in one eye movement and complete fastest; left-aligned labels slow people down, which is right for unfamiliar data. Reset, Cancel and Go Back are secondary actions; a Cancel placed on the right cost about six seconds and six participants clicked it by mistake.</p>
+            <div class="ex"><b>Example.</b> "Align primary actions with input fields for a clear path to completion." Web Form Design, Rosenfeld Media, May 2008.</div>
+            <div class="riddle">One primary button per wizard step, on the input's left edge. Cancel as a link, never a twin button.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2009</div>
+            <h3>Inline validation, after the field</h3>
+            <p>In a 22-participant study the best variant gave 22 percent more completions, 22 percent fewer errors, 31 percent higher satisfaction and 42 percent faster completion. The rules that produced it: validate when the person leaves the field, not per keystroke; validate only where errors are likely; keep success marks persistent.</p>
+            <div class="ex"><b>Example.</b> A List Apart, "Inline Validation in Web Forms", September 2009.</div>
+            <div class="riddle">The Mesh editor is the high-error surface. Validate on blur and show the match count, so meaning is checked, not only syntax.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2008 · 2010</div>
+            <h3>Gradual engagement</h3>
+            <p>"Sign Up Forms Must Die": a registration form as the first step treats people as database records before they have a reason to care. Registration is "either postponed, or handled behind the scenes" and the first experience shows how the service is useful. Twitter added a step (pick topics you care about) and completions rose 29 percent.</p>
+            <div class="ex"><b>Example.</b> TripIt let people email an itinerary and get a result before any account existed.</div>
+            <div class="riddle">Let people see Riddle sift a sample before the Google Cloud steps. Observe mode is the gradual-engagement path.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2012</div>
+            <h3>One thumb, one eyeball</h3>
+            <p>People check phones about 150 times a day in short, distracted, one-handed bursts. Polar set a litmus test: vote on ten polls or create one in under 60 seconds with one thumb. Experienced users did it in about 30. Quoting Dan Formosa: design for the extremes and the middle takes care of itself.</p>
+            <div class="ex"><b>Example.</b> The Mobile First book lists the modes: Lookup, Explore, Check In, Edit. Riddle's daily use is Check In.</div>
+            <div class="riddle">A timed test: open Riddle, see what needs attention, dispose of one item, leave in under a minute, keyboard only.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2013</div>
+            <h3>Input matters</h3>
+            <p>His Designing for Touch talk and his notes on Josh Clark's work carry the guidance: a 7 mm target (about 44 px), content at the top and controls at the bottom on phones, and hover as an enhancement, never the only way to do something. Clarity beats density on every interface.</p>
+            <div class="ex"><b>Example.</b> The 44 px figure is Apple's guideline, relayed through his 2013 notes.</div>
+            <div class="riddle">Riddle's 10 to 11 px chips and hover-only titles fail this test on a desktop too.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2011 – 2013</div>
+            <h3>Data-informed, not data-decided</h3>
+            <p>Forty-two "Data Monday" posts used sourced numbers to make design arguments: 3.6 million smartphones a day against 371 thousand births. He is careful about the limit: "If you're data informed instead, then you're still the one making a decision."</p>
+            <div class="ex"><b>Example.</b> The form studies count fixations and seconds; the AI posts count answers and study participants.</div>
+            <div class="riddle">Riddle already records every decision. Show the numbers that justify a change before it is applied.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2024 · 2025</div>
+            <h3>AI as a feature versus a product</h3>
+            <p>A bolted-on AI feature competes with every existing feature for attention, and the numbers "look good" only because "even turkeys fly in hurricanes". Building from the ground up means earning each user by providing value. An embedded app inherits inputs and integrations but is limited by what its host allows.</p>
+            <div class="ex"><b>Example.</b> Microsoft Edge: AI icons beside shopping, games and Collections, and people tune everything out.</div>
+            <div class="riddle">A "Director" rail item competes with Finds. Put proposals where the evidence is and keep chat small.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2024 – 2025</div>
+            <h3>Chat's limits and intent-driven UI</h3>
+            <p>People know how to use chat and can state intent directly, but "without clear affordances, people don't know what they can do", scrolling threads is painful, and language is poor at visual and spatial things. Single-pane chat gives way to split panes and then to agent products where chat "remains collapsed by default".</p>
+            <div class="ex"><b>Example.</b> "Chatting back and forth to create things feels dated now." The Receding Role of AI Chat, June 2025.</div>
+            <div class="riddle">Plain-language rule requests that the Director turns into Mesh text, shown for approval, teach the DSL by refinement.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2025 · 2026</div>
+            <h3>Durable patterns: suggestions, citations, less text</h3>
+            <p>Three problems persist across every AI product: people do not know what it can do, what information it used, or how to digest long text. From Ask LukeW's usage: suggested questions "did an enormous amount of heavy lifting" and citations give "a real trust boost". A January 2025 study with designers confirmed all three.</p>
+            <div class="ex"><b>Example.</b> Participants were intimidated by long answers and asked for visuals; old content raised doubts.</div>
+            <div class="riddle">Every proposal cites the messages that motivated it, with counts per disposition.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2025 · 2026</div>
+            <h3>Show the agent's work, collapsed</h3>
+            <p>Users split into two camps regardless of experience: some find an agent's process overwhelming, others need it to monitor. The answer is progressive disclosure: tool calls collapsed to one expandable summary line, each step linked to its result, and less visual weight as the tool count rises. Humans belong at review, approve, steer and delegate.</p>
+            <div class="ex"><b>Example.</b> The management checklist: start, schedule, monitor, redirect, stop, capture results. Inbox framing works for agents needing a decision.</div>
+            <div class="riddle">Proposal cards: one summary line, an expander, per-step links to exact message lists.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">2025 · 2026</div>
+            <h3>Let the AI do the onboarding</h3>
+            <p>Instead of tours and empty states, generate a first result and let people edit it: "AI does the creation, people do the curation." Nearly every chat product opens with a question, yet "people regularly struggle with knowing what to ask", so start with an answer. Forms follow: people communicate naturally and software handles the structure.</p>
+            <div class="ex"><b>Example.</b> A photographed concert poster becomes database fields. "No form is the best kind of Web Form Design."</div>
+            <div class="riddle">The Director opens with what it noticed since last visit and two proposals, not an empty box.</div>
+          </article>
+        </div>
+      </section>
+
+      <section id="work">
+        <div class="eyebrow">Contributions</div>
+        <h2>A career in sequence</h2>
+        <ul class="timeline">
+          <li><span class="year">2002</span><b>Site-Seeing: A Visual Approach to Web Usability</b> (Wiley), endorsed by Jakob Nielsen.</li>
+          <li><span class="year">2007</span>Eye-tracking studies with Etre on label alignment and primary actions, while lead UI designer at eBay.</li>
+          <li><span class="year">2008</span><b>Web Form Design: Filling in the Blanks</b> (Rosenfeld Media); "Sign Up Forms Must Die" in A List Apart.</li>
+          <li><span class="year">2009</span>"Mobile First" article, November; inline-validation study in A List Apart.</li>
+          <li><span class="year">2010–13</span>Mobile First talk at 50 events; Sign Up Forms Must Die tour; Data Monday series (42 posts).</li>
+          <li><span class="year">2011</span><b>Mobile First</b> (A Book Apart); Bagcheck acquired by Twitter nine months after launch.</li>
+          <li><span class="year">2012–14</span>Polar: one billion polls served in eight months; acquired by Google in September 2014. Lessons-learned ebook, 2014.</li>
+          <li><span class="year">2015</span>"Obvious Always Wins", the navigation-visibility article; talk tour 2017 to 2018.</li>
+          <li><span class="year">2014–18+</span>Product Director at Google: cross-product UX, research, metrics, Blogger, Notifications.</li>
+          <li><span class="year">2023</span>Ask LukeW launches; "How AI Ate My Website" at SmashingConf Antwerp. 103 AI-tagged articles since.</li>
+          <li><span class="year">2025–26</span>The agentic-UX series: agent management patterns, showing agent work, the AI steering layer, letting AI do onboarding.</li>
+        </ul>
+      </section>
+
+      <section id="quotes">
+        <div class="eyebrow">In his words</div>
+        <h2>Eight lines, each verified against its page</h2>
+        <div class="quotes">
+          <blockquote class="quote"><p>"When critical parts of an application are made more visible, usage of them can increase."</p><cite>Obvious Always Wins, 2015</cite></blockquote>
+          <blockquote class="quote"><p>"Registration is either postponed, or handled behind the scenes."</p><cite>Gradual Engagement Boosts Twitter Sign-Ups by 29%, 2010</cite></blockquote>
+          <blockquote class="quote"><p>"Make sure you really need each secondary action on a form."</p><cite>Primary &amp; Secondary Actions in Web Forms, 2007</cite></blockquote>
+          <blockquote class="quote"><p>"The numbers 'look good' but even turkeys fly in hurricanes."</p><cite>Bolting on AI Features, 2024</cite></blockquote>
+          <blockquote class="quote"><p>"Even just seeing where information comes from gives people a real trust boost."</p><cite>Durable Patterns in AI Product Design, 2026</cite></blockquote>
+          <blockquote class="quote"><p>"People regularly struggle with knowing what to ask."</p><cite>Always Asking People to Ask, 2026</cite></blockquote>
+          <blockquote class="quote"><p>"AI does the creation, people do the curation."</p><cite>Let the AI do the Onboarding, 2025</cite></blockquote>
+          <blockquote class="quote"><p>"There simply isn't room in a 320 by 480 pixel screen for extraneous, unnecessary elements."</p><cite>Mobile First, 2009</cite></blockquote>
+        </div>
+      </section>
+
+      <section id="riddle">
+        <div class="eyebrow">Applied to Riddle</div>
+        <h2>Thirteen implications for Riddle's flows</h2>
+        <p>Each item names the idea it comes from. The flow tag says which part of Riddle it changes.</p>
+        <ol class="apply">
+          <li><span class="n">1</span><div><span class="flow">Navigation</span><b>Keep the rail fully visible with counts on every destination.</b> Riddle's value is that Finds, Unresolved, Spoil and Contamination are distinct places to look; Polar lost section-to-section movement the day it hid its sections. Under density pressure, shrink type before hiding labels.<span class="from">From: Obvious always wins.</span></div></li>
+          <li><span class="n">2</span><div><span class="flow">Onboarding</span><b>Let people watch Riddle work before asking for anything.</b> On first launch, run the default Meshes over the fixture mailbox so a Finds list, an Unresolved list and an Activity ledger exist before Google Cloud is mentioned. Connecting Gmail in Observe mode, with nothing written back, is registration "handled behind the scenes".<span class="from">From: Gradual engagement; Let the AI do the onboarding.</span></div></li>
+          <li><span class="n">3</span><div><span class="flow">Settings</span><b>Top-aligned labels, one primary action per step, Cancel as a link.</b> The wizard's data is familiar, so top-aligned labels are fastest. Use left-aligned labels or inline help only where the input is unfamiliar, such as a Mesh's target disposition. The six-second, six-misclick Cancel finding argues against symmetrical button pairs anywhere.<span class="from">From: Form design from eye-tracking.</span></div></li>
+          <li><span class="n">4</span><div><span class="flow">Meshes</span><b>Validate the Mesh DSL on blur, and show the match count as feedback.</b> Syntax errors are cheap to catch; meaning errors are what bite. A rule that matches zero messages, or three thousand, should say so before Apply. Do not inline-validate trivial fields such as a Dig's name.<span class="from">From: Inline validation, after the field.</span></div></li>
+          <li><span class="n">5</span><div><span class="flow">Daily loop</span><b>Make the check-in glance a timed test.</b> Open Riddle, see what needs attention, dispose of one item, leave in under a minute, keyboard only. Run it in the fixture suite. It also argues for Summary as the landing view rather than a full Inbox.<span class="from">From: One thumb, one eyeball.</span></div></li>
+          <li><span class="n">6</span><div><span class="flow">Director</span><b>Open the Director with an answer, not a prompt.</b> A generated note of what it noticed since the last visit (an Unresolved cluster, a sender that keeps landing in Spoil, a Mesh that never fires) and two or three proposals to accept or dismiss. Suggested questions did the heavy lifting in his product; an empty box will not.<span class="from">From: Let the AI do the onboarding; Durable patterns.</span></div></li>
+          <li><span class="n">7</span><div><span class="flow">Director</span><b>Every proposal cites the messages that motivated it.</b> A Mesh proposal lists the messages it would have matched, with hover previews and a "would have changed" count per disposition. Keep the observability rule: ids and counts, never subjects, in logs.<span class="from">From: Durable patterns; Show the agent's work.</span></div></li>
+          <li><span class="n">8</span><div><span class="flow">Director</span><b>Show the Director's work collapsed, one line per step, each linked to its result.</b> "Read 140 Unresolved messages, found 3 clusters" with an expander. As tools grow, reduce the trace's visual weight rather than its length.<span class="from">From: Show the agent's work, collapsed.</span></div></li>
+          <li><span class="n">9</span><div><span class="flow">Autonomy</span><b>Make the autonomy rung visible per Dig, everywhere, with a one-key way to drop a rung.</b> His management checklist is start, schedule, monitor, redirect, stop, capture. Riddle has capture (Activity) and stop (Undo). It lacks monitor: the rung is shown only in Settings. Add an inbox-style queue of proposals with a count.<span class="from">From: Show the agent's work; Obvious always wins.</span></div></li>
+          <li><span class="n">10</span><div><span class="flow">Trust</span><b>Verify through the Activity ledger, not through extra confirmations.</b> At Act and Trusted, write to Gmail without a dialog, but make each ledger row link to the rule that fired and the message, and keep Undo one keystroke away. He treats every extra secondary action as a cost.<span class="from">From: Show the agent's work; Form design.</span></div></li>
+          <li><span class="n">11</span><div><span class="flow">Meshes</span><b>Plain language in, Mesh text out, shown for approval.</b> "People don't know what AI can do nor how to guide it"; the same holds for a small IF/ELSE DSL. The rewrite stays visible and editable so people learn the DSL by observing then refining.<span class="from">From: Chat's limits and intent-driven UI.</span></div></li>
+          <li><span class="n">12</span><div><span class="flow">Navigation</span><b>Embed the Director in the triage views instead of a separate destination.</b> Surface proposals inline where the evidence is: an Unresolved cluster header, a Spoil sender row. Keep chat collapsed to a small pane as the fallback for questions the inline proposals cannot answer.<span class="from">From: AI as a feature versus a product; Chat's limits.</span></div></li>
+          <li><span class="n">13</span><div><span class="flow">Settings</span><b>Publish Riddle's steering layer, read-only and versioned.</b> The Director's prompt, the Never Hidden gate and the disposition taxonomy are a steering layer in his sense. Make them inspectable from Settings so behaviour is reviewed by people rather than tuned per session.<span class="from">From: Steering layers.</span></div></li>
+        </ol>
+      </section>
+
+      <section id="caveats">
+        <div class="eyebrow">Honesty note</div>
+        <h2>What we could not confirm</h2>
+        <div class="note warn">The phrases "content first, navigation second", "reduce, prioritise, focus", "designing for the moment" and "cutting through the hype" are widely attributed to him but did not appear in any page we fetched; the underlying ideas are verified from the articles above. No talk titled "Conversational Interfaces" is in his presentations index. He has no Substack; his writing is on lukew.com. The 44 px touch-target figure is Apple's guideline relayed through his notes on Josh Clark's 2013 talk, not his own slide.</div>
+      </section>
+
+      <section id="sources">
+        <div class="eyebrow">Sources</div>
+        <h2>Pages fetched for this dossier</h2>
+        <ul class="sources">
+          <li><a href="https://www.lukew.com/about/">lukew.com/about</a> — roles, companies, books, IxDA, Sutter Hill.</li>
+          <li><a href="https://www.lukew.com/ff/entry.asp?933">Mobile First</a> (2009) and <a href="https://www.lukew.com/ff/entry.asp?1428">the book announcement</a> (2011); <a href="https://www.lukew.com/presos/preso.asp?26">the talk's 50 events</a>.</li>
+          <li><a href="https://www.lukew.com/ff/entry.asp?1945">Obvious Always Wins</a> (2015); <a href="https://www.youtube.com/watch?v=I4UIIISgl2U">An Event Apart Denver 2017 video</a>.</li>
+          <li><a href="https://www.lukew.com/ff/entry.asp?571">Primary &amp; Secondary Actions in Web Forms</a> (2007); <a href="https://lukew.com/ff/entry.asp?504">Top, Right or Left Aligned Form Labels</a> (2007); <a href="https://static.lukew.com/webforms_lukew.pdf">form design deck</a>.</li>
+          <li><a href="https://alistapart.com/article/inline-validation-in-web-forms/">Inline Validation in Web Forms</a> (A List Apart, 2009); <a href="https://alistapart.com/article/signupforms/">Sign Up Forms Must Die</a> (2008).</li>
+          <li><a href="https://www.lukew.com/ff/entry.asp?1128">Gradual Engagement Boosts Twitter Sign-Ups by 29%</a> (2010); <a href="https://www.lukew.com/ff/entry.asp?1219">Killing Sign Up Forms</a> (2010).</li>
+          <li><a href="https://www.lukew.com/ff/entry.asp?1664">Testing One Thumb, One Eyeball Mobile Use</a> (2012); <a href="https://www.lukew.com/ff/entry.asp?1699">notes on Designing for Touch</a> (2013).</li>
+          <li><a href="https://www.lukew.com/ff?tag=data">Data Monday archive</a> (2011 to 2013); <a href="https://dribbble.com/overtime/2018/09/26/designing-for-everyone-everywhere-with-luke-wrobkewski">Dribbble Overtime interview</a> (2018).</li>
+          <li><a href="https://lukew.com/ff/entry.asp?2065">Bolting on AI Features</a> (2024); <a href="https://www.lukew.com/ff/entry.asp?2129">Wrapper vs. Embedded AI Apps</a> (2025).</li>
+          <li><a href="https://www.lukew.com/ff/entry.asp?2118">Chat is: the Future or a Terrible UI</a>; <a href="https://www.lukew.com/ff/entry.asp?2085">Chat Interfaces &amp; Declaring Intent</a>; <a href="https://www.lukew.com/ff/entry.asp?2073">Intent-driven User Interfaces</a>; <a href="https://www.lukew.com/ff/entry.asp?2105">The Receding Role of AI Chat</a>.</li>
+          <li><a href="https://www.lukew.com/ff/entry.asp?2107">Common AI Product Issues</a>; <a href="https://www.lukew.com/ff/entry.asp?2145">Durable Patterns in AI Product Design</a>; <a href="https://www.lukew.com/ff/entry.asp?2087">Ask LukeW usability study</a>; <a href="https://www.lukew.com/ff/entry.asp?2092">2 Years and 27,000 Answers</a>.</li>
+          <li><a href="https://lukew.com/ff/entry.asp?2142">Showing the Work of Agents in UI</a>; <a href="https://www.lukew.com/ff/entry.asp?2136">Agentic AI Interface Improvements</a>; <a href="https://www.lukew.com/ff/entry.asp?2106">Agent Management Interface Patterns</a>; <a href="https://www.lukew.com/ff/entry.asp?2144">Finding the Role of Humans in AI Products</a>.</li>
+          <li><a href="https://www.lukew.com/ff/entry.asp?2130">Let the AI do the Onboarding</a>; <a href="https://www.lukew.com/ff/entry.asp?2120">Unstructured Input Instead of Web Forms</a>; <a href="https://www.lukew.com/ff/entry.asp?2097">Make the AI Models do the Prompting</a>; <a href="https://www.lukew.com/ff/entry.asp?2160">Always Asking People to Ask</a>; <a href="https://www.lukew.com/ff/entry.asp?2163">Skip the Tools, Make the Outcomes</a>.</li>
+          <li><a href="https://www.lukew.com/ff/entry.asp?2155">The AI Steering Layer</a>; <a href="https://www.lukew.com/ff/entry.asp?2153">Collaborative Steering</a>; <a href="https://www.lukew.com/ff/entry.asp?2141">Agent Orchestration UI</a>.</li>
+          <li><a href="https://techcrunch.com/2014/09/11/google-acquires-opinion-poll-service-polar-for-google/">TechCrunch on the Polar acquisition</a>; <a href="https://mixergy.com/interviews/luke-wroblewski-bagcheck-interview/">Mixergy on Bagcheck</a>; <a href="https://www.bennadel.com/blog/2305-a-book-apart-mobile-first-by-luke-wroblewski.htm">a review quoting Mobile First pages 32 and 70</a>.</li>
+        </ul>
+      </section>
+
+      <div class="footer"><span>Riddle UX study · researched 25 September 2026</span><span>Quotes are 15 words or fewer and verified against the cited page.</span></div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

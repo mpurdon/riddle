@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Riddle UX Proposals</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/dossier.css">
+<link rel="stylesheet" href="assets/wire.css">
+</head>
+<body>
+<style>
+.dirs { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 14px; }
+.dir { border: 1px solid var(--line); border-radius: 10px; padding: 18px; background: var(--paper); display: flex; flex-direction: column; gap: 8px; }
+.dir .letter { font-family: var(--mono); font-size: 12px; color: var(--ochre); font-weight: 600; letter-spacing: .08em; }
+.dir h3 { font-size: 22px; }
+.dir p { font-size: 15px; margin: 0; }
+.dir ul { font-family: var(--ui); font-size: 13.5px; padding-left: 18px; margin: 0; }
+.dir .best { font-family: var(--ui); font-size: 13px; color: var(--ink-2); border-top: 1px solid var(--line); padding-top: 8px; margin-top: auto; }
+.flow { padding-block: 28px; }
+.today { border-left: 3px solid var(--rust); background: var(--rust-soft); border-radius: 0 8px 8px 0; padding: 10px 14px; font-family: var(--ui); font-size: 14px; margin: 12px 0; }
+.today b { font-weight: 600; }
+.sev { display: inline-block; min-width: 20px; text-align: center; font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 4px; font-weight: 600; vertical-align: middle; }
+.sev4 { background: var(--rust); color: #fff; } .sev3 { background: var(--ochre-soft); color: var(--ochre); } .sev2 { background: var(--slate-soft); color: var(--slate); }
+.options { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+.opt { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: var(--paper); display: flex; flex-direction: column; gap: 6px; }
+.opt .k { font-family: var(--mono); font-size: 11.5px; color: var(--clay); letter-spacing: .06em; }
+.opt h3 { font-size: 17px; }
+.opt p { font-size: 14.5px; margin: 0; }
+.opt.rec { border-color: var(--moss); box-shadow: inset 0 0 0 1px var(--moss); }
+.opt.rec .k::after { content: " · recommended"; color: var(--moss); }
+.opt .trade { font-family: var(--ui); font-size: 12.5px; color: var(--ink-2); margin-top: auto; }
+figure.wf { margin: 16px 0 0; }
+figure.wf figcaption { font-family: var(--ui); font-size: 12.5px; color: var(--ink-2); margin-top: 6px; }
+.evidence { font-family: var(--ui); font-size: 13.5px; color: var(--ink-2); margin-top: 14px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.evidence b { color: var(--ink); }
+.rec-box { margin-top: 12px; border: 1px solid var(--moss); background: var(--moss-soft); border-radius: 8px; padding: 12px 14px; font-family: var(--ui); font-size: 14px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px 16px; align-items: start; }
+.rec-box .meta { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.rec-box .meta span { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; background: var(--paper); }
+.pick { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; background: var(--sand); font-family: var(--ui); font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.pick .lab { font-weight: 600; margin-right: 4px; }
+.pick label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; padding: 3px 8px; border-radius: 6px; border: 1px solid transparent; }
+.pick label:has(input:checked) { border-color: var(--ochre); background: var(--ochre-soft); }
+.pick input[type=radio] { accent-color: var(--ochre); }
+.pick input[type=text] { flex: 1 1 220px; min-width: 160px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; background: var(--paper); color: var(--ink); }
+.pick .st { font-size: 12px; color: var(--clay); min-width: 70px; }
+.status-bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--paper); border-bottom: 1px solid var(--line); font-family: var(--ui); font-size: 12.5px; color: var(--ink-2); padding: 6px 0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.status-bar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--clay); display: inline-block; }
+.status-bar .dot.live { background: var(--moss); } .status-bar .dot.local { background: var(--ochre); }
+.phases { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 12px; }
+.phase { border-top: 3px solid var(--ochre); padding-top: 10px; font-family: var(--ui); font-size: 13.5px; }
+.phase b { display: block; font-size: 15px; margin-bottom: 6px; }
+.phase ul { padding-left: 16px; margin: 0; }
+.phase li { margin-bottom: 4px; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 12px; }
+.metric { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-family: var(--ui); font-size: 13px; background: var(--paper); }
+.metric b { display: block; font-size: 14px; }
+.metric i { display: block; font-style: normal; color: var(--clay); font-size: 12px; margin-top: 4px; }
+.cta { display: inline-block; font-family: var(--ui); font-weight: 600; font-size: 14px; background: var(--ink); color: var(--paper); padding: 8px 14px; border-radius: 8px; text-decoration: none; }
+.cta:hover { background: var(--accent); color: #fff; }
+.summary-table td:first-child { white-space: nowrap; font-weight: 600; }
+@media (max-width: 760px) { .rec-box { grid-template-columns: 1fr; } .wire .body, .wire .body.three, .wire .body.two { grid-template-columns: 1fr; } .wire .rail { display: none; } }
+.mini { font: inherit; font-size: 12px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+.mini:hover { border-color: var(--ochre); color: var(--ochre); }
+.mini.ghost { border-color: transparent; color: var(--clay); }
+.applied-list { list-style: none; padding: 0; margin: 12px 0 0; max-width: none; } .applied-list li { border-top: 1px solid var(--line); padding: 12px 0; font-family: var(--ui); font-size: 14.5px; line-height: 1.5; max-width: 80ch; } .applied-list li b { display: block; font-size: 15.5px; margin-bottom: 4px; }
+</style>
+<div class="wrap">
+  <div class="series">
+    <div class="crumbs"><a href="index.html" data-hub>Riddle UX study</a><span>›</span><b>Proposals</b></div>
+    <div class="crumbs"><a href="index.html" data-hub>Evidence and audit</a><span>·</span><a href="#directions">Directions</a><span>·</span><a href="#flows">Flows</a><span>·</span><a href="#applied">What shipped</a><span>·</span><a href="#sequence">Sequence</a></div>
+  </div>
+
+  <header class="hero">
+    <div>
+      <div class="eyebrow">25 September 2026 · for the desktop client</div>
+      <h1>Riddle UX Proposals</h1>
+      <p class="lede">Three directions for the whole app, then twelve flows with two or three options each, a wireframe of the recommended one, the evidence behind it, and a control to record which version you prefer. Pick per flow; the directions are there to keep the picks coherent.</p>
+      <p style="margin-top:14px"><a class="cta" href="#directions">Start with the directions</a></p>
+    </div>
+    <dl class="card">
+      <dt>What this is built on</dt><dd>A source audit of every flow, 17 mail and 16 communication clients, about 60 studies on attention and trust in automation, and seven practitioners' thinking (all on the evidence page)</dd>
+      <dt>House rules honoured</dt><dd>Confirm in place, not in modals · errors inline · chroma only for status · one shortcut table · honest progress · Actions as the capability boundary · nothing hidden without a way back</dd>
+      <dt>Recording picks</dt><dd>Your picks are kept in this browser. When you are done, "Copy picks as Markdown" at the top and paste them into the chat, or download the JSON.</dd>
+    </dl>
+  </header>
+
+  <div class="status-bar" id="status"><span class="dot local" id="dot"></span><span id="status-text">Picks are kept in this browser.</span><span id="pick-count"></span><button type="button" class="mini" id="copy-picks">Copy picks as Markdown</button><button type="button" class="mini" id="download-picks">Download JSON</button><button type="button" class="mini ghost" id="clear-picks">Clear</button><span id="flash" style="color:var(--moss);font-weight:600"></span></div>
+<textarea id="picks-out" hidden rows="6" style="width:100%;font-family:var(--mono);font-size:12px;margin-top:8px"></textarea>
+
+  <div class="layout">
+    <nav class="toc" aria-label="On this page">
+      <div class="eyebrow">On this page</div>
+      <a href="#directions">Three directions</a>
+      <a href="#flows">Twelve flows</a>
+      <a href="#f1">1 First run</a>
+      <a href="#f2">2 Navigation and words</a>
+      <a href="#f3">3 The daily loop</a>
+      <a href="#f4">4 Deciding Unresolved</a>
+      <a href="#f5">5 Reading mail</a>
+      <a href="#f6">6 Correcting Riddle</a>
+      <a href="#f7">7 Trust and autonomy</a>
+      <a href="#f8">8 Director and proposals</a>
+      <a href="#f9">9 Editing Meshes</a>
+      <a href="#f10">10 Settings</a>
+      <a href="#f11">11 Search and the palette</a>
+      <a href="#f12">12 Notifications and rhythm</a>
+      <a href="#applied">What shipped</a>
+      <a href="#sequence">The sequence</a>
+      <a href="#metrics">How we will know</a>
+    </nav>
+
+    <main>
+      <section id="directions">
+        <div class="eyebrow">Three directions</div>
+        <h2>The same Riddle, three ways of holding it</h2>
+        <p>Each direction is a coherent answer to "what is Riddle for, at the moment you open it". They are not exclusive: the recommendations below mostly take the Deck's lists, the Brief's home and rhythm, and the Ledger's visibility. Pick the one that should win when they conflict.</p>
+        <div class="dirs">
+          <article class="dir">
+            <div class="letter">DIRECTION A</div>
+            <h3>The Brief</h3>
+            <p>Riddle is a place you visit two or three times a day to review what it decided, not an inbox you live in. It opens on a brief: what needs you, what it filed, what it would have done at the next rung, what it noticed. A review walks you through Finds and Unresolved one at a time and ends with a summary.</p>
+            <ul>
+              <li>Home: a daily brief with a "Start review" button</li>
+              <li>Rail: five destinations (Today, Needs you, Mail, Rules, Director)</li>
+              <li>Director: starts with an answer; proposals inline; chat collapsed</li>
+              <li>Rhythm: alerts only for allow-listed senders; everything else batched</li>
+            </ul>
+            <div class="best"><b>Influences:</b> HEY, Cora's Brief, Apple digests, the batching studies, Wroblewski's answer-first, Spool's seducible moment. <b>Risk:</b> people who want an inbox will feel steered.</div>
+          </article>
+          <article class="dir">
+            <div class="letter">DIRECTION B</div>
+            <h3>The Deck</h3>
+            <p>Riddle is a keyboard instrument. Every list behaves the same way, every row leads with its reason, single keys carry verdicts, a palette prints the keys, and the preview pane means you never leave the list. Speed is the trust feature.</p>
+            <ul>
+              <li>Home: Finds, reason-first, with a preview pane</li>
+              <li>Rail: current destinations, regrouped, counts follow the account</li>
+              <li>Director: a proposal queue with 1/2/3 verdicts</li>
+              <li>Rhythm: unchanged; the loop is fast enough to visit often</li>
+            </ul>
+            <div class="best"><b>Influences:</b> Superhuman, Linear, GitHub's inbox, Raycast, Showalter's density rules. <b>Risk:</b> the learning curve; keys must mean one thing per object.</div>
+          </article>
+          <article class="dir">
+            <div class="letter">DIRECTION C</div>
+            <h3>The Ledger</h3>
+            <p>Riddle is an audited assistant. Every row shows who decided and what reached Gmail; the account's rung is always in the chrome; corrections become visible rules; proposals are case studies with counts. Activity is the home for anyone who does not yet trust the machine.</p>
+            <ul>
+              <li>Home: Summary with a trust card and per-rule precision</li>
+              <li>Rail: unchanged, plus a rung chip and effect toasts everywhere</li>
+              <li>Director: proposals as problem, evidence, options, diff, expected effect</li>
+              <li>Rhythm: unchanged; the ledger is the source of calm</li>
+            </ul>
+            <div class="best"><b>Influences:</b> GitHub reason labels, Missive's rule timeline, Shneiderman's audit trail, Kulesza's explanatory debugging, Onyinye's trust ledger. <b>Risk:</b> more to read per row; can feel bureaucratic once trust is earned.</div>
+          </article>
+        </div>
+        <div class="scroll" style="margin-top:16px"><table class="summary-table">
+          <thead><tr><th>Question</th><th>Brief</th><th>Deck</th><th>Ledger</th></tr></thead>
+          <tbody>
+            <tr><td>What you see first</td><td>A brief and a Start button</td><td>The Finds list</td><td>Summary with a trust card</td></tr>
+            <tr><td>How you move</td><td>One item at a time, then done</td><td>j/k through lists, a palette</td><td>Lists with provenance columns</td></tr>
+            <tr><td>Where the Director lives</td><td>Inline, at the evidence</td><td>A queue with verdict keys</td><td>Cards that read like a case</td></tr>
+            <tr><td>How trust is built</td><td>Fewer, calmer visits; a seducible-moment offer</td><td>Speed, reversibility, keys that never surprise</td><td>Visibility of every effect and rule</td></tr>
+            <tr><td>Biggest change from today</td><td>Home and rhythm</td><td>List behaviour and keyboard</td><td>Chrome and rows</td></tr>
+          </tbody>
+        </table></div>
+        <div class="pick" data-pick="direction"><span class="lab">Which direction wins a conflict?</span>
+          <label><input type="radio" name="p-direction" value="A"> A · Brief</label>
+          <label><input type="radio" name="p-direction" value="B"> B · Deck</label>
+          <label><input type="radio" name="p-direction" value="C"> C · Ledger</label>
+          <label><input type="radio" name="p-direction" value="blend"> The recommended blend</label>
+          <input type="text" id="note-direction" placeholder="Notes (optional)">
+          <span class="st" id="st-direction"></span>
+        </div>
+      </section>
+
+      <section id="flows">
+        <div class="eyebrow">Twelve flows</div>
+        <h2>Flow by flow: today, the options, the evidence, a recommendation</h2>
+        <p>Severity is Nielsen's scale from the audit. "Effort" is a rough size for the recommended option: S is a day or two of frontend work, M is a week with one new Action, L is a multi-week change touching the engine. Wireframes are sketches of the recommended option; ochre marks what changes.</p>
+      </section>
+
+      <!-- FLOW 1 -->
+      <section class="flow" id="f1">
+        <div class="eyebrow">Flow 1 · Onboarding</div>
+        <h2>First run and adding an account</h2>
+        <div class="today"><b>Today.</b> With no account, the Summary says "Nothing needs your attention." and offers Review Spoil and Undo <span class="sev sev4">4</span>. The tour walks three empty pages and promises a digest that no longer exists <span class="sev sev3">3</span>. The hardest step, Google Cloud, is a repository path in monospace <span class="sev sev3">3</span>. An expired sign-in has no way back except Remove, which wipes learned state <span class="sev sev4">4</span>. The wizard itself is good: one decision per step and an effect sentence.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · BRIEF</div><h3>Show first, ask later</h3><p>First launch creates the sample mailbox in Observe, runs the default Meshes, and opens a populated Summary and Finds under a persistent banner: "This is sample mail. Connect Gmail when you are ready." The tour is replaced by three pull tips that appear on the first Find, the first Unresolved item and the first proposal, each dismissable and recallable from Help. The Google Cloud step opens the guide in the browser and lists the six console steps inline with a "Done" tick per step. The account panel gains "Sign in again".</p><div class="trade">Trade-off: a sample mailbox must be obviously a sample, or it will be mistaken for the user's own.</div></article>
+          <article class="opt"><div class="k">OPTION B · DECK</div><h3>Guided setup</h3><p>A full-screen first-run sequence: what Riddle does in three lines; connect Gmail with the console steps inline; choose the starting rung (Observe pre-selected); a sync screen that shows the work (messages fetched, rules evaluated, Finds so far) and lands in Finds. No sample data. Reconnect through the error card.</p><div class="trade">Trade-off: nothing to see until Google Cloud is done, which can take twenty minutes.</div></article>
+          <article class="opt"><div class="k">OPTION C · LEDGER</div><h3>Empty state as instruction</h3><p>Keep the structure. Gate the Summary and the Task Centre on zero accounts with one "Add an account" card, drop the digest sentence from the tour, add "Sign in again". Smallest change; fixes both severity-4 items.</p><div class="trade">Trade-off: still asks for Google Cloud before showing any value.</div></article>
+        </div>
+        <figure class="wf">
+          <div class="wire"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span>Sample mailbox</span><span class="search">Search or ask…</span><span class="right"><span class="chip ochre">Sample · Observe</span></span></div>
+            <div class="body">
+              <div class="rail"><div class="it on">Summary</div><div class="it">Finds <span class="c">4</span></div><div class="it">Unresolved <span class="c warn">2</span></div><div class="it">Inbox</div><div class="g">Mail</div><div class="it">Spoil</div><div class="it">Contamination</div><div class="g">Rules</div><div class="it">Meshes</div><div class="it">Strata</div><div class="it">Director</div></div>
+              <div class="pane"><div class="banner new rel"><span class="tag">NEW</span><b>This is sample mail.</b> Riddle is showing what it does on 120 made-up messages. Nothing here is yours. <span class="btn pri">Connect Gmail</span> <span class="btn ghost">Keep exploring</span></div>
+                <div class="h">Good morning <small>sample mailbox · Observe</small></div>
+                <div class="stack"><div class="row"><span class="av">4</span><span class="t"><b>4 Finds need your attention</b><span>2 to respond · 1 to pay · 1 to decide</span></span><span class="m">open →</span></div>
+                <div class="row"><span class="av">2</span><span class="t"><b>2 Unresolved</b><span>Riddle could not decide; deciding teaches it</span></span><span class="m">open →</span></div>
+                <div class="row"><span class="av">41</span><span class="t"><b>41 filed, 12 to Spoil</b><span>At Act, 12 would have been archived in Gmail. Nothing was.</span></span><span class="m">review →</span></div></div>
+                <div class="card sand new rel"><span class="tag">TIP 1 OF 3</span><div class="k">Your first Find</div>A Find is something Riddle thinks needs you. Press <kbd>e</kbd> when it is dealt with, <kbd>d</kbd> if it should not have been raised. <span class="btn ghost">Got it</span></div>
+              </div>
+            </div></div>
+          <figcaption>Option A: a populated first run on sample mail, a banner that cannot be mistaken for real data, and the first of three pull tips in place of the tour.</figcaption>
+        </figure>
+        <div class="evidence"><b>What the evidence says.</b> Spool's $300 million button: every gate before value is a tax you only see by watching people hit it. Wroblewski: registration "postponed, or handled behind the scenes"; "let the AI do the onboarding" and start with a result. NN/g (2023): tours are skipped and forgotten; contextual pull help works. Buell and Norton: people value visible work during a wait, so a first sync should show what Riddle is doing. Superhuman's concierge configures the real inbox; HEY's forced re-screening of every sender is the counter-example. Kole Jain: onboarding is sequencing, "a single tooltip pointing at the most important action", then a second, then a checklist, never "the entire product in a modal with six bullet points"; close a shortcut tip by executing the shortcut. The audit's two severity-4 items both live here.</div>
+        <div class="rec-box"><div><b>Recommendation: A, with C's gate as the floor.</b> The sample mailbox already exists (the fixture provider); the change is to create it on first launch and label it loudly. "Sign in again" needs one Action that reuses the OAuth flow for an existing Dig and keeps its classifications; the auth error card should land on it.</div><div class="meta"><span>Effort M</span><span>1 new Action</span><span>Fixes #1, #2, #17</span></div></div>
+        <div class="pick" data-pick="f1"><span class="lab">Your pick</span><label><input type="radio" name="p-f1" value="A"> A</label><label><input type="radio" name="p-f1" value="B"> B</label><label><input type="radio" name="p-f1" value="C"> C</label><label><input type="radio" name="p-f1" value="rec"> As recommended</label><input type="text" id="note-f1" placeholder="Notes (optional)"><span class="st" id="st-f1"></span></div>
+      </section>
+
+      <!-- FLOW 2 -->
+      <section class="flow" id="f2">
+        <div class="eyebrow">Flow 2 · Navigation and vocabulary</div>
+        <h2>The rail, the words, and what an account looks like in the chrome</h2>
+        <div class="today"><b>Today.</b> Four rail groups; "Excavation" is an unexplained heading over two review trays, a taxonomy, two policy editors and the audit log. Signals sits in primary navigation although its page speaks of Platt scaling. Spoil has a trash icon, Mesh a network icon <span class="sev sev2">2</span>. About 45 domain nouns, 16 before the daily loop makes sense. "Dig" in the app, "account" in Settings. Rail counts and the Summary ignore the account switcher <span class="sev sev2">2</span>. The account's rung is shown nowhere but Settings <span class="sev sev3">3</span>.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · ANY DIRECTION</div><h3>Regroup, gloss, and put the rung in the chrome</h3><p>Rail groups become: Summary, Finds, Unresolved; <b>Mail</b> (Inbox, Spoil, Contamination); <b>Rules</b> (Meshes, Strata, Never Hidden); <b>Director</b> (Director, Expeditions); Activity, Settings. Signals moves under Meshes as a tab, visible in full only in developer mode. Icons: a sieve for Meshes, an archive box for Spoil. Every rail item and every chip carries a one-line gloss on hover until it has been used five times: "Spoil · low-value mail, archived in Gmail at Act". One word per concept in copy: account in Settings, Dig elsewhere, with the wizard sentence "each account is its own Dig" kept. The account switcher shows the rung and sync state, and rail counts follow it.</p><div class="trade">Trade-off: glosses add hover text the keyboard user never sees; the "?" sheet gets a glossary section for them.</div></article>
+          <article class="opt"><div class="k">OPTION B · BRIEF</div><h3>Five destinations</h3><p>Collapse to Today, Needs you (Finds and Unresolved as tabs), Mail (Inbox, Spoil, Contamination as tabs), Rules (Meshes, Strata, Never Hidden, Signals as tabs) and Director (chat, proposals, Expeditions). Activity and Settings move to the top bar. Fewer places to look; more tabs inside each.</p><div class="trade">Trade-off: tabs hide counts; Wroblewski's data says hidden sections lose traffic.</div></article>
+          <article class="opt"><div class="k">OPTION C · LEDGER</div><h3>Keep the rail, add an account strip</h3><p>No regrouping. A strip under the top bar shows the selected account: name, rung chip, "Right now" sentence, sync state, with a one-key step down. Counts follow the switcher.</p><div class="trade">Trade-off: leaves "Excavation" and the icons as they are.</div></article>
+        </div>
+        <figure class="wf">
+          <div class="wire"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="chip new rel">Personal · <b>Observe</b> · synced 2m ago ▾</span><span class="search">Search or ask…</span><span class="right"><span class="btn ghost">Compose</span><span class="btn ghost">?</span></span></div>
+            <div class="body">
+              <div class="rail new rel"><span class="tag">REGROUPED</span><div class="it">Summary</div><div class="it on">Finds <span class="c">7</span></div><div class="it">Unresolved <span class="c warn">5</span></div><div class="g">Mail</div><div class="it">Inbox</div><div class="it">Spoil</div><div class="it">Contamination</div><div class="g">Rules</div><div class="it">Meshes</div><div class="it">Strata</div><div class="it">Never Hidden</div><div class="g">Director</div><div class="it">Director <span class="c warn">2</span></div><div class="it">Expeditions</div><div class="g">&nbsp;</div><div class="it">Activity</div><div class="it">Settings</div></div>
+              <div class="pane"><div class="card sand" style="max-width:320px"><div class="k">Hover gloss on "Spoil"</div><b>Spoil</b> · low-value mail Riddle set aside. Not deleted, still searchable. At Act it is archived in Gmail; this account is at Observe, so nothing moves. <span class="sub">Shown until you have opened Spoil five times.</span></div>
+                <div class="card" style="max-width:320px"><div class="k">Account popover</div><b>Personal</b> · matt@… <span class="chip">Observe</span><p>Right now: Riddle classifies only. Gmail is never changed.</p><div class="steps"><b>Observe</b> <i>›</i> Suggest <i>›</i> Act <i>›</i> Trusted</div><div class="btns"><span class="btn">Next rung: Suggest…</span><span class="btn ghost">Settings</span></div></div>
+              </div>
+            </div></div>
+          <figcaption>Option A: the regrouped rail with "Mail" and "Rules" instead of "Excavation", a rung chip on the account switcher, and the hover gloss that teaches a noun in place.</figcaption>
+        </figure>
+        <div class="evidence"><b>What the evidence says.</b> Wroblewski's "Obvious always wins": when Polar hid its sections, movement between them fell; keep every destination visible with counts. Spool: the gap between current knowledge (Gmail's words) and target knowledge (Riddle's) is where design happens, and the bridge must be unnoticed. Shulman et al. (2020): jargon hurts even with definitions, so glosses must say the Gmail effect, not define the metaphor. Superhuman recommends three to seven streams. Onyinye: teach the vocabulary once, first. The audit: the metaphor works for Find, Dig and Sift; it misleads for Strata and the icons contradict Spoil and Mesh. Kole Jain: the sidebar is "the spine of your product", each link an icon plus a short title so it can collapse and carry badges, settings and help at the bottom, and a tooltip on every icon because "the user won't understand all of our icons".</div>
+        <div class="rec-box"><div><b>Recommendation: A.</b> Under the Brief direction, B is the natural next step once A's glosses have done their work. Keep "Dig" as the noun; the gloss and the wizard carry it. Rename nothing in the engine.</div><div class="meta"><span>Effort S</span><span>Frontend only</span><span>Fixes #14, #16</span></div></div>
+        <div class="pick" data-pick="f2"><span class="lab">Your pick</span><label><input type="radio" name="p-f2" value="A"> A</label><label><input type="radio" name="p-f2" value="B"> B</label><label><input type="radio" name="p-f2" value="C"> C</label><label><input type="radio" name="p-f2" value="rec"> As recommended</label><input type="text" id="note-f2" placeholder="Notes (optional)"><span class="st" id="st-f2"></span></div>
+      </section>
+
+      <!-- FLOW 3 -->
+      <section class="flow" id="f3">
+        <div class="eyebrow">Flow 3 · The daily loop</div>
+        <h2>Summary, then Finds: the check-in that should take a minute</h2>
+        <div class="today"><b>Today.</b> The Summary is always "All Digs". Finds are grouped by type with a priority bar; the Find's plain-English reason is computed and never rendered, while the Why card leads with a monospace route walk <span class="sev sev3">3</span>. After resolving a Find opened with Enter, the cursor is invisible until the mouse is used <span class="sev sev3">3</span>. Lists cap at 200 with no paging, search, sort or multi-select <span class="sev sev3">3</span>. "Not important" is two different Actions <span class="sev sev3">3</span>. Resolve, Snooze, Retype and Not important with keys is good; the snooze picker is good.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · BRIEF</div><h3>The morning brief and a bounded review</h3><p>The Summary becomes a brief for the selected account or all: "Since yesterday: 7 need you (3 respond, 2 pay, 2 decide) · 41 filed · 12 to Spoil, which Act would have archived · 5 Unresolved. Riddle noticed: 6 GitHub notifications keep landing in Unresolved." Every line is a link. A "Start review" button walks Finds then Unresolved one card at a time with the same keys, and ends with "You resolved 9 and taught 2 rules. Nothing else needs you." The rail badge counts decisions pending, not messages.</p><div class="trade">Trade-off: card mode suits small counts; past a few dozen the list (B) must remain one key away.</div></article>
+          <article class="opt rec"><div class="k">OPTION B · DECK</div><h3>The triage deck</h3><p>Finds as a reason-first list: the first line is the reason in the user's words ("Jamie asked for your review; a follow-up says it blocks the merge"), the second the subject and sender, then chips for type, rule and due. Tabs Needs you / Later / Done replace the Status filter. Single click selects and shows the preview; Enter opens; j/k always work; x selects; paging; sort within a group by due or priority; a palette that prints the keys. The Why card shows the reason sentence first and collapses the route walk.</p><div class="trade">Trade-off: reason lines make rows taller; the density budget must come from removing borders, not spacing.</div></article>
+          <article class="opt"><div class="k">OPTION C · LEDGER</div><h3>Reason and rule on the row, nothing else moves</h3><p>Keep the layout. Add the reason line and a "decided by Mesh v7" chip to each row, render the reason first in the detail, collapse the route walk, fix the dead end, make the Summary follow the switcher, rename the Why-card button.</p><div class="trade">Trade-off: leaves the 200 cap and the lack of bulk actions.</div></article>
+        </div>
+        <figure class="wf">
+          <div class="wire"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="chip">Personal · Observe</span><span class="search">Search or ask…</span><span class="right"><span class="btn ghost">⌘K</span></span></div>
+            <div class="body three">
+              <div class="rail"><div class="it">Summary</div><div class="it on">Finds <span class="c">7</span></div><div class="it">Unresolved <span class="c warn">5</span></div><div class="g">Mail</div><div class="it">Inbox</div><div class="it">Spoil</div></div>
+              <div class="pane"><div class="tabs new rel"><span class="tag">TABS</span><span class="on">Needs you 7</span><span>Later 3</span><span>Done</span></div>
+                <div class="grp">Respond · 3</div>
+                <div class="row sel new rel"><span class="tag">REASON FIRST</span><span class="av">J</span><span class="t"><b>Jamie asked for your review; a follow-up says it blocks the merge</b><span>Re: PR #412 · Jamie Chen · <span class="chip slate">GitHub Notifications v7</span> · due tomorrow</span></span><span class="m">P82<br>2 msgs</span></div>
+                <div class="row"><span class="av">A</span><span class="t"><b>Anna is waiting on your answer about Thursday</b><span>Dinner? · Anna Ruiz · <span class="chip slate">Personal replies v2</span></span></span><span class="m">P71<br>1 msg</span></div>
+                <div class="grp">Pay · 2</div>
+                <div class="row"><span class="av">$</span><span class="t"><b>Invoice 8841 is due in 3 days</b><span>Acme Hosting · <span class="chip slate">Bills v3</span></span></span><span class="m">P68</span></div>
+              </div>
+              <div class="pane dim new rel"><span class="tag">PREVIEW PANE</span><div class="h">Re: PR #412 <small>Respond · P82</small></div>
+                <div class="btns"><span class="btn pri">Resolve <kbd>e</kbd></span><span class="btn">Snooze <kbd>s</kbd></span><span class="btn">Retype <kbd>r</kbd></span><span class="btn">Not important <kbd>d</kbd></span><span class="btn ghost">?</span></div>
+                <p>Jamie requested your review directly; a follow-up says it is blocking the merge.</p>
+                <div class="card"><div class="k">Why · GitHub Notifications v7</div><div class="why"><div class="cl"><i class="ok">✓</i>header X-GitHub-Reason is review_requested</div><div class="cl"><i class="ok">✓</i>review_requested@v3 > .80 <span class="chip">.93</span></div><div class="cl"><i class="un">–</i>2 routes not reached</div></div><div class="btns"><span class="btn ghost">Show the full walk</span><span class="btn ghost">Talk to the Director</span></div></div>
+                <div class="msg you">Jamie · 2h · "Could you take a look before Thursday?"</div><div class="msg">Jamie · 20m · "This is now blocking the merge."</div>
+              </div>
+            </div></div>
+          <figcaption>Option B: reason-first rows with the deciding Mesh as a chip, tabs instead of a status filter, and a preview pane so j/k never stop working. The Why card leads with the sentence and collapses the walk.</figcaption>
+        </figure>
+        <div class="evidence"><b>What the evidence says.</b> Spool's trigger words: users succeed 72 percent of the time when their own words are on the page, 6 percent when not; a Find labelled only by type has no scent. GitHub prints a reason on every row; Copilot's why-headline was what Microsoft's users valued; Focused Inbox's silence is what they distrusted. Linear's Priority tab and Superhuman's Important/Other: two lists beat one ranking. Kulesza: explanations should be sound, complete and bounded (ten features did as well as fifty), which is the route walk collapsed under a sentence. Cowan: at most four unchunked decisions at once, which is the card review. Kahneman's peak-end: close the review with what was resolved. Wroblewski's one-thumb test: open, see, dispose of one item, leave in under a minute. Kole Jain on the row itself: let the data drive the form (types and rules as chips, counts and times right-aligned, subjects truncated, decided rows shaded), lay it out like a receipt on two hard edges without cards, and fix density with differentiation rather than white space, because "nobody reads a screen".</div>
+        <div class="rec-box"><div><b>Recommendation: A and B together.</b> They are the same data at two densities: the brief is the entry and the exit, the deck is the middle. The reason line uses the existing <code>find.reason</code>; the rule chip uses the classification's Mesh id and version already attached to corrections. The dead-end fix and the rename are a morning's work and should not wait for the rest.</div><div class="meta"><span>Effort M</span><span>Frontend; paging needs a list Action change</span><span>Fixes #5, #11, #13, #14, #18</span></div></div>
+        <div class="pick" data-pick="f3"><span class="lab">Your pick</span><label><input type="radio" name="p-f3" value="A"> A</label><label><input type="radio" name="p-f3" value="B"> B</label><label><input type="radio" name="p-f3" value="C"> C</label><label><input type="radio" name="p-f3" value="rec"> A + B as recommended</label><input type="text" id="note-f3" placeholder="Notes (optional)"><span class="st" id="st-f3"></span></div>
+      </section>
+
+      <!-- FLOW 4 -->
+      <section class="flow" id="f4">
+        <div class="eyebrow">Flow 4 · Unresolved</div>
+        <h2>Deciding what Riddle could not</h2>
+        <div class="today"><b>Today.</b> A clear page: "Riddle could not decide. Deciding here is the fastest way to teach it." But <code>f</code> silently creates a Respond Find while the button opens a type menu <span class="sev sev2">2</span>; no multi-select or bulk decide, so 200 items after a week away is 200 decisions <span class="sev sev2">2</span>; nothing tells the user what the decision teaches or how many corrections lead to a proposal.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · DECK</div><h3>One at a time, four keys, and what it teaches</h3><p>Unresolved as a card: sender, subject, the message summary, and the reason Riddle stopped ("no rule mentions this sender; two Signals disagreed"). Riddle's best guess is shown as a suggestion with its confidence, below the summary, not above it. Keys: <kbd>1</kbd> Find (opens the type picker), <kbd>2</kbd> Filed, <kbd>3</kbd> Spoil, <kbd>4</kbd> Contamination, <kbd>h</kbd> Never hide, <kbd>s</kbd> later. After each decision a line says what it taught: "Recorded. 3 similar from this sender; the Director will propose a rule at 5." An inline "also add a rule for this sender" toggle turns the decision into a sender-scoped rule.</p><div class="trade">Trade-off: showing the guess below the summary costs a glance; it is the point.</div></article>
+          <article class="opt rec"><div class="k">OPTION B · BRIEF</div><h3>Clusters first</h3><p>Group Unresolved by what stopped Riddle: the sender, the list, the header, the disagreement. A cluster header reads "12 from notifications@github.com: decide all as Filed?" and one action decides the cluster, records the corrections, and offers the Director's draft rule with a preview count. Singles fall through to the card flow.</p><div class="trade">Trade-off: a wrong cluster decision is twelve wrong decisions; Undo All must be on the toast.</div></article>
+          <article class="opt"><div class="k">OPTION C · MINIMAL</div><h3>Fix the keys</h3><p><code>f</code> opens the type picker; <code>x</code> selects; a bulk decide toolbar; paging past 200. No cluster or teaching line.</p><div class="trade">Trade-off: the fastest fix; leaves the teaching invisible.</div></article>
+        </div>
+        <figure class="wf">
+          <div class="wire"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="chip">Personal · Observe</span><span class="search">Search or ask…</span><span class="right"><span class="sub">Unresolved · 3 of 14</span></span></div>
+            <div class="body two">
+              <div class="pane"><div class="banner moss new rel"><span class="tag">CLUSTER</span><b>12 more from notifications@github.com</b> look like this one. <span class="btn">Decide all 12 the same way</span> <span class="btn ghost">One at a time</span></div>
+                <div class="h">Build failed: main #2291 <small>notifications@github.com · 40m</small></div>
+                <p>The nightly workflow failed on step "integration tests". Re-run or view logs.</p>
+                <div class="card sand"><div class="k">Why Riddle stopped</div>No rule mentions this sender. <span class="chip">ci_failure@v2 .88</span> says important; <span class="chip">routine@v1 .71</span> says routine. The GitHub Mesh has no route for <code>header X-GitHub-Reason = ci_activity</code>.</div>
+                <div class="card new rel"><span class="tag">GUESS BELOW THE SUMMARY</span><div class="k">Riddle's guess · 62%</div>Filed. Low confidence because the two Signals disagree.</div>
+                <div class="btns new rel"><span class="tag">KEYS</span><span class="btn pri">Find… <kbd>1</kbd></span><span class="btn">Filed <kbd>2</kbd></span><span class="btn">Spoil <kbd>3</kbd></span><span class="btn">Contamination <kbd>4</kbd></span><span class="btn ghost">Never hide <kbd>h</kbd></span><span class="btn ghost">Later <kbd>s</kbd></span></div>
+                <div class="bar2"><input type="checkbox" checked disabled> Also add a rule: mail from this sender with reason ci_activity → this decision <span class="chip">would apply to 12</span></div>
+              </div>
+              <div class="pane dim"><div class="h">What your decisions taught <small>today</small></div>
+                <div class="stack"><div class="msg you">Filed · 2 from newsletters@stripe.com · <b>rule proposed</b></div><div class="msg">Find: Pay · invoice from Acme · 1 similar</div><div class="msg">Spoil · 4 from deals@… · <b>rule added by you</b></div></div>
+                <div class="card sand"><div class="k">When the Director proposes</div>After 5 similar corrections against one Mesh. GitHub Notifications v7: <b>3 of 5</b>.</div>
+              </div>
+            </div></div>
+          <figcaption>Options A and B together: a card with the reason Riddle stopped, its guess below the summary with a confidence, numeric verdict keys, a cluster offer, and a running account of what the decisions taught.</figcaption>
+        </figure>
+        <div class="evidence"><b>What the evidence says.</b> Vaccaro et al. (2024): human plus AI teams win only where the human is the stronger judge, which is exactly the borderline case; Unresolved is the primary human task, not an error bucket. Buçinca et al. (2021): showing the AI's verdict after the person has looked cuts overreliance. Zhang, Liao and Bellamy (2020): a confidence number calibrates trust where an explanation does not. Kulesza: an undecided message is a too-few-examples case, so ask for a feature (the sender rule), not only a label. Linear's triage uses 1/2/3 verdicts. Femke van Schoonhoven: Unresolved is where clarity beats forced simplicity; show which Meshes fired and which Signal abstained. Spool: name the trigger word Riddle lacked.</div>
+        <div class="rec-box"><div><b>Recommendation: A with B's cluster header.</b> The reason Riddle stopped is already in the explanation trace (routes that returned Unknown, signals that disagreed); the teaching line needs the corrections count per Mesh, which the new <code>mesh_corrections</code> read exposes. The sender-rule toggle should create a small Mesh route through the normal preview-then-apply path, not a hidden override.</div><div class="meta"><span>Effort M</span><span>Frontend; cluster decide is a batched Action</span><span>Fixes #15, #18</span></div></div>
+        <div class="pick" data-pick="f4"><span class="lab">Your pick</span><label><input type="radio" name="p-f4" value="A"> A</label><label><input type="radio" name="p-f4" value="B"> B</label><label><input type="radio" name="p-f4" value="C"> C</label><label><input type="radio" name="p-f4" value="rec"> A + B as recommended</label><input type="text" id="note-f4" placeholder="Notes (optional)"><span class="st" id="st-f4"></span></div>
+      </section>
+
+      <!-- FLOW 5 -->
+      <section class="flow" id="f5">
+        <div class="eyebrow">Flow 5 · Reading mail</div>
+        <h2>Inbox, Spoil, Contamination and the message page</h2>
+        <div class="today"><b>Today.</b> Inbox, Spoil and Contamination rows open only on double-click or Enter; there is no preview pane; the message page has no next or previous, so triage is open, act, back, j <span class="sev sev3">3</span>. <code>s</code> snoozes 24 hours silently on messages but opens a picker on Finds <span class="sev sev2">2</span>. Review-page buttons act on the cursor row when nothing is checked <span class="sev sev2">2</span>. Gmail label ids show raw. The reply tree we just built is good; long threads have no collapse-all or jump-to-latest.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · ANY DIRECTION</div><h3>One list model everywhere</h3><p>Single click selects and shows the preview pane, as Finds already does; Enter opens the full page; j/k move in either. The message page gets <kbd>n</kbd>/<kbd>p</kbd> and "3 of 41". <kbd>s</kbd> opens the picker everywhere. Toolbar buttons say what they act on: "Archive 1 (cursor)" or "Archive 3 selected". In Spoil and Contamination the preview shows the message summary first and Riddle's verdict and reason beneath it, with a "Not Spoil" that offers the sender scope. Gmail labels are named, not id'd. Threads get collapse-all and jump-to-latest, with the depth cap kept.</p><div class="trade">Trade-off: the preview pane costs width on a laptop; it collapses to a two-pane layout below 1100 px.</div></article>
+          <article class="opt rec"><div class="k">OPTION B · BRIEF</div><h3>Sender digests in Spoil</h3><p>Spoil grouped by sender: one row per sender with a count and the newest subject, expanding to the messages. "Not Spoil for this sender" is one action and one rule; "Never hide" sits beside it. Contamination stays flat but reason-first, with the evidence chips (auth failed, lookalike domain) on the row.</p><div class="trade">Trade-off: a sender with one message looks the same as one with forty; the count must carry the weight.</div></article>
+          <article class="opt"><div class="k">OPTION C · DECK</div><h3>Full page with a queue</h3><p>Keep the full-page message but add n/p, a queue position, and the verdict keys on the page. No preview pane.</p><div class="trade">Trade-off: still leaves the list to read anything.</div></article>
+        </div>
+        <figure class="wf">
+          <div class="wire"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="chip">Personal · Observe</span><span class="search">Search or ask…</span><span class="right"><span class="sub">Spoil · 312</span></span></div>
+            <div class="body three">
+              <div class="rail"><div class="it">Finds <span class="c">7</span></div><div class="it">Unresolved <span class="c warn">5</span></div><div class="g">Mail</div><div class="it">Inbox</div><div class="it on">Spoil</div><div class="it">Contamination</div></div>
+              <div class="pane"><div class="btns"><span class="btn">Not Spoil · 1 (cursor)</span><span class="btn ghost">Never hide sender</span><span class="btn ghost">?</span></div>
+                <div class="grp new rel"><span class="tag">BY SENDER</span>Grouped by sender</div>
+                <div class="row sel"><span class="av">D</span><span class="t"><b>deals@retailer.example · 41</b><span>"Last chance: 30% off" · newest 2h · <span class="chip slate">Promotions v4</span></span></span><span class="m">▾</span></div>
+                <div class="row child"><span class="av"></span><span class="t"><b>Last chance: 30% off everything</b><span>2h</span></span><span class="m"></span></div>
+                <div class="row child"><span class="av"></span><span class="t"><b>Your weekend picks</b><span>yesterday</span></span><span class="m"></span></div>
+                <div class="row"><span class="av">S</span><span class="t"><b>digest@social.example · 18</b><span>"3 new followers" · <span class="chip slate">Social v1</span></span></span><span class="m">▸</span></div>
+                <div class="row"><span class="av">N</span><span class="t"><b>news@paper.example · 9</b><span>"Morning briefing" · <span class="chip slate">Newsletters v2</span></span></span><span class="m">▸</span></div>
+              </div>
+              <div class="pane dim new rel"><span class="tag">MESSAGE BEFORE VERDICT</span><div class="h">Last chance: 30% off everything <small>deals@retailer.example</small></div>
+                <p>Ends tonight. Free shipping over $50. Unsubscribe.</p>
+                <div class="card"><div class="k">Riddle's verdict</div><b>Spoil</b> · Promotions v4 matched <code>list-unsubscribe present</code> and <code>promotional@v2 .96</code>. At Act this would be archived in Gmail. <span class="sub">This account is at Observe: nothing moved.</span></div>
+                <div class="btns"><span class="btn">Not Spoil: this message</span><span class="btn">Not Spoil: this sender (41)</span><span class="btn ghost">Never hide</span></div>
+              </div>
+            </div></div>
+          <figcaption>Options A and B: Spoil grouped by sender with counts and the deciding rule, a preview pane that shows the message before the verdict, and corrections scoped to the sender in one click.</figcaption>
+        </figure>
+        <div class="evidence"><b>What the evidence says.</b> Jakob's law and the audit: two list behaviours in one app is the pattern break people remember (Onyinye). Apple Mail's sender digests and HEY's bundles collapse prolific senders to one row. Buçinca: in the views that can hide mail, show the content before the verdict. Slack's designers: one visible level with a count is what stays legible; Coding Horror argues against deep trees; keep the tree but give it collapse controls. Superhuman, Apple and Shortwave all scope corrections to the sender. Femke van Schoonhoven: a control must mean one clear thing, so the toolbar names its target. Kole Jain: secondary actions sit lower on "the spectrum of explicitness", revealed on hover and focus with a tooltip, and a disposition is optimistic, the way Gmail's delete "disappears instantly, assuming that the server request will succeed", with Undo as the safety net.</div>
+        <div class="rec-box"><div><b>Recommendation: A, with B for Spoil.</b> The preview pane reuses the message page's body renderer; sender grouping is a client-side group over the existing page. The snooze picker already exists on Finds. Label names need the Gmail label list, which the sync already fetches.</div><div class="meta"><span>Effort M</span><span>Frontend; label names need one read</span><span>Fixes #3, #15</span></div></div>
+        <div class="pick" data-pick="f5"><span class="lab">Your pick</span><label><input type="radio" name="p-f5" value="A"> A</label><label><input type="radio" name="p-f5" value="B"> B</label><label><input type="radio" name="p-f5" value="C"> C</label><label><input type="radio" name="p-f5" value="rec"> A + B as recommended</label><input type="text" id="note-f5" placeholder="Notes (optional)"><span class="st" id="st-f5"></span></div>
+      </section>
+
+      <!-- FLOW 6 -->
+      <section class="flow" id="f6">
+        <div class="eyebrow">Flow 6 · Corrections</div>
+        <h2>Correcting Riddle and seeing what it learned</h2>
+        <div class="today"><b>Today.</b> Corrections exist everywhere under different names (Not Spoil, Restore, Correct…, Decide, Not important twice) <span class="sev sev3">3</span>. The toast never says whether Gmail changed <span class="sev sev3">3</span>. A correction "never changes a rule by itself" but nothing shows corrections accumulating or which Mesh they count against. There is no scope choice: a correction is always one message. Undo semantics are documented well.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · LEDGER</div><h3>The scoped correction sheet</h3><p>Every correction opens a small in-place sheet under the row, not a modal: "Move to Spoil: this message · this sender (14) · this domain (31)", each with the count it would apply to now and going forward. A line states the Gmail effect for this account ("archived in Gmail" or "Riddle only, Observe"). The toast reads "Moved to Spoil · rule added for this sender · Riddle only" with Undo. Sender and domain rules appear under Settings → Mail rules → Your corrections, editable and removable. A row a correction decided shows a "Your rule" chip.</p><div class="trade">Trade-off: one more choice per correction; the default (this message) is pre-selected and Enter takes it.</div></article>
+          <article class="opt"><div class="k">OPTION B · DECK</div><h3>The editable Why card</h3><p>Every clause in the route walk becomes actionable: "make this pass", "raise the threshold", "add sender to Never Hidden". The change re-simulates at once, shows "would change 37 messages", and Apply creates a Mesh version through the normal path. This is explanatory debugging in full; it belongs on the Mesh page too (Flow 9).</p><div class="trade">Trade-off: the deepest option; needs the simulator wired to the card.</div></article>
+          <article class="opt"><div class="k">OPTION C · MINIMAL</div><h3>Rename and tell</h3><p>One name per Action, the Gmail effect in every toast, and a corrections count on the Mesh page. No scope choice.</p><div class="trade">Trade-off: corrections stay one message at a time.</div></article>
+        </div>
+        <figure class="wf">
+          <div class="wire"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="chip">Work · <b>Act</b> · Labels and archiving</span><span class="search">Search or ask…</span></div>
+            <div class="body one">
+              <div class="pane"><div class="row"><span class="av">N</span><span class="t"><b>Weekly product update</b><span>news@vendor.example · <span class="chip slate">Newsletters v2</span> · Filed</span></span><span class="m">10:12</span></div>
+                <div class="card new rel" style="margin-left:24px;max-width:520px"><span class="tag">IN-PLACE SHEET</span><div class="k">Move to Spoil</div>
+                  <div class="stack"><div class="bar2"><input type="radio" checked disabled> This message only</div><div class="bar2"><input type="radio" disabled> This sender · <b>14 now</b>, and future mail</div><div class="bar2"><input type="radio" disabled> This domain (@vendor.example) · <b>31 now</b>, and future mail</div></div>
+                  <p style="margin-top:6px">In Gmail: <b>archived</b> and labelled Riddle/Spoil, because Work is at Act with archiving. Undo restores the label and the inbox.</p>
+                  <div class="btns"><span class="btn pri">Move to Spoil</span><span class="btn ghost">Cancel <kbd>esc</kbd></span></div></div>
+                <div class="bar2 new rel" style="max-width:520px"><span class="tag">TOAST</span>Moved to Spoil · rule added for news@vendor.example · <b>archived in Gmail</b> <span class="btn ghost">Undo</span></div>
+                <div class="card sand" style="max-width:520px"><div class="k">Settings › Mail rules › Your corrections</div><div class="stack"><div class="bar2">news@vendor.example → Spoil <span class="chip">14 applied</span> <span class="btn ghost">Remove</span></div><div class="bar2">@bank.example → Never hidden <span class="btn ghost">Remove</span></div></div></div>
+              </div>
+            </div></div>
+          <figcaption>Option A: a correction sheet under the row with three scopes and their counts, the Gmail effect stated for this account, a toast that says what reached Gmail, and the resulting rule listed where it can be removed.</figcaption>
+        </figure>
+        <div class="evidence"><b>What the evidence says.</b> The universal correction primitive in Gmail tabs, Apple, Spark, Shortwave, Superhuman and Proton is sender-scoped and persistent; the user's mental model is "that sender", not "that weight". Shortwave lists every resulting rule under Settings; Outlook's hidden override list is the documented source of distrust. Kulesza's principles: actionable, reversible, always honoured, incremental, and "what happens if I change this" as the top question, which the counts answer. Amershi G9 and G16: efficient correction, and convey the consequences. Dietvorst (2018): letting people adjust the algorithm even slightly restores use after an error. Wroblewski: "even just seeing where information comes from gives people a real trust boost." Kole Jain's container ladder: a simple, non-blocking context belongs in a popover, not a page, with the primary action at the top and the dangerous one lower, which is exactly the in-place sheet.</div>
+        <div class="rec-box"><div><b>Recommendation: A now, B on the Mesh page (Flow 9).</b> Sender and domain rules can be small generated Mesh routes in a per-account "Your corrections" Mesh, which keeps them visible, versioned and undoable through the existing machinery instead of a second rule system. The Gmail effect line already exists as <code>gmailEffect</code> in the account model.</div><div class="meta"><span>Effort M</span><span>1 Action: correction with scope</span><span>Fixes #4, #13</span></div></div>
+        <div class="pick" data-pick="f6"><span class="lab">Your pick</span><label><input type="radio" name="p-f6" value="A"> A</label><label><input type="radio" name="p-f6" value="B"> B</label><label><input type="radio" name="p-f6" value="C"> C</label><label><input type="radio" name="p-f6" value="rec"> As recommended</label><input type="text" id="note-f6" placeholder="Notes (optional)"><span class="st" id="st-f6"></span></div>
+      </section>
+
+      <!-- FLOW 7 -->
+      <section class="flow" id="f7">
+        <div class="eyebrow">Flow 7 · Trust and autonomy</div>
+        <h2>Knowing what Riddle will do to your mailbox, and letting it do more</h2>
+        <div class="today"><b>Today.</b> The rung is shown only in Settings <span class="sev sev3">3</span>; a user with Work at Act and Personal at Observe sees the same chrome for both. Toasts are identical at every rung <span class="sev sev3">3</span>. The Shadow card's "Review proposals" opens a plain inbox with no agree or disagree while the toolbar acts for real <span class="sev sev3">3</span>. "Nothing is hidden" on degraded paths, the "Right now" sentence, and Trusted behind a hold are all good.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · LEDGER</div><h3>Rung in the chrome, effect in every toast</h3><p>The account switcher shows "Personal · Observe · synced 2m ago". Clicking opens a popover with the "Right now" sentence, the ladder as current rung and one recommended next rung (not four peers), and a one-key step down. Every toast and Activity line states the Gmail effect. Activity shows queued writes as a distinct state from written ones. Confirmations for Gmail writes use verb plus noun with a count: "Archive 42 messages in Gmail?" with the button "Archive", and a line saying what Undo covers. Approve and Send lose their autofocus.</p><div class="trade">Trade-off: none worth naming; this is the floor.</div></article>
+          <article class="opt rec"><div class="k">OPTION B · BRIEF</div><h3>The trust card and the seducible moment</h3><p>A card on the Summary: "Last 7 days on Personal: 214 decisions, 3 you corrected, 0 undone. Riddle would have archived 41 to Spoil." Per-rule precision beneath it ("Promotions v4: reversed 1 of 60"). Only after a clean run does a one-line offer appear, dismissable: "Riddle got the last 40 Spoil calls right. Let it archive Spoil on Personal?" with the rung and the undo guarantee stated. A rule whose reversal rate climbs is demoted to Suggest and the user is told. Shadow review becomes a list with Agree and Disagree per row that feeds the same numbers.</p><div class="trade">Trade-off: the offer must never be a nag; once dismissed it waits for the next clean run.</div></article>
+          <article class="opt"><div class="k">OPTION C · LEDGER, DEEPER</div><h3>Autonomy per rule</h3><p>The rung lives on each Mesh route rather than the account: Promotions may archive while Newsletters only labels. Promotion and demotion happen per rule on evidence. Lee and See's "resolution": trust should track the capability of each function.</p><div class="trade">Trade-off: an engine change to the projection gate and the settings model; the biggest bet on this page.</div></article>
+        </div>
+        <figure class="wf">
+          <div class="wire"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="chip new rel"><span class="tag">RUNG CHIP</span>Personal · <b>Observe</b> · synced 2m ▾</span><span class="search">Search or ask…</span></div>
+            <div class="body one">
+              <div class="pane"><div class="split">
+                <div class="card new rel"><span class="tag">TRUST CARD</span><div class="k">Last 7 days · Personal</div><b>214 decisions</b> · 3 you corrected · 0 undone<br><span class="sub">Riddle would have archived 41 to Spoil. Nothing was changed in Gmail.</span>
+                  <div class="stack" style="margin-top:6px"><div class="bar2">Promotions v4 <span class="fill"><i style="width:98%"></i></span> reversed 1 of 60</div><div class="bar2">Newsletters v2 <span class="fill"><i style="width:92%"></i></span> reversed 3 of 38</div><div class="bar2">GitHub Notifications v7 <span class="fill"><i style="width:70%"></i></span> reversed 6 of 20 <span class="chip rust">watch</span></div></div></div>
+                <div class="card sand new rel"><span class="tag">SEDUCIBLE MOMENT</span><div class="k">After a clean run</div><b>Riddle got the last 40 Spoil calls on Personal right.</b><p>Let it archive Spoil in Gmail? That is the Act rung for Spoil only. Everything it archives stays in Spoil and Activity, with Undo.</p><div class="btns"><span class="btn pri">Let it archive Spoil</span><span class="btn ghost">Not yet</span></div></div>
+              </div>
+              <div class="bar2 new rel" style="max-width:560px;margin-top:8px"><span class="tag">VERB + NOUN</span><b>Archive 42 messages in Gmail?</b> They stay in Spoil here; Undo restores them to the inbox. <span class="btn pri">Archive 42</span> <span class="btn ghost">Cancel</span></div>
+              </div>
+            </div></div>
+          <figcaption>Options A and B: the rung on the account chip, a trust card with per-rule precision, the offer that appears only after a clean run, and a confirmation that names the verb, the noun and the count.</figcaption>
+        </figure>
+        <div class="evidence"><b>What the evidence says.</b> Spool's seducible moment: the right time for a secondary ask is right after the mission is satisfied; offer more autonomy then, never in Settings at startup. Lee and See: calibrated trust needs the automation's purpose, process and performance on display; per-rule precision is performance. Parasuraman and Riley: false alarms produce disuse, so a rule whose reversals climb must step down. Amershi G2, G17, G18: how well it works, global controls, notify about changes. Zander Whitehurst: "'Are you sure' tells people nothing"; verb plus noun. Nielsen: focus the safe action. Onyinye: in a low-trust market people want to know where their money is; show "would have archived 41" before any write. Android: the app proposes importance, only the user raises it. Kole Jain: keep the primary colour on the non-destructive action so people can "trust that it's always that way", destructive stays red, and grade the rung copy on the four-level rubric so it says how it helps ("Riddle files newsletters so you never see them") rather than what it does.</div>
+        <div class="rec-box"><div><b>Recommendation: A and B; C when Meshes multiply.</b> Per-rule precision comes from Activity: reversals per Mesh version over a window. The offer is a Summary card driven by that number, and accepting it runs the existing autonomy Action. The Shadow review list reuses the Unresolved card with Agree and Disagree keys.</div><div class="meta"><span>Effort M</span><span>Frontend; precision is one read over Activity</span><span>Fixes #4, #8, #9</span></div></div>
+        <div class="pick" data-pick="f7"><span class="lab">Your pick</span><label><input type="radio" name="p-f7" value="A"> A</label><label><input type="radio" name="p-f7" value="B"> B</label><label><input type="radio" name="p-f7" value="C"> C</label><label><input type="radio" name="p-f7" value="rec"> A + B as recommended</label><input type="text" id="note-f7" placeholder="Notes (optional)"><span class="st" id="st-f7"></span></div>
+      </section>
+
+      <!-- FLOW 8 -->
+      <section class="flow" id="f8">
+        <div class="eyebrow">Flow 8 · The Director</div>
+        <h2>Talking to the Director, and what a proposal looks like</h2>
+        <div class="today"><b>Today.</b> The Director opens on an empty chat with six suggestions that send at once. Enter sends; there is no Stop <span class="sev sev2">2</span>. "Talk to the Director about this" auto-sends a prompt containing raw ids <span class="sev sev2">2</span>. Proposals and their badge live in session memory; Dismiss never reaches the backend <span class="sev sev3">3</span>. Approve is autofocused <span class="sev sev3">3</span>. No simulation is shown before Apply, although the Mesh editor has one. Tool-call cards, per-turn cost and the untrusted-content banner are good. Answers cannot be selected <span class="sev sev3">3</span>.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · BRIEF</div><h3>Starts with an answer, lives where the evidence is</h3><p>The Director page opens with a generated note ("Since Tuesday I noticed: 6 GitHub CI failures landed in Unresolved; deals@retailer keeps being corrected to Spoil") and two or three proposal cards. The same cards appear inline on an Unresolved cluster header and on a Spoil sender row. Chat is a collapsed pane beneath. <kbd>⌘↵</kbd> sends, Enter is a newline; a Stop button; "Talk to the Director about this" prefills the composer without sending and names the message by subject and sender, never by id.</p><div class="trade">Trade-off: the opening note costs a model call per visit; cache it per day.</div></article>
+          <article class="opt rec"><div class="k">OPTION B · DECK</div><h3>The proposal queue</h3><p>Proposals are a persisted queue with an unread count in the rail, fetched on launch. Keys: <kbd>1</kbd> apply, <kbd>2</kbd> adjust (opens the Mesh editor prefilled), <kbd>3</kbd> decline with a reason (an Action, so the backend forgets it too). The approval step focuses Reject; Apply needs a deliberate press.</p><div class="trade">Trade-off: none; this is the persistence fix with keys on top.</div></article>
+          <article class="opt rec"><div class="k">OPTION C · LEDGER</div><h3>The proposal as a case</h3><p>Every card reads: the problem with counts ("6 CI failures in Unresolved this week"); the evidence (the messages, by subject, with hover previews); the proposed change in one verb-plus-noun line ("Route GitHub ci_activity with a failed conclusion to Find: Do; the rest to Filed"); options considered and rejected; the simulation ("would change 14 messages: 6 to Find, 8 to Filed; 0 currently in Finds; no Never Hidden sender touched"); the DSL diff under a disclosure; how success will be judged ("Unresolved from GitHub should fall to 0").</p><div class="trade">Trade-off: longer cards; the disclosure keeps the diff out of the way.</div></article>
+        </div>
+        <figure class="wf">
+          <div class="wire"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="chip">Work · Act</span><span class="search">Search or ask…</span><span class="right"><span class="sub">Director · 2 proposals</span></span></div>
+            <div class="body one">
+              <div class="pane"><div class="card sand new rel"><span class="tag">STARTS WITH AN ANSWER</span><div class="k">Since Tuesday</div>I noticed two patterns worth a rule. Six GitHub CI failures landed in Unresolved because the GitHub Mesh has no route for <code>ci_activity</code>; and you corrected deals@retailer to Spoil four times.</div>
+                <div class="card new rel"><span class="tag">PROPOSAL 1 OF 2 · CASE FORMAT</span><div class="h">Route failed GitHub CI runs to a Find, pass them to Filed <small>GitHub Notifications v7 → v8</small></div>
+                  <div class="stack">
+                    <div class="msg"><b>Problem.</b> 6 messages in Unresolved this week, all <code>X-GitHub-Reason: ci_activity</code>.</div>
+                    <div class="msg"><b>Evidence.</b> "Build failed: main #2291", "Build failed: main #2289", 4 more <span class="btn ghost">show</span></div>
+                    <div class="msg you"><b>Change.</b> WHEN header reason is ci_activity: IF subject CONTAINS "failed" → Find: Do; ELSE → Filed.</div>
+                    <div class="msg"><b>Considered.</b> Filing all CI mail (would hide failures); a Signal-only route (too costly at 60 a day).</div>
+                    <div class="msg"><b>Simulation.</b> Would change <b>14</b> messages: 6 to Find, 8 to Filed. 0 currently in Finds. No Never Hidden sender touched. No new judge calls.</div>
+                    <div class="msg"><b>Success.</b> GitHub mail in Unresolved falls to 0 next week.</div>
+                  </div>
+                  <div class="btns"><span class="btn pri">Apply rule <kbd>1</kbd></span><span class="btn">Adjust… <kbd>2</kbd></span><span class="btn ghost">Decline… <kbd>3</kbd></span><span class="btn ghost">Show the diff</span></div>
+                </div>
+                <div class="bar2"><span class="sub">Chat, collapsed ▸</span> <span class="search" style="flex:1">Ask the Director… (⌘↵ to send)</span> <span class="btn ghost">Stop</span></div>
+              </div>
+            </div></div>
+          <figcaption>Options A, B and C together: the Director opens with what it noticed, each proposal reads as a case with evidence and a simulation, and the verdict keys carry the queue.</figcaption>
+        </figure>
+        <div class="evidence"><b>What the evidence says.</b> Wroblewski: "people regularly struggle with knowing what to ask", suggested questions did the heavy lifting, citations give a trust boost, and the agent's work should be collapsed with each step linked to its result; a Director rail item competing with Finds is a bolted-on feature. Femke van Schoonhoven: proposals as "options compared"; approval must surface judgment, not lint, or "people will route around it". Sharon Onyinye: case-study shape. Zander Whitehurst: verb plus noun and "Apply rule", not "Approve". Bansal et al.: explanations raise acceptance whether right or wrong, so the card leads with counts and the simulation rather than persuasion. Dietvorst: an "Adjust" affordance restores use; the IKEA effect says people value rules they finished themselves. Notion Mail's sample-and-tick and Front's example approval preview matches before a rule goes live. Kole Jain: chain the tiny decisions Notion-style with a skip, and guard model-generated UI the way vibe-coded UI needs guarding, since AI "has a hard time" with the invisible layer of states and tooltips: the Director emits DSL and copy, never colour, emoji or layout, and each count appears once.</div>
+        <div class="rec-box"><div><b>Recommendation: all three, in this order: B (persistence and keys), C (the card), then A (the opening note and inline placement).</b> The simulation already exists (<code>simulate_mesh</code>); the card calls it on arrival. The Director's prompt already tells it to simulate before proposing; the card makes that visible.</div><div class="meta"><span>Effort M–L</span><span>2 Actions: decline, opening note</span><span>Fixes #8, #10, #12, #20</span></div></div>
+        <div class="pick" data-pick="f8"><span class="lab">Your pick</span><label><input type="radio" name="p-f8" value="A"> A</label><label><input type="radio" name="p-f8" value="B"> B</label><label><input type="radio" name="p-f8" value="C"> C</label><label><input type="radio" name="p-f8" value="rec"> All three as recommended</label><input type="text" id="note-f8" placeholder="Notes (optional)"><span class="st" id="st-f8"></span></div>
+      </section>
+
+      <!-- FLOW 9 -->
+      <section class="flow" id="f9">
+        <div class="eyebrow">Flow 9 · Meshes</div>
+        <h2>Editing a rule by hand</h2>
+        <div class="today"><b>Today.</b> A text editor with live parse, line markers, a change note, version diffs, Preview impact with cost, and a hold before a Spoil-proposing Mesh can act. The line-number gutter drifts once the Mesh scrolls <span class="sev sev2">2</span>. The DSL is learnt from a twenty-line syntax box; no completion, no hover on a Signal, no match counts <span class="sev sev2">2</span>. Nothing shows precedence between Meshes; with ten, the user cannot see which wins <span class="sev sev2">2</span>. The mock parser in the browser does not understand WHEN blocks.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · DECK</div><h3>The live-matching editor</h3><p>Validate on blur, not per keystroke. Beside each route, "matches 118 now" with the first three subjects on hover; a route matching zero or thousands says so before Apply. Hover a Signal name for its definition and calibration; <kbd>⌘K</kbd> in the editor inserts facts, headers and Signals from a list. The gutter scrolls with the text.</p><div class="trade">Trade-off: per-route counts need a simulation per parse; debounce to blur and cache by text hash.</div></article>
+          <article class="opt rec"><div class="k">OPTION B · BRIEF</div><h3>Plain language in, DSL out</h3><p>A "Describe the rule" box above the editor: "file GitHub CI passes, find the failures". The Director drafts the DSL beside it with the simulation; the user edits and applies. The text stays the source of truth; the description is a starting point.</p><div class="trade">Trade-off: a model call per draft; the Director already has the tools.</div></article>
+          <article class="opt"><div class="k">OPTION C · LEDGER</div><h3>Structure across Meshes</h3><p>A Structure view over all Meshes: evaluation order, which Mesh decides a sample message, decisions and corrections per Mesh, per-rule precision, a link from every Why card to the version diff that decided.</p><div class="trade">Trade-off: most useful past five Meshes; today there are three.</div></article>
+        </div>
+        <figure class="wf">
+          <div class="wire"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="chip">Work · Act</span><span class="search">Search or ask…</span><span class="right"><span class="sub">GitHub Notifications · v8 draft</span></span></div>
+            <div class="body two">
+              <div class="pane"><div class="bar2 new rel"><span class="tag">DESCRIBE</span><span class="search" style="flex:1">File GitHub CI passes, find the failures</span><span class="btn">Draft it</span></div>
+                <div class="card" style="font-family:var(--mono);font-size:10.5px;line-height:1.5">MESH "GitHub Notifications" v8<br>WHEN header X-GitHub-Reason IS "ci_activity"<br>&nbsp;&nbsp;IF subject CONTAINS "failed" → Find: Do <span class="chip moss new">matches 6 now</span><br>&nbsp;&nbsp;ELSE → Filed <span class="chip moss">matches 8 now</span><br>END<br>IF header X-GitHub-Reason IS "review_requested" AND review_requested@v3 > .80 → Find: Respond <span class="chip">matches 3</span><br>ELSE → Filed <span class="chip">matches 41</span></div>
+                <div class="sub">Valid: 4 routes, 1 guard, scope Dig Group "Work". Checked on blur.</div>
+                <div class="btns"><span class="btn">Preview impact <kbd>⌘↵</kbd></span><span class="btn pri">Apply as v8 <kbd>⌘S</kbd></span><span class="btn ghost">Keep v7</span></div>
+              </div>
+              <div class="pane dim"><div class="h">Simulation <small>last 30 days</small></div>
+                <div class="stack"><div class="bar2">Unchanged <span class="fill"><i style="width:90%"></i></span> 1,204</div><div class="bar2">Changed <span class="fill"><i style="width:8%"></i></span> 14</div><div class="msg">Unresolved → Find: Do · 6</div><div class="msg">Unresolved → Filed · 8</div><div class="msg">New judge calls · 0 · $0.00</div></div>
+                <div class="card sand new rel"><span class="tag">HOVER A SIGNAL</span><div class="k">review_requested@v3</div>"The sender asks the recipient by name to review something." Calibrated on 1,200 messages · agreement 91%.</div>
+              </div>
+            </div></div>
+          <figcaption>Options A and B: a description box that drafts the DSL, per-route match counts beside the text, validation on blur, hover definitions for Signals, and the simulation alongside.</figcaption>
+        </figure>
+        <div class="evidence"><b>What the evidence says.</b> Wroblewski's inline-validation study: validate after the field, only where errors are likely, keep success marks; and "people don't know how to guide it", so plain language in with the rewrite visible teaches the grammar by refinement. Zander Whitehurst: learn by doing, inside your own files; live matching in Observe is the sandbox. Kulesza: the top information need was "what will happen if I change this"; per-route counts answer it before commit. Notion and Front previewed matches before a rule went live; Shortwave lists every rule. The IKEA effect: let the Director start the rule and the user finish it.</div>
+        <div class="rec-box"><div><b>Recommendation: A and B; C when there are more than five Meshes.</b> Match counts come from the existing detailed simulation, keyed by route. The description box calls the Director with the existing update-mesh tooling but returns text into the editor instead of a proposal. Fix the gutter first; it is a CSS change.</div><div class="meta"><span>Effort M</span><span>Frontend + 1 read</span><span>Fixes gutter, DSL learning</span></div></div>
+        <div class="pick" data-pick="f9"><span class="lab">Your pick</span><label><input type="radio" name="p-f9" value="A"> A</label><label><input type="radio" name="p-f9" value="B"> B</label><label><input type="radio" name="p-f9" value="C"> C</label><label><input type="radio" name="p-f9" value="rec"> A + B as recommended</label><input type="text" id="note-f9" placeholder="Notes (optional)"><span class="st" id="st-f9"></span></div>
+      </section>
+
+      <!-- FLOW 10 -->
+      <section class="flow" id="f10">
+        <div class="eyebrow">Flow 10 · Settings</div>
+        <h2>The four tabs, and the seams between them</h2>
+        <div class="today"><b>Today.</b> The tabs are the clearest surface in the app. Gaps: no reconnect (Flow 1); no <kbd>⌘,</kbd>; "Everything here is saved through the Action layer" and "The Action layer gave no count" are system-centric; the Mail rules tab says "You edit this list; Riddle cannot" although the Director can add to it after approval <span class="sev sev2">2</span>; the notification threshold is an unexplained number <span class="sev sev2">2</span>; free-text model ids are validated only by Probe; "Review and relaunch" has no relaunch <span class="sev sev2">2</span>.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · ANY DIRECTION</div><h3>Fix the seams</h3><p><kbd>⌘,</kbd> opens Settings. Every "change this in Settings" phrase in the app is a link to the field. A copy pass removes system nouns: "Saved and listed in Activity", "Riddle could not count these messages; try again". The threshold is explained with examples from the user's own mail ("P82 was Jamie's review request; P40 was a newsletter") and a preview: "last week this would have notified you 4 times". Model ids get a picker fed by a probe. The Never Hidden copy says what the Director may do. "Your corrections" lists sender and domain rules (Flow 6).</p><div class="trade">Trade-off: none; these are seams.</div></article>
+          <article class="opt"><div class="k">OPTION B · DECK</div><h3>Search and ownership</h3><p>A search field that hides non-matching settings; sections regrouped by ownership: this app, this account, the rules. Useful once settings outgrow four tabs.</p><div class="trade">Trade-off: premature at the current size.</div></article>
+        </div>
+        <div class="evidence"><b>What the evidence says.</b> The house playbook: settings cross-links as navigation objects; <kbd>⌘,</kbd>; toggles, not checkboxes. Femke van Schoonhoven: a control must mean one clear thing. Spool: current knowledge is the user's, not the team's; "Action layer" is the team's word. Amershi G18: notify about changes, which the Update Preview already does well.</div>
+        <div class="rec-box"><div><b>Recommendation: A.</b> The threshold preview is a count over last week's Finds by priority, which the store has.</div><div class="meta"><span>Effort S</span><span>Frontend + copy</span><span>Fixes #19 and the seams</span></div></div>
+        <div class="pick" data-pick="f10"><span class="lab">Your pick</span><label><input type="radio" name="p-f10" value="A"> A</label><label><input type="radio" name="p-f10" value="B"> B</label><label><input type="radio" name="p-f10" value="rec"> As recommended</label><input type="text" id="note-f10" placeholder="Notes (optional)"><span class="st" id="st-f10"></span></div>
+      </section>
+
+      <!-- FLOW 11 -->
+      <section class="flow" id="f11">
+        <div class="eyebrow">Flow 11 · Search and the palette</div>
+        <h2>Ask Riddle, search, and finding any command</h2>
+        <div class="today"><b>Today.</b> "Ask Riddle" guesses from a regex: <code>is:unread</code>, <code>show me everything from adam</code> and <code>find the receipt</code> all go to the Director and are sent at once, at real cost, with no chance to edit <span class="sev sev3">3</span>. The hint is 11 px text. <kbd>g</kbd>-chords and <kbd>t</kbd>/<kbd>u</kbd> are discoverable only from the "?" sheet; the rail shows no key hints <span class="sev sev2">2</span>. The one shortcut table driving keys and help is a strength to keep.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · ANY DIRECTION</div><h3>Search by default, ask by intent, never auto-send</h3><p>Anything with an operator or plain words searches. A trailing "?" or a leading "ask" routes to the Director but only prefills and focuses the composer. The search results page offers "Ask the Director about these 14 results" as a button. The hint becomes a visible segmented toggle: Search · Ask.</p><div class="trade">Trade-off: one more keypress for a question; it is the keypress that costs money.</div></article>
+          <article class="opt rec"><div class="k">OPTION B · DECK</div><h3>The palette that prints the keys</h3><p><kbd>⌘K</kbd> opens a palette over the same shortcut table: navigation ("Go to Finds · g f"), actions valid for the current row ("Resolve · e"), search, and "Ask the Director…" as a command. Each entry shows its key, so people graduate to the key. Invalid actions are hidden, not greyed.</p><div class="trade">Trade-off: one more surface to keep in step; it must be generated from the table, never hand-written.</div></article>
+        </div>
+        <figure class="wf">
+          <div class="wire"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="chip">Personal · Observe</span><span class="search new rel"><span class="tag">SEARCH · ASK</span>is:unread from:adam</span></div>
+            <div class="body one">
+              <div class="pane"><div class="card new rel" style="max-width:520px"><span class="tag">⌘K</span><div class="bar2"><span class="search" style="flex:1">res</span></div>
+                <div class="stack" style="margin-top:6px"><div class="bar2"><b>Resolve this Find</b><span style="margin-left:auto"><kbd>e</kbd></span></div><div class="bar2">Retype this Find<span style="margin-left:auto"><kbd>r</kbd></span></div><div class="bar2">Go to Unresolved<span style="margin-left:auto"><kbd>g</kbd> <kbd>u</kbd></span></div><div class="bar2">Search "res"<span style="margin-left:auto"><kbd>↵</kbd></span></div><div class="bar2">Ask the Director: "res…"<span style="margin-left:auto"><kbd>⇧↵</kbd></span></div></div>
+                <div class="sub" style="margin-top:6px">Only actions valid for the selected row are listed. Keys shown are the same ones the "?" sheet documents.</div></div>
+              </div>
+            </div></div>
+          <figcaption>Options A and B: a visible Search · Ask toggle on the box, and a palette generated from the one shortcut table that prints the key beside every entry.</figcaption>
+        </figure>
+        <div class="evidence"><b>What the evidence says.</b> Superhuman's and Raycast's palettes print the shortcut beside every entry and users graduate to the key; Superhuman boosts commands valid in the current state and hides the rest. Maggie Appleton: a command bar is only useful if it finds things by the words people actually use. Spool: search is where people go when links have failed them; a misrouted search is a scent failure at real cost. Wroblewski: suggested questions do the heavy lifting, so the results page can suggest the question. Kole Jain, designing a macOS utility: a floating search that appears where you need it "and then immediately get out of the way", and a shortcut cheat sheet in Help because shortcuts are "very powerful but also easy to forget".</div>
+        <div class="rec-box"><div><b>Recommendation: A and B.</b> The palette is a view over <code>shortcuts.ts</code> and the per-page action tables that already exist; the routing fix is a few lines in the search box.</div><div class="meta"><span>Effort S–M</span><span>Frontend only</span><span>Fixes #6, discoverability</span></div></div>
+        <div class="pick" data-pick="f11"><span class="lab">Your pick</span><label><input type="radio" name="p-f11" value="A"> A</label><label><input type="radio" name="p-f11" value="B"> B</label><label><input type="radio" name="p-f11" value="rec"> A + B as recommended</label><input type="text" id="note-f11" placeholder="Notes (optional)"><span class="st" id="st-f11"></span></div>
+      </section>
+
+      <!-- FLOW 12 -->
+      <section class="flow" id="f12">
+        <div class="eyebrow">Flow 12 · Notifications and rhythm</div>
+        <h2>When Riddle should interrupt, and when it should wait</h2>
+        <div class="today"><b>Today.</b> One global priority threshold; a notification for every Find at or above it; a Test button that works. Nothing batches; nothing distinguishes an allow-listed sender from a threshold; the badge counts Finds.</div>
+        <div class="options">
+          <article class="opt rec"><div class="k">OPTION A · BRIEF</div><h3>Allow-list alerts, a brief for the rest</h3><p>Immediate notifications only for Never Hidden senders and for Finds of type Pay or Respond with a due date inside a day. Everything else waits for a brief at two or three user-chosen times (default 9:00 and 16:00): "7 need you, 5 Unresolved, 41 filed." The dock badge counts decisions pending, never messages. Notifications say the reason, not the subject, so a locked screen shows nothing private.</p><div class="trade">Trade-off: a Find raised at 10:00 waits until 16:00 unless it is allow-listed or due; that is the design.</div></article>
+          <article class="opt"><div class="k">OPTION B · MINIMAL</div><h3>The threshold, explained</h3><p>Keep the single threshold, explain it with examples from the user's mail, and preview "last week this would have notified you 4 times".</p><div class="trade">Trade-off: still a stream, not batches.</div></article>
+        </div>
+        <div class="evidence"><b>What the evidence says.</b> Fitz et al. (2019), a randomised trial: three notification batches a day improved attention, mood and control; hourly equalled no change; none at all raised anxiety. Kushlev and Dunn: three checks a day lowered stress with the same mail handled. Mark et al. (2016): notification-driven checkers fared worse. Pielot: people re-check when they fear missing something, so keep an allow-list bypass. HEY: off by default, no badge; Gmail notifies Primary only; Linear digests only what is still unread; Slack VIPs bypass quiet hours. Peak-end: the brief closes with what was handled.</div>
+        <div class="rec-box"><div><b>Recommendation: A with B's preview on the settings page.</b> The brief reuses the Summary's copy; the schedule is two settings fields; allow-listing is the existing Never Hidden list plus the due-date rule.</div><div class="meta"><span>Effort S–M</span><span>Frontend + a scheduler in the system layer</span><span>Fixes the threshold, adds rhythm</span></div></div>
+        <div class="pick" data-pick="f12"><span class="lab">Your pick</span><label><input type="radio" name="p-f12" value="A"> A</label><label><input type="radio" name="p-f12" value="B"> B</label><label><input type="radio" name="p-f12" value="rec"> As recommended</label><input type="text" id="note-f12" placeholder="Notes (optional)"><span class="st" id="st-f12"></span></div>
+      </section>
+
+      <section id="applied">
+        <div class="eyebrow">What shipped</div>
+        <h2>Applied on 25 and 26 September 2026</h2>
+        <p>The recommended options were built into the desktop client over two days: first all of Phase 0 and Phase 1 and the parts of Phases 2 and 3 that needed no engine change, then the rest with the engine work behind it. The flows above keep the full argument; this list is what a build from those days contains.</p>
+        <ul class="applied-list">
+          <li><b>Phase 0, basics.</b> "Sign in again" on an account, with the auth error landing on it (the backend reconnects an existing account and keeps its history); the zero-account gate on the Summary and the Task Centre; the digest sentence gone; the keyboard dead end on Finds fixed structurally; <kbd>f</kbd> opens the type picker and <kbd>s</kbd> the snooze picker everywhere; Approve and Send lose autofocus and the dialogs read verb plus noun; selectable text in answers, Finds, Why cards and messages; one name per Action ("Mark as Filed" on the Why card, "Not important" only for a Find); every toast names the Gmail effect; proposals fetched on launch and Decline reaches the backend as an Action; operators always search and questions never auto-send; the Mesh editor gutter scrolls with the text.</li>
+          <li><b>Phase 1, seeing.</b> Reason-first rows on Finds with a rule chip, and the Why card leads with the sentence; the rail regrouped into Mail, Rules and Director with a gloss and its key on every item, a sieve for Meshes and an archive box for Spoil; the rung beside the sync state in the account switcher; one list model with a preview pane on Inbox, Spoil and Contamination, <kbd>n</kbd>/<kbd>p</kbd> and "3 of 41" on the message page, toolbar buttons that name their target; the Summary follows the switcher and reads as a brief with Start review; sample mail on first run with the banner, and three pull tips instead of a tour.</li>
+          <li><b>From Phases 2 and 3.</b> The scoped correction sheet on Spoil and Contamination (this message · this sender); Unresolved with a type picker on <kbd>f</kbd>, a teaching line after each decision, bulk decide, and the sender cluster header with Decide all; the proposal queue with <kbd>1</kbd> apply, <kbd>2</kbd> adjust, <kbd>3</kbd> decline and the case-format card with Preview impact; the live-matching Mesh editor with ⌘K insert and describe-then-draft; Settings seams (⌘, opens Settings, the threshold explained with the user's own Finds, plain-words copy, a glossary in the help sheet); Gmail labels by name; thread collapse-all and jump-to-latest.</li>
+          <li><b>Second wave, 26 September.</b> The trust card on the Summary from real store counts (decisions, corrections, undos, what would have been archived, per-rule precision) and the seducible-moment offer that waits for the next clean run; the Shadow review list with Agree and Disagree per row, which is the first thing that ever recorded agreement for a Shadow Mesh; a rule the user keeps reversing steps back to Shadow and says so; per-rule autonomy through an <code>Autonomy:</code> header that the projection gate honours, with the cap shown on the list, the Structure tab and the account page; Spoil grouped by sender with "Not Spoil for this sender" that restores and writes a one-line rule into a "Your corrections" Mesh listed in Settings; brief-mode notifications (allow-list now, a brief at chosen times, reason never subject) and a dock badge that counts decisions; the ⌘K palette generated from the shortcut table and what the page has bound; and the token, spacing and type-scale pass with wider dark-mode layers.</li>
+          <li><b>Third wave, 26 September.</b> The client stopped guessing what the store knows: a message row carries its Shadow proposal and the user's Agree or Disagree mark, and a disagreement keeps the proposal on the review list beside the decision; an account says what Sift does to its mailbox and what holds it (autonomy, or an unarmed dev build); a group names the rules that use it; every outcome carries its Activity sentence and the entities it touched, so the toast and the cache refresh come from the same answer; a Mesh that stepped back records when and on what counts, and any status the user chooses clears it; the rule's precision row says whether the engine's demotion rule fired. Search, the plan cache for applying a Mesh to history and the key-prefix reads were made index-friendly on the way.</li>
+          <li><b>Still open.</b> The trust card's "would have archived" counts Spoil decisions held below Act; a per-message audit of what projection would have written is a later refinement. Per-rule autonomy is a cap, not a promotion ladder per rule. The demo mailbox has no demoted rule to show.</li>
+        </ul>
+      </section>
+
+      <section id="sequence">
+        <div class="eyebrow">The sequence</div>
+        <h2>What to build first, whichever direction wins</h2>
+        <p>Spool's Kano reading and Showalter's 90 percent trap say the same thing: the basics earn only neutral when present but frustrate when absent, so they come first. Phase 0 is the same under every direction. Phases 1 to 3 follow the recommended blend; a different direction reorders 1 and 2.</p>
+        <div class="phases">
+          <div class="phase"><b>Phase 0 · Basics (about a week)</b><ul><li>"Sign in again" and the auth error landing on it</li><li>Zero-account gate on Summary and Task Centre; drop the digest line</li><li>Keyboard dead end on Finds; <code>f</code> opens the picker; <code>s</code> opens the picker on messages</li><li>Approve and Send lose autofocus; "Are you sure" becomes verb plus noun</li><li>Selectable text in answers, Finds and Why cards</li><li>One name per Action; toast suffix with the Gmail effect</li><li>Proposals fetched on launch; Dismiss reaches the backend</li><li>Operators always search; questions never auto-send</li><li>The Mesh editor gutter</li></ul></div>
+          <div class="phase"><b>Phase 1 · Seeing (two to three weeks)</b><ul><li>Reason-first rows and the rule chip; Why card leads with the sentence</li><li>Regrouped rail, glosses, icons; rung chip on the account switcher</li><li>One list model: preview pane, n/p, named toolbar targets</li><li>Summary follows the switcher; the brief copy</li><li>Sample mailbox on first run with the banner and three pull tips</li></ul></div>
+          <div class="phase"><b>Phase 2 · Teaching (three to four weeks)</b><ul><li>Scoped correction sheet and "Your corrections"</li><li>Unresolved card with verdict keys, guess below the summary, cluster offer, teaching line</li><li>Proposal queue with keys; the case-format card with simulation</li><li>Live-matching Mesh editor; describe-then-draft</li><li>Trust card with per-rule precision; the seducible-moment offer; Shadow review with Agree/Disagree</li></ul></div>
+          <div class="phase"><b>Phase 3 · Rhythm and polish</b><ul><li>Allow-list alerts and the twice-daily brief; badge counts decisions</li><li>The palette over the shortcut table</li><li>Spoil by sender; thread collapse-all and jump-to-latest</li><li>Settings seams; threshold preview; model picker</li><li>Semantic tokens and the spacing ladder; one type scale with nothing over 24 px in dense views</li><li>The palette as four neutral layers plus one accent ramp; dark mode with double the distance between layers</li><li>A tooltip on every icon and full states on every control (the invisible UI budget)</li><li>Per-rule autonomy, if Meshes multiply</li></ul></div>
+        </div>
+      </section>
+
+      <section id="metrics">
+        <div class="eyebrow">How we will know</div>
+        <h2>Outcome metrics, not satisfaction scores</h2>
+        <p>Spool's argument against NPS and Onyinye's success-first process point the same way: measure the outcome the product promises. All of these can be computed locally from Activity and shown in a private stats panel; none needs a survey.</p>
+        <div class="metrics">
+          <div class="metric"><b>Time from launch to an empty Finds list</b><i>The one-minute check-in test, measured</i></div>
+          <div class="metric"><b>Corrections per hundred classifications</b><i>Falling means the rules are learning</i></div>
+          <div class="metric"><b>Undo rate per disposition</b><i>A frustration proxy in Spool's sense; rising means surprise</i></div>
+          <div class="metric"><b>Unresolved share of incoming mail</b><i>Falling means Riddle decides more; watch it does not fall by hiding</i></div>
+          <div class="metric"><b>Proposals applied, adjusted, declined</b><i>Adjusted is the healthiest signal: people finishing the Director's rules</i></div>
+          <div class="metric"><b>Keyboard-only completion of the daily loop</b><i>Any mouse use in the review is a dead end to find</i></div>
+          <div class="metric"><b>Never Hidden violations</b><i>Must be zero, always</i></div>
+          <div class="metric"><b>Days at each rung per account</b><i>Promotion on evidence, demotion on reversals</i></div>
+        </div>
+        <p style="margin-top:16px">And two hours every six weeks watching someone triage their own mailbox with Riddle, on their machine. Reports do not count.</p>
+      </section>
+
+      <div class="footer"><span>Riddle UX study · proposals · 25 September 2026</span><span><a href="index.html" data-hub>Back to the evidence</a></span></div>
+    </main>
+  </div>
+</div>
+<script>
+(function () {
+  var IDS = ['direction','f1','f2','f3','f4','f5','f6','f7','f8','f9','f10','f11','f12'];
+  var LABELS = { direction: 'Direction', f1: '1 First run', f2: '2 Navigation and words', f3: '3 The daily loop', f4: '4 Deciding Unresolved', f5: '5 Reading mail', f6: '6 Correcting Riddle', f7: '7 Trust and autonomy', f8: '8 Director and proposals', f9: '9 Editing Meshes', f10: '10 Settings', f11: '11 Search and the palette', f12: '12 Notifications and rhythm' };
+  var KEY = 'riddle-ux-picks';
+  var state = {};
+  var $ = function (id) { return document.getElementById(id); };
+  function readLocal() { try { var raw = localStorage.getItem(KEY); if (raw) Object.assign(state, JSON.parse(raw)); } catch (e) {} }
+  function writeLocal() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+  function flash(msg) { var f = $('flash'); if (!f) return; f.textContent = msg; clearTimeout(flash.t); flash.t = setTimeout(function () { f.textContent = ''; }, 2000); }
+  function render(id) {
+    var d = state[id] || {};
+    var radios = document.querySelectorAll('input[name="p-' + id + '"]');
+    for (var i = 0; i < radios.length; i++) radios[i].checked = radios[i].value === d.choice;
+    var note = $('note-' + id); if (note && document.activeElement !== note) note.value = d.note || '';
+    var st = $('st-' + id); if (st) st.textContent = d.choice ? 'Picked ' + (d.at ? new Date(d.at).toLocaleDateString() : '') : '';
+  }
+  function renderAll() { IDS.forEach(render); var n = IDS.filter(function (id) { return state[id] && state[id].choice; }).length; var c = $('pick-count'); if (c) c.textContent = n ? n + ' of ' + IDS.length + ' picked' : 'Nothing picked yet'; }
+  function save(id) {
+    var chosen = document.querySelector('input[name="p-' + id + '"]:checked');
+    var note = $('note-' + id);
+    state[id] = { choice: chosen ? chosen.value : (state[id] && state[id].choice) || '', note: note ? note.value : '', at: new Date().toISOString() };
+    writeLocal(); renderAll(); flash('Saved in this browser');
+  }
+  function toMarkdown() {
+    var lines = ['# Riddle UX picks', '', 'Recorded ' + new Date().toLocaleString(), ''];
+    IDS.forEach(function (id) { var d = state[id]; if (!d || !d.choice) return; lines.push('- **' + LABELS[id] + '**: ' + d.choice + (d.note ? ' — ' + d.note : '')); });
+    if (lines.length === 4) lines.push('_No picks yet._');
+    return lines.join('\n');
+  }
+  function copyPicks() {
+    var md = toMarkdown();
+    var done = function () { flash('Copied as Markdown'); };
+    var fallback = function () { var ta = $('picks-out'); ta.hidden = false; ta.value = md; ta.focus(); ta.select(); flash('Select and copy the text below'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(md).then(done, fallback); else fallback();
+  }
+  function downloadPicks() {
+    var blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'riddle-ux-picks.json'; document.body.appendChild(a); a.click(); a.remove();
+  }
+  var clearArmed = false;
+  function clearPicks() {
+    if (!clearArmed) { clearArmed = true; $('clear-picks').textContent = 'Click again to clear all picks'; setTimeout(function () { clearArmed = false; $('clear-picks').textContent = 'Clear'; }, 3000); return; }
+    state = {}; writeLocal(); renderAll(); clearArmed = false; $('clear-picks').textContent = 'Clear'; flash('Cleared');
+  }
+  IDS.forEach(function (id) {
+    var radios = document.querySelectorAll('input[name="p-' + id + '"]');
+    for (var i = 0; i < radios.length; i++) radios[i].addEventListener('change', function () { save(id); });
+    var note = $('note-' + id); if (note) note.addEventListener('change', function () { save(id); });
+  });
+  $('copy-picks').addEventListener('click', copyPicks);
+  $('download-picks').addEventListener('click', downloadPicks);
+  $('clear-picks').addEventListener('click', clearPicks);
+  readLocal(); renderAll();
+})();
+</script>
+
+</body>
+</html>

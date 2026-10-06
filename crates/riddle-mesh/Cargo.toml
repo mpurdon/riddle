@@ -16,6 +16,10 @@ log.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 uuid.workspace = true
+toml.workspace = true
+ts-rs.workspace = true
 
 [dev-dependencies]
+riddle-mail.workspace = true
+riddle-signals.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

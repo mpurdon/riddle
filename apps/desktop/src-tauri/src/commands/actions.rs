@@ -3,7 +3,7 @@
 //! the `PendingAction`; the client re-invokes with `pendingId`.
 
 use crate::state::AppState;
-use riddle_core::{ActionInvocation, ActionMeta, ActionOutcome, PendingAction};
+use riddle_core::{ActionInvocation, ActionMeta, ActionOutcome, MailboxWritesState, PendingAction};
 use riddle_errors::Result;
 use riddle_store::repo;
 use tauri::State;
@@ -25,16 +25,21 @@ pub async fn invoke_action(
 }
 
 #[tauri::command]
-pub fn list_actions(state: State<'_, AppState>) -> Result<Vec<ActionMeta>> {
+pub async fn list_actions(state: State<'_, AppState>) -> Result<Vec<ActionMeta>> {
     Ok(state.runtime().list_actions())
 }
 
 #[tauri::command]
-pub fn list_pending(state: State<'_, AppState>) -> Result<Vec<PendingAction>> {
+pub async fn list_pending(state: State<'_, AppState>) -> Result<Vec<PendingAction>> {
     repo::pending::list_pending(&state.stores().index())
 }
 
 #[tauri::command]
-pub fn dev_armed(state: State<'_, AppState>) -> Result<bool> {
+pub async fn dev_armed(state: State<'_, AppState>) -> Result<bool> {
     Ok(state.runtime().is_armed())
+}
+
+#[tauri::command]
+pub async fn mailbox_writes(state: State<'_, AppState>) -> Result<MailboxWritesState> {
+    state.app.mailbox_writes()
 }

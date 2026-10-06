@@ -17,6 +17,7 @@ import { useAction } from '@/lib/useAction'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { inputClass } from '@/components/ui/Field'
+import { senderOf } from '@/components/ThreadRow'
 
 function parseAddresses(s: string): Address[] {
   return s
@@ -32,7 +33,7 @@ const fmtAddresses = (a: Address[]) => a.map((x) => (x.name ? `${x.name} <${x.em
 
 function quote(m: Message): string {
   const body = (m.bodyText ?? m.snippet).split('\n').map((l) => `> ${l}`).join('\n')
-  return `\n\nOn ${fmtDateTime(m.date)}, ${m.from.name ?? m.from.email} wrote:\n${body}\n`
+  return `\n\nOn ${fmtDateTime(m.date)}, ${senderOf(m)} wrote:\n${body}\n`
 }
 
 export function useComposerActions() {

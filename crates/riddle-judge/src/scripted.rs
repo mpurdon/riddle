@@ -402,6 +402,41 @@ impl ScriptedJudge {
                     0.15
                 }
             }
+            "donation_appeal" => {
+                if Self::any(
+                    &t,
+                    &[
+                        "donate",
+                        "donation",
+                        "fundrais",
+                        "your gift",
+                        "charity",
+                        "foundation",
+                    ],
+                ) {
+                    0.9
+                } else {
+                    0.05
+                }
+            }
+            "claims_prior_contact" => {
+                if Self::any(
+                    &t,
+                    &[
+                        "your comment",
+                        "noticed your",
+                        "saw your",
+                        "we met",
+                        "we spoke",
+                        "as discussed",
+                        "following up",
+                    ],
+                ) {
+                    0.9
+                } else {
+                    0.08
+                }
+            }
             "travel_reservation" => {
                 if Self::any(
                     &t,

@@ -472,6 +472,7 @@ mod tests {
             id: ClassificationId::new(),
             message_id: m.id.clone(),
             dig_id: m.dig_id.clone(),
+            importance: Importance::default_for(&d),
             disposition: d,
             strata: vec![],
             notify: false,
@@ -485,6 +486,7 @@ mod tests {
             shadow: false,
             created_at: chrono::Utc::now(),
             superseded_at: None,
+            series: None,
         };
         repo::classifications::record(store, &k).unwrap();
     }

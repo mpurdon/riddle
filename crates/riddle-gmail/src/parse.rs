@@ -139,6 +139,12 @@ pub fn message_from_json(dig: &DigId, m: &GmailMessage) -> Message {
             .map(|s| s.trim().to_lowercase())
             .filter(|s| s != "no"),
         reply_to: header(h, "Reply-To").and_then(parse_address),
+        extra: riddle_core::KEPT_HEADERS
+            .iter()
+            .filter_map(|name| {
+                header(h, name).map(|v| (name.to_ascii_lowercase(), v.trim().to_string()))
+            })
+            .collect(),
         authentication: header(h, "Authentication-Results")
             .map(parse_authentication_results)
             .unwrap_or_default(),
@@ -302,8 +308,14 @@ pub fn map_http_error(
     ];
     if status == 429 || reasons.iter().any(|r| rate_reasons.contains(&r.as_str())) {
         let secs = retry_after_secs.unwrap_or(60);
+        // The reason travels with the error: a per-second throttle is worth
+        // waiting out in the request, a spent daily quota is not.
+        let reason = reasons
+            .iter()
+            .find(|r| rate_reasons.contains(&r.as_str()))
+            .cloned();
         return RiddleError::rate_limited(format!("Gmail rate limit; retry after {secs}s"))
-            .with_detail(serde_json::json!({"retryAfterSeconds": secs}));
+            .with_detail(serde_json::json!({"retryAfterSeconds": secs, "reason": reason}));
     }
     match status {
         401 => RiddleError::provider_auth("Gmail rejected the credential; sign in again"),
@@ -339,6 +351,27 @@ pub fn map_http_error(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn github_headers_are_kept_for_rules() {
+        let mut raw: GmailMessage = serde_json::from_str(META).unwrap();
+        if let Some(p) = raw.payload.as_mut() {
+            p.headers.push(Header {
+                name: "X-GitHub-Reason".into(),
+                value: "ci_activity".into(),
+            });
+            p.headers.push(Header {
+                name: "X-Unrelated".into(),
+                value: "dropped".into(),
+            });
+        }
+        let m = message_from_json(&DigId::from("d"), &raw);
+        assert_eq!(
+            m.headers.extra.get("x-github-reason").map(String::as_str),
+            Some("ci_activity")
+        );
+        assert_eq!(m.headers.extra.len(), 1);
+    }
+
     use super::*;
     use riddle_core::AuthVerdict;
 

@@ -1,64 +1,31 @@
 //! Read commands: thin adapters over `riddle_app::App`'s read services.
 
 use crate::state::AppState;
+use riddle_app::dispatch::MessageFilterArgs;
 use riddle_core::*;
 use riddle_errors::Result;
+use riddle_mesh::service::MeshService;
 use riddle_store::repo;
-use serde::Deserialize;
 use tauri::State;
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageFilterArgs {
-    pub disposition: Option<String>,
-    pub find_type: Option<String>,
-    pub label: Option<String>,
-    pub query: Option<String>,
-    pub from: Option<String>,
-    pub thread_id: Option<String>,
-    pub since: Option<chrono::DateTime<chrono::Utc>>,
-    pub until: Option<chrono::DateTime<chrono::Utc>>,
-    pub stratum: Option<String>,
-    #[serde(default)]
-    pub unclassified_only: bool,
-}
-
-impl From<MessageFilterArgs> for repo::messages::MessageFilter {
-    fn from(a: MessageFilterArgs) -> Self {
-        Self {
-            disposition: a.disposition,
-            find_type: a.find_type,
-            label: a.label,
-            query: a.query,
-            from: a.from,
-            thread_id: a.thread_id,
-            since: a.since,
-            until: a.until,
-            unclassified_only: a.unclassified_only,
-            include_shadow: false,
-            stratum: a.stratum,
-        }
-    }
-}
-
 #[tauri::command]
-pub fn summary(state: State<'_, AppState>) -> Result<Summary> {
+pub async fn summary(state: State<'_, AppState>, dig_id: Option<DigId>) -> Result<Summary> {
     let since = chrono::Utc::now() - chrono::Duration::hours(24);
-    state.app.summary(since)
+    state.app.summary(since, dig_id.as_ref())
 }
 
 #[tauri::command]
-pub fn list_digs(state: State<'_, AppState>) -> Result<Vec<Dig>> {
-    state.app.list_digs()
+pub async fn list_digs(state: State<'_, AppState>) -> Result<Vec<Dig>> {
+    state.app.list_all_digs()
 }
 
 #[tauri::command]
-pub fn list_dig_groups(state: State<'_, AppState>) -> Result<Vec<DigGroup>> {
-    repo::digs::list_groups(&state.stores().index())
+pub async fn list_dig_groups(state: State<'_, AppState>) -> Result<Vec<DigGroup>> {
+    state.app.list_dig_groups()
 }
 
 #[tauri::command]
-pub fn list_messages(
+pub async fn list_messages(
     state: State<'_, AppState>,
     dig_id: Option<DigId>,
     filter: Option<MessageFilterArgs>,
@@ -71,7 +38,7 @@ pub fn list_messages(
 }
 
 #[tauri::command]
-pub fn get_message(
+pub async fn get_message(
     state: State<'_, AppState>,
     dig_id: DigId,
     message_id: MessageId,
@@ -80,7 +47,7 @@ pub fn get_message(
 }
 
 #[tauri::command]
-pub fn get_thread(
+pub async fn get_thread(
     state: State<'_, AppState>,
     dig_id: DigId,
     thread_id: ThreadId,
@@ -89,7 +56,7 @@ pub fn get_thread(
 }
 
 #[tauri::command]
-pub fn explain(
+pub async fn explain(
     state: State<'_, AppState>,
     dig_id: DigId,
     message_id: MessageId,
@@ -98,14 +65,16 @@ pub fn explain(
 }
 
 #[tauri::command]
-pub fn search(
+pub async fn search(
     state: State<'_, AppState>,
     query: String,
     dig_id: Option<DigId>,
     page: Option<PageRequest>,
+    shadow_only: Option<bool>,
 ) -> Result<Page<MessageSummary>> {
     let filter = repo::messages::MessageFilter {
         query: Some(query),
+        shadow_only: shadow_only.unwrap_or(false),
         ..Default::default()
     };
     state
@@ -113,8 +82,20 @@ pub fn search(
         .list_messages(dig_id.as_ref(), &filter, &page.unwrap_or_default())
 }
 
+/// The Priority inbox: what `Settings.priority_inbox` chooses, OR-combined.
 #[tauri::command]
-pub fn list_finds(
+pub async fn priority_inbox(
+    state: State<'_, AppState>,
+    dig_id: Option<DigId>,
+    page: Option<PageRequest>,
+) -> Result<Page<MessageSummary>> {
+    state
+        .app
+        .priority_inbox(dig_id.as_ref(), &page.unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn list_finds(
     state: State<'_, AppState>,
     status: Option<String>,
     find_type: Option<String>,
@@ -143,13 +124,13 @@ pub fn list_finds(
 }
 
 #[tauri::command]
-pub fn get_find(state: State<'_, AppState>, find_id: FindId) -> Result<Find> {
+pub async fn get_find(state: State<'_, AppState>, find_id: FindId) -> Result<Find> {
     repo::finds::get(&state.stores().index(), &find_id)?
         .ok_or_else(|| riddle_errors::RiddleError::not_found("find"))
 }
 
 #[tauri::command]
-pub fn list_activity(
+pub async fn list_activity(
     state: State<'_, AppState>,
     dig_id: Option<String>,
     actor: Option<Actor>,
@@ -171,43 +152,51 @@ pub fn list_activity(
 }
 
 #[tauri::command]
-pub fn get_activity(state: State<'_, AppState>, activity_id: ActivityId) -> Result<Activity> {
+pub async fn get_activity(state: State<'_, AppState>, activity_id: ActivityId) -> Result<Activity> {
     repo::activities::get(&state.stores().index(), &activity_id)?
         .ok_or_else(|| riddle_errors::RiddleError::not_found("activity"))
 }
 
+// Mesh reads go through the service, which gives a Mesh stored before routes
+// carried their wording its sentences on the way out.
 #[tauri::command]
-pub fn list_meshes(state: State<'_, AppState>, include_deleted: Option<bool>) -> Result<Vec<Mesh>> {
-    repo::meshes::list_latest(&state.stores().index(), include_deleted.unwrap_or(false))
+pub async fn list_meshes(
+    state: State<'_, AppState>,
+    include_deleted: Option<bool>,
+) -> Result<Vec<Mesh>> {
+    MeshService::new(state.stores().index()).list(include_deleted.unwrap_or(false))
 }
 
 #[tauri::command]
-pub fn get_mesh(state: State<'_, AppState>, mesh_id: MeshId, version: Option<u32>) -> Result<Mesh> {
-    let index = state.stores().index();
-    let m = match version {
-        Some(v) => repo::meshes::get(&index, &mesh_id, v)?,
-        None => repo::meshes::latest(&index, &mesh_id)?,
-    };
-    m.ok_or_else(|| riddle_errors::RiddleError::not_found("mesh"))
+pub async fn get_mesh(
+    state: State<'_, AppState>,
+    mesh_id: MeshId,
+    version: Option<u32>,
+) -> Result<Mesh> {
+    let svc = MeshService::new(state.stores().index());
+    match version {
+        Some(v) => svc.get(&mesh_id, v),
+        None => svc.latest(&mesh_id),
+    }
 }
 
 #[tauri::command]
-pub fn mesh_versions(state: State<'_, AppState>, mesh_id: MeshId) -> Result<Vec<Mesh>> {
-    repo::meshes::versions(&state.stores().index(), &mesh_id)
+pub async fn mesh_versions(state: State<'_, AppState>, mesh_id: MeshId) -> Result<Vec<Mesh>> {
+    MeshService::new(state.stores().index()).versions(&mesh_id)
 }
 
 #[tauri::command]
-pub fn list_signals(state: State<'_, AppState>) -> Result<Vec<Signal>> {
+pub async fn list_signals(state: State<'_, AppState>) -> Result<Vec<Signal>> {
     repo::signals::list(&state.stores().index())
 }
 
 #[tauri::command]
-pub fn signal_versions(state: State<'_, AppState>, name: String) -> Result<Vec<Signal>> {
+pub async fn signal_versions(state: State<'_, AppState>, name: String) -> Result<Vec<Signal>> {
     repo::signals::versions(&state.stores().index(), &name)
 }
 
 #[tauri::command]
-pub fn signal_evaluations(
+pub async fn signal_evaluations(
     state: State<'_, AppState>,
     dig_id: DigId,
     message_id: MessageId,
@@ -216,17 +205,17 @@ pub fn signal_evaluations(
 }
 
 #[tauri::command]
-pub fn list_strata(state: State<'_, AppState>) -> Result<Vec<Stratum>> {
+pub async fn list_strata(state: State<'_, AppState>) -> Result<Vec<Stratum>> {
     repo::strata::list(&state.stores().index(), false)
 }
 
 #[tauri::command]
-pub fn list_expeditions(state: State<'_, AppState>) -> Result<Vec<Expedition>> {
+pub async fn list_expeditions(state: State<'_, AppState>) -> Result<Vec<Expedition>> {
     repo::expeditions::list(&state.stores().index(), 100)
 }
 
 #[tauri::command]
-pub fn get_expedition(
+pub async fn get_expedition(
     state: State<'_, AppState>,
     expedition_id: ExpeditionId,
 ) -> Result<Expedition> {
@@ -235,18 +224,18 @@ pub fn get_expedition(
 }
 
 #[tauri::command]
-pub fn list_drafts(state: State<'_, AppState>, dig_id: DigId) -> Result<Vec<Draft>> {
+pub async fn list_drafts(state: State<'_, AppState>, dig_id: DigId) -> Result<Vec<Draft>> {
     let store = state.stores().dig(&dig_id)?;
     repo::drafts::list(&store)
 }
 
 #[tauri::command]
-pub fn get_user_profile(state: State<'_, AppState>) -> Result<UserProfile> {
+pub async fn get_user_profile(state: State<'_, AppState>) -> Result<UserProfile> {
     repo::user_profile::get(&state.stores().index())
 }
 
 #[tauri::command]
-pub fn read_trace(
+pub async fn read_trace(
     state: State<'_, AppState>,
     dig_id: DigId,
     trace_id: TraceId,
@@ -255,7 +244,7 @@ pub fn read_trace(
 }
 
 #[tauri::command]
-pub fn recent_traces(
+pub async fn recent_traces(
     state: State<'_, AppState>,
     dig_id: Option<DigId>,
     limit: Option<u32>,
@@ -266,13 +255,16 @@ pub fn recent_traces(
 }
 
 #[tauri::command]
-pub fn usage_summary(state: State<'_, AppState>, since_days: Option<u32>) -> Result<UsageSummary> {
+pub async fn usage_summary(
+    state: State<'_, AppState>,
+    since_days: Option<u32>,
+) -> Result<UsageSummary> {
     let since = chrono::Utc::now() - chrono::Duration::days(since_days.unwrap_or(30) as i64);
     state.app.usage_summary(since)
 }
 
 #[tauri::command]
-pub fn trace_stats(
+pub async fn trace_stats(
     state: State<'_, AppState>,
     dig_id: Option<DigId>,
     since_days: Option<u32>,
@@ -302,4 +294,15 @@ pub fn trace_stats(
         total.avg_judge_ms /= n as f64;
     }
     Ok(total)
+}
+
+#[tauri::command]
+pub async fn trust_stats(
+    state: State<'_, AppState>,
+    dig_id: Option<DigId>,
+    since_days: Option<u32>,
+) -> Result<TrustStats> {
+    state
+        .app
+        .trust_stats(since_days.unwrap_or(7), dig_id.as_ref())
 }

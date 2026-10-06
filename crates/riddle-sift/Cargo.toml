@@ -18,9 +18,11 @@ serde_json.workspace = true
 log.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
 uuid.workspace = true
 regex.workspace = true
 
 [dev-dependencies]
+riddle-mail.workspace = true
 riddle-judge.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

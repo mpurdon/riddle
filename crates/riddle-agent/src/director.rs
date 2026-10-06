@@ -19,8 +19,8 @@ use crate::tools;
 use parking_lot::Mutex;
 use riddle_ai::{LlmMessage, PromptName, PromptStore};
 use riddle_core::{
-    Clock, Conversation, ConversationId, Dig, DigId, EventSink, PrivacyMode, RiddleEvent, Turn,
-    TurnRole, UserProfile,
+    Clock, Conversation, ConversationId, Dig, DigId, EventSink, PrivacyMode, RiddleEvent,
+    ToolAllowance, Turn, TurnFailure, TurnRole, UserProfile,
 };
 use riddle_errors::{Result, RiddleError};
 use riddle_observability::{rerror, rinfo, rwarn, Category, Timed};
@@ -29,10 +29,17 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// The round limit under "keep going": a ceiling against a turn that loops
+/// forever, far past any turn doing useful work.
+const KEEP_GOING_ROUNDS: u32 = 200;
+
 #[derive(Debug, Clone)]
 pub struct DirectorConfig {
     /// The Director tier model; `None` uses the `Llm`'s default.
     pub model_id: Option<String>,
+    /// Tool rounds per turn. A backstop against a runaway turn, not the
+    /// budget: cost and tokens are. At 12 it ended ordinary work (find a
+    /// message, explain it, simulate four drafts) mid-proposal.
     pub max_iterations: u32,
     pub max_turn_cost_usd: Option<f64>,
     pub max_turn_tokens: Option<u64>,
@@ -45,7 +52,7 @@ impl Default for DirectorConfig {
     fn default() -> Self {
         Self {
             model_id: None,
-            max_iterations: 12,
+            max_iterations: 40,
             max_turn_cost_usd: Some(0.50),
             max_turn_tokens: Some(150_000),
             max_tokens_per_call: 4096,
@@ -119,6 +126,57 @@ impl Director {
         Ok(id)
     }
 
+    /// Run the last user message again after a failed turn: the failed
+    /// Director turns come off the conversation and the turn starts afresh.
+    /// The client calls this when the wait a provider named has passed, or
+    /// when the person presses Retry.
+    pub fn retry(self: &Arc<Self>, conversation_id: &ConversationId) -> Result<()> {
+        self.begin_retry(conversation_id)?;
+        let me = self.clone();
+        let cid = conversation_id.clone();
+        tokio::spawn(async move {
+            me.run_turn(&cid, false).await;
+        });
+        Ok(())
+    }
+
+    /// `retry`, awaiting the turn; for tests and the CLI.
+    pub async fn retry_and_wait(self: &Arc<Self>, conversation_id: &ConversationId) -> Result<()> {
+        self.begin_retry(conversation_id)?;
+        self.run_turn(conversation_id, false).await;
+        Ok(())
+    }
+
+    /// Validate first, then take the in-flight slot only around the write
+    /// that commits to the turn, so no error path has a slot to give back.
+    fn begin_retry(&self, id: &ConversationId) -> Result<()> {
+        let index = self.stores.index();
+        let mut conv = repo::conversations::get(&index, id)?
+            .ok_or_else(|| RiddleError::not_found("no such conversation"))?;
+        while conv
+            .turns
+            .last()
+            .is_some_and(|t| t.role == TurnRole::Director && t.failure.is_some())
+        {
+            conv.turns.pop();
+        }
+        if !conv.turns.last().is_some_and(|t| t.role == TurnRole::User) {
+            return Err(RiddleError::invalid(
+                "nothing to retry: the last turn is not a message of yours that failed",
+            ));
+        }
+        conv.updated_at = self.clock.now();
+        let mut busy = self.in_flight.lock();
+        if busy.contains(id) {
+            return Err(RiddleError::conflict(
+                "the Director is still working on that conversation",
+            ));
+        }
+        repo::conversations::upsert(&index, &conv)?;
+        busy.insert(id.clone());
+        Ok(())
+    }
+
     fn begin(&self, req: SendRequest) -> Result<(ConversationId, bool)> {
         let message = req.message.trim().to_string();
         if message.is_empty() {
@@ -139,6 +197,7 @@ impl Director {
                 prompt_version: None,
                 created_at: now,
                 updated_at: now,
+                allowance: None,
             },
         };
         {
@@ -153,6 +212,9 @@ impl Director {
         if !req.dig_ids.is_empty() {
             conv.dig_ids = req.dig_ids;
         }
+        if let Some(asked) = crate::allowance::parse(&message) {
+            conv.allowance = Some(crate::allowance::fold(conv.allowance.take(), asked));
+        }
         conv.turns.push(Turn {
             role: TurnRole::User,
             content: message,
@@ -161,6 +223,8 @@ impl Director {
             input_tokens: 0,
             output_tokens: 0,
             cost_usd: None,
+            failure: None,
+            stopped_early: None,
         });
         conv.updated_at = now;
         if let Err(e) = repo::conversations::upsert(&index, &conv) {
@@ -204,7 +268,7 @@ impl Director {
         let index = self.stores.index();
         let conv = repo::conversations::get(&index, conversation_id)?
             .ok_or_else(|| RiddleError::not_found("no such conversation"))?;
-        let all_digs = repo::digs::list(&index).unwrap_or_default();
+        let all_digs = repo::digs::list_enabled(&index).unwrap_or_default();
         let (digs, excluded) = scope_digs(&all_digs, &conv.dig_ids)?;
         let privacy = riddle_privacy::most_restrictive(digs.iter().map(|d| d.privacy));
         if !riddle_privacy::allowed(privacy, riddle_privacy::Purpose::Llm) {
@@ -249,13 +313,7 @@ impl Director {
                 None
             },
             model_id: self.config.model_id.clone(),
-            budget: LoopBudget {
-                max_iterations: self.config.max_iterations,
-                max_tool_calls: None,
-                max_cost_usd: self.config.max_turn_cost_usd,
-                max_tokens: self.config.max_turn_tokens,
-                deadline: None,
-            },
+            budget: self.budget(conv.allowance.as_ref()),
             read_untrusted: conv.read_untrusted,
             cancel: None,
             max_tokens_per_call: self.config.max_tokens_per_call,
@@ -295,6 +353,26 @@ impl Director {
         self.record_outcome(&conv.id, outcome, &prompt.version)
     }
 
+    /// The turn's limits, widened by what the person allowed. "Keep going"
+    /// lifts the round limit to a ceiling no useful turn reaches; the cost
+    /// and token limits hold unless a dollar figure was given.
+    fn budget(&self, allowance: Option<&ToolAllowance>) -> LoopBudget {
+        let a = allowance.cloned().unwrap_or_default();
+        let calls = a.next_turn_tool_calls;
+        LoopBudget {
+            max_iterations: if a.keep_going {
+                KEEP_GOING_ROUNDS
+            } else {
+                // A tool-call allowance needs the rounds to spend it in.
+                self.config.max_iterations.max(calls.map_or(0, |n| n + 1))
+            },
+            max_tool_calls: calls,
+            max_cost_usd: a.next_turn_cost_usd.or(self.config.max_turn_cost_usd),
+            max_tokens: self.config.max_turn_tokens,
+            deadline: None,
+        }
+    }
+
     fn record_outcome(
         &self,
         id: &ConversationId,
@@ -306,12 +384,12 @@ impl Director {
             .ok_or_else(|| RiddleError::not_found("no such conversation"))?;
         let now = self.clock.now();
         let mut content = outcome.text;
+        let mut stopped_early = None;
         match &outcome.stop {
-            crate::tool_loop::LoopStop::BudgetExhausted(r) => {
-                content.push_str(&format!("\n\n(Stopped early: {r}.)"))
+            crate::tool_loop::LoopStop::BudgetExhausted(r) => stopped_early = Some(r.clone()),
+            crate::tool_loop::LoopStop::IterationCap => {
+                stopped_early = Some("the turn's tool limit is reached".into())
             }
-            crate::tool_loop::LoopStop::IterationCap => content
-                .push_str("\n\n(Stopped at the tool limit for one turn; ask me to continue.)"),
             crate::tool_loop::LoopStop::MaxTokens => {
                 content.push_str("\n\n(The answer was cut off at the length limit.)")
             }
@@ -328,7 +406,15 @@ impl Director {
             input_tokens: outcome.input_tokens,
             output_tokens: outcome.output_tokens,
             cost_usd: outcome.cost_usd,
+            failure: None,
+            stopped_early,
         });
+        // The next-turn part of an allowance is spent by this turn; "keep
+        // going" lasts the conversation.
+        if let Some(a) = conv.allowance.as_mut() {
+            a.next_turn_tool_calls = None;
+            a.next_turn_cost_usd = None;
+        }
         conv.read_untrusted |= outcome.read_untrusted;
         conv.model_id = Some(outcome.model_id);
         conv.prompt_version = Some(prompt_version.to_string());
@@ -342,6 +428,12 @@ impl Director {
             return;
         };
         let now = self.clock.now();
+        let retry_after_secs = e
+            .detail
+            .as_ref()
+            .and_then(|d| d.get("retryAfterSecs"))
+            .and_then(|v| v.as_u64())
+            .map(|n| n.min(u32::MAX as u64) as u32);
         conv.turns.push(Turn {
             role: TurnRole::Director,
             content: format!("I could not complete that: {}", e.message),
@@ -350,6 +442,11 @@ impl Director {
             input_tokens: 0,
             output_tokens: 0,
             cost_usd: None,
+            failure: Some(TurnFailure {
+                kind: e.kind,
+                retry_after_secs,
+            }),
+            stopped_early: None,
         });
         conv.updated_at = now;
         if let Err(pe) = repo::conversations::upsert(&index, &conv) {
@@ -476,6 +573,10 @@ fn history(conv: &Conversation, limit: usize) -> Vec<LlmMessage> {
     let start = turns.len().saturating_sub(limit.max(1));
     let mut out = Vec::new();
     for t in &turns[start..] {
+        // A failed turn is an error the person saw, not something the model said.
+        if t.failure.is_some() {
+            continue;
+        }
         match t.role {
             TurnRole::User => out.push(LlmMessage::user(t.content.clone())),
             TurnRole::Director => {

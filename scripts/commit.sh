@@ -3,6 +3,8 @@
 #
 #   scripts/commit.sh "<subject>" [<body-file>] [-- <path>...]
 #
+# CO_AUTHOR names the model in the Co-Authored-By trailer (default Claude Opus 5).
+#
 # Stages the given paths (or everything when none are given), computes wall time and token usage since the previous
 # commit (or since the build started), appends a `Build-Stats:` trailer, and
 # appends the same row to docs/BUILD_LEDGER.md so the ledger and the git log
@@ -29,7 +31,7 @@ if [ ${#PATHS[@]} -gt 0 ]; then git add -- "${PATHS[@]}"; else git add -A; fi
   echo "$STATS"
   echo "Build-Window: $SINCE -> $NOW"
   echo
-  echo "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+  echo "Co-Authored-By: ${CO_AUTHOR:-Claude Opus 5} <noreply@anthropic.com>"
 } > .build/msg
 git commit -q -F .build/msg
 echo "$NOW" > "$MARK"

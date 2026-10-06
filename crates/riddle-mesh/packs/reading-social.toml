@@ -1,0 +1,90 @@
+id = "reading-social"
+name = "Reading and social"
+version = 2
+area = "Reading"
+summary = "Newsletters you do not read are set aside; social network mail, crowdfunding updates and entertainment are Filed under their own Strata; daily reminders on a schedule become a Find that lasts the day."
+band = "general"
+
+[detect]
+gmail_categories = ["social", "updates"]
+min_messages = 10
+
+[[lists]]
+name = "social_platforms"
+description = "Social networks"
+question = "Which social networks email you?"
+default = ["linkedin.com", "nextdoor.com", "pinterest.com", "instagram.com", "facebookmail.com", "x.com", "twitter.com", "redditmail.com", "tiktok.com", "discord.com", "bsky.app", "threads.net"]
+
+[[lists]]
+name = "crowdfunding"
+description = "Crowdfunding platforms and campaigns you back"
+question = "Which crowdfunding sites or campaigns write to you?"
+default = ["kickstarter.com", "indiegogo.com", "backerkit.com"]
+
+[[lists]]
+name = "entertainment"
+description = "Streaming, sports, tickets and games"
+question = "Which streaming, sports, ticket or games services write to you?"
+default = []
+
+[[meshes]]
+band = "specific"
+rank = 35
+text = '''
+Mesh: Daily reminders
+Scope:
+All Digs
+
+ROUTES
+
+IF sender_cadence = daily AND sender_on_schedule AND personally_relevant@v1 > .75
+    → Find: Do + Replaces + Expires: end of day
+'''
+
+[[meshes]]
+rank = 10
+fallback = true
+text = '''
+Mesh: Newsletters
+Scope:
+All Digs
+
+ROUTES
+
+IF automated_sender AND newsletter@v1 > .60 AND personally_relevant@v1 < .40
+    → Spoil + Stratum: Newsletters
+ELSE IF automated_sender AND marketing@v1 > .60 AND personally_relevant@v1 < .40
+    → Spoil + Stratum: Newsletters
+'''
+
+# Before the promotion rules: a social network's mail is Social whichever
+# Gmail tab it lands in (Pinterest and Nextdoor arrive daily in Promotions).
+[[meshes]]
+rank = 6
+fallback = true
+text = '''
+Mesh: Social
+Scope:
+All Digs
+
+ROUTES
+
+IF gmail_category = social OR sender_domain IN list:social_platforms
+    → Filed + Stratum: Social
+'''
+
+[[meshes]]
+rank = 16
+fallback = true
+text = '''
+Mesh: Crowdfunding and entertainment
+Scope:
+All Digs
+
+ROUTES
+
+IF sender_domain IN list:crowdfunding
+    → Filed + Stratum: Crowdfunding
+ELSE IF sender_domain IN list:entertainment
+    → Filed + Stratum: Entertainment
+'''

@@ -41,6 +41,9 @@ pub const METADATA_HEADERS: &[&str] = &[
     "Authentication-Results",
 ];
 
+/// How often one request waits out `rateLimitExceeded` before failing.
+const MAX_THROTTLE_RETRIES: u32 = 3;
+
 pub struct GmailClient {
     http: reqwest::Client,
     tokens: Arc<TokenManager>,
@@ -81,6 +84,7 @@ impl GmailClient {
     ) -> Result<String> {
         self.limiter.acquire(units).await;
         let mut refreshed = false;
+        let mut throttled = 0;
         loop {
             let token = self.tokens.access_token().await?;
             let resp = build(&self.http, &token).send().await.map_err(|e| {
@@ -112,6 +116,31 @@ impl GmailClient {
             let err = map_http_error(status, retry_after, &text, history, self.tokens.client_id());
             if err.kind == ErrorKind::ProviderAuth {
                 self.tokens.invalidate();
+            }
+            // Gmail's per-second limit clears in seconds; one throttled fetch
+            // used to fail a whole page of the first sync. Wait as asked, a
+            // few times, before handing the error to the job's backoff.
+            // A daily quota does not clear in seconds; hand that straight to the
+            // job's backoff instead of sleeping through three retries first.
+            let daily_quota = err
+                .detail
+                .as_ref()
+                .and_then(|d| d.get("reason"))
+                .and_then(|v| v.as_str())
+                .is_some_and(|r| r == "dailyLimitExceeded" || r == "quotaExceeded");
+            if err.kind == ErrorKind::ProviderRateLimited
+                && !daily_quota
+                && throttled < MAX_THROTTLE_RETRIES
+            {
+                throttled += 1;
+                let secs = retry_after.unwrap_or(1 << throttled).min(30);
+                rdebug!(
+                    Category::Sync,
+                    "gmail rate limited; retry {throttled} in {secs}s"
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+                self.limiter.acquire(units).await;
+                continue;
             }
             return Err(err);
         }
@@ -206,7 +235,7 @@ impl GmailClient {
         match format {
             Format::Metadata => {
                 query.push(("format", "metadata".into()));
-                for h in METADATA_HEADERS {
+                for h in METADATA_HEADERS.iter().chain(riddle_core::KEPT_HEADERS) {
                     query.push(("metadataHeaders", (*h).into()));
                 }
             }

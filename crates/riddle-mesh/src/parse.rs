@@ -18,8 +18,8 @@
 //! point at it.
 
 use riddle_core::{
-    CmpOp, CreatedBy, Disposition, DispositionKind, Expr, FactValue, FindType, Guard, Mesh, MeshId,
-    MeshOutput, MeshScope, MeshStatus, NamedList, Route,
+    Autonomy, CmpOp, CreatedBy, Disposition, DispositionKind, Expiry, Expr, FactValue, FindType,
+    Guard, Importance, Mesh, MeshId, MeshOutput, MeshScope, MeshStatus, NamedList, Route,
 };
 use riddle_errors::{Result, RiddleError};
 
@@ -32,6 +32,14 @@ pub struct ParsedHeader {
     /// previous version's scope instead of silently widening to All Digs.
     pub scope_given: bool,
     pub priority: i32,
+    /// Whether the text carried a `Priority:`; without one a new Mesh takes
+    /// the first free priority and an update keeps the previous version's.
+    pub priority_given: bool,
+    /// `Autonomy: Observe | Suggest | Act`: the most this Mesh may do in the
+    /// mailbox. Absent means "as the account"; an update without the line
+    /// keeps the previous version's cap.
+    pub autonomy: Option<Autonomy>,
+    pub autonomy_given: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -211,6 +219,21 @@ fn tokenize(lines: &[(usize, &str)]) -> Result<Vec<Token>> {
                         line,
                     });
                     i = k;
+                } else if name.eq_ignore_ascii_case("list") && chars.get(j) == Some(&':') {
+                    // list:banks, a named list, read as one word.
+                    let mut k = j + 1;
+                    while k < chars.len() && is_ident(chars[k]) {
+                        k += 1;
+                    }
+                    if k == j + 1 {
+                        return Err(err(line, "list: needs a name, like list:banks"));
+                    }
+                    let list: String = chars[j + 1..k].iter().collect();
+                    out.push(Token {
+                        tok: Tok::Ident(format!("list:{}", list.to_ascii_lowercase())),
+                        line,
+                    });
+                    i = k;
                 } else {
                     out.push(Token {
                         tok: Tok::Ident(name),
@@ -349,13 +372,60 @@ impl Parser {
                 })
             }
             Tok::Ident(name) => {
-                let lower = name.to_ascii_lowercase();
+                let mut lower = name.to_ascii_lowercase();
                 if lower == "true" || lower == "false" {
                     return Err(err(line, "a bare true/false is meaningless here"));
                 }
+                // `header X-GitHub-Reason = ci_activity`
+                if lower == "header" {
+                    match self.next() {
+                        Some(Token {
+                            tok: Tok::Ident(h), ..
+                        })
+                        | Some(Token {
+                            tok: Tok::Str(h), ..
+                        }) => {
+                            lower =
+                                format!("{}{}", riddle_core::HEADER_PREFIX, h.to_ascii_lowercase());
+                        }
+                        _ => {
+                            return Err(err(
+                                line,
+                                "header needs a name, like header X-GitHub-Reason",
+                            ))
+                        }
+                    }
+                }
+                if self.eat_kw("CONTAINS") {
+                    let value = match self.next() {
+                        Some(Token {
+                            tok: Tok::Str(s), ..
+                        })
+                        | Some(Token {
+                            tok: Tok::Ident(s), ..
+                        }) => s,
+                        _ => {
+                            return Err(err(
+                                line,
+                                format!("{name} CONTAINS needs text, like \"dependabot\""),
+                            ))
+                        }
+                    };
+                    return Ok(Expr::Fact {
+                        fact: lower,
+                        op: CmpOp::Contains,
+                        value: FactValue::Text(value),
+                    });
+                }
                 if self.eat_kw("IN") {
                     let list = match self.next() {
-                        Some(Token { tok: Tok::Ident(l), .. }) => NamedList::parse(&l).ok_or_else(|| err(line, format!("unknown list {l}; use never_hidden, contacts, vips, organisation or family")))?,
+                        Some(Token { tok: Tok::Ident(l), .. }) if l.starts_with("list:") => {
+                            return Ok(Expr::InNamedList {
+                                subject: lower,
+                                list: l["list:".len()..].to_string(),
+                            });
+                        }
+                        Some(Token { tok: Tok::Ident(l), .. }) => NamedList::parse(&l).ok_or_else(|| err(line, format!("unknown list {l}; use never_hidden, contacts, vips, organisation, family, or one of yours as list:name")))?,
                         _ => return Err(err(line, "IN needs a list name")),
                     };
                     return Ok(Expr::InList {
@@ -437,6 +507,22 @@ fn parse_output(text: &str, line: usize) -> Result<MeshOutput> {
             ("contamination", None) => set_disposition(&mut out, Disposition::Contamination)?,
             ("escalate", None) => out.escalate = true,
             ("notify", None) => out.notify = true,
+            ("replaces", None) => out.replaces = true,
+            ("expires", t) => out.expires = Some(parse_expiry(t.unwrap_or(""), line)?),
+            ("importance", Some(t)) => {
+                if out.importance.is_some() {
+                    return Err(err(line, "an output has at most one Importance"));
+                }
+                out.importance = Some(Importance::parse(t).ok_or_else(|| {
+                    err(
+                        line,
+                        format!("unknown Importance {t}; use Low, Normal, High or Critical"),
+                    )
+                })?);
+            }
+            ("importance", None) => {
+                return Err(err(line, "Importance needs a level, e.g. Importance: High"))
+            }
             ("stratum" | "strata", Some(t)) => {
                 for s in t.split(',').map(str::trim).filter(|s| !s.is_empty()) {
                     if !out.strata.iter().any(|x| x == s) {
@@ -453,7 +539,77 @@ fn parse_output(text: &str, line: usize) -> Result<MeshOutput> {
     if out.disposition.is_none() && !out.escalate && out.strata.is_empty() && !out.notify {
         return Err(err(line, "the output does nothing"));
     }
+    // Replaces works where "only the newest matters" means something: a
+    // Find (the older ones close) or Spoil and Filed (the older ones are
+    // superseded: read, and below their list). Expires closes a Find.
+    let is_find = matches!(out.disposition, Some(Disposition::Find { .. }));
+    if out.replaces
+        && !is_find
+        && !matches!(
+            out.disposition,
+            Some(Disposition::Spoil | Disposition::Filed)
+        )
+    {
+        return Err(err(
+            line,
+            "Replaces needs a Find, Spoil or Filed, e.g. Spoil + Replaces",
+        ));
+    }
+    if out.expires.is_some() && !is_find {
+        return Err(err(
+            line,
+            "Expires closes Finds, so it needs a Find, e.g. Find: Do + Expires",
+        ));
+    }
     Ok(out)
+}
+
+/// The most `Expires:` allows, in days; a Find that should outlive this
+/// wants no expiry at all.
+const MAX_EXPIRES_DAYS: u32 = 90;
+
+/// `end of day`, `next morning`, or a span: `18h`, `18 hours`, `2d`,
+/// `2 days`.
+fn parse_expiry(text: &str, line: usize) -> Result<Expiry> {
+    let t = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    match t.as_str() {
+        "end of day" | "end of the day" => return Ok(Expiry::EndOfDay),
+        "next morning" | "tomorrow morning" => return Ok(Expiry::NextMorning),
+        _ => {}
+    }
+    let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
+    let (n, unit) = t.split_at(digits);
+    if let "m" | "min" | "mins" | "minute" | "minutes" = unit.trim() {
+        return match n.parse::<u32>() {
+            Ok(minutes) if (1..60).contains(&minutes) => Ok(Expiry::AfterMinutes { minutes }),
+            Ok(m) if m >= 60 && m % 60 == 0 => Ok(Expiry::After { hours: m / 60 }),
+            _ => Err(err(
+                line,
+                "Expires in minutes is between 1 and 59, e.g. Expires: 15m",
+            )),
+        };
+    }
+    let per = match unit.trim() {
+        "h" | "hr" | "hrs" | "hour" | "hours" => 1,
+        "d" | "day" | "days" => 24,
+        _ => {
+            return Err(err(
+                line,
+                format!("Expires needs minutes, hours, days, end of day or next morning, e.g. Expires: 18h or Expires: end of day, not {text:?}"),
+            ))
+        }
+    };
+    match n.parse::<u32>().ok().and_then(|n| n.checked_mul(per)) {
+        Some(hours) if (1..=MAX_EXPIRES_DAYS * 24).contains(&hours) => Ok(Expiry::After { hours }),
+        _ => Err(err(
+            line,
+            format!("Expires is between 1 hour and {MAX_EXPIRES_DAYS} days"),
+        )),
+    }
 }
 
 fn parse_scope(value: &str, line: usize) -> Result<MeshScope> {
@@ -536,33 +692,63 @@ pub fn parse_full(text: &str) -> Result<(Mesh, ParsedHeader)> {
     }
     let parsed_header = parse_header(&header)?;
 
+    // One IF … ELSE IF … ELSE chain per Mesh. A `WHEN <condition>` block
+    // groups routes under a shared condition (sender_domain = github.com)
+    // and closes with END or the next WHEN; its routes join the same chain
+    // with the block condition ANDed in, and its ELSE is the block
+    // condition alone, so a block can claim everything it matches.
     let mut route_list = Vec::new();
     let toks = tokenize(&routes)?;
     let mut p = Parser { toks, pos: 0 };
     let mut expect_else_chain = false;
+    // (condition, source line) of the open block.
+    let mut block: Option<(Expr, usize)> = None;
+    let mut block_has_route = false;
     while let Some(t) = p.peek().cloned() {
         let start_line = t.line;
-        let condition = if p.eat_kw("IF") {
-            if expect_else_chain {
+        if p.eat_kw("WHEN") {
+            if block.is_some() && !block_has_route {
                 return Err(err(
                     start_line,
-                    "IF after a route; use ELSE IF to continue the chain or start a new Mesh",
+                    "a WHEN block needs at least one route before the next WHEN",
                 ));
             }
-            expect_else_chain = true;
-            p.expr()?
+            let gate = p.expr()?;
+            block = Some((gate, start_line));
+            block_has_route = false;
+            continue;
+        }
+        if p.eat_kw("END") {
+            match block.take() {
+                Some(_) if !block_has_route => {
+                    return Err(err(start_line, "a WHEN block needs at least one route"))
+                }
+                Some(_) => continue,
+                None => return Err(err(start_line, "END without a WHEN")),
+            }
+        }
+        let first_in_block = block.is_some() && !block_has_route;
+        let local = if p.eat_kw("IF") {
+            if expect_else_chain && !first_in_block {
+                return Err(err(
+                    start_line,
+                    "IF after a route; use ELSE IF to continue the chain, or start a WHEN block",
+                ));
+            }
+            Some(p.expr()?)
         } else if p.eat_kw("ELSE") {
-            if !expect_else_chain {
+            if !expect_else_chain || first_in_block {
                 return Err(err(start_line, "ELSE without a preceding IF"));
             }
             if p.eat_kw("IF") {
-                p.expr()?
+                Some(p.expr()?)
             } else {
-                Expr::Always
+                None
             }
         } else {
-            return Err(err(start_line, "expected IF or ELSE"));
+            return Err(err(start_line, "expected IF, ELSE, WHEN or END"));
         };
+        expect_else_chain = true;
         let (output, end_line) = match p.next() {
             Some(Token {
                 tok: Tok::Arrow(rest),
@@ -571,12 +757,38 @@ pub fn parse_full(text: &str) -> Result<(Mesh, ParsedHeader)> {
             Some(Token { line, .. }) => return Err(err(line, "expected → after the condition")),
             None => return Err(err(p.line(), "expected → after the condition")),
         };
-        let text = source_text(&routes, start_line, end_line);
-        route_list.push(Route {
+        let own_text = source_text(&routes, start_line, end_line);
+        let (condition, text, when) = match &block {
+            Some((gate, gate_line)) => {
+                let condition = match &local {
+                    Some(l) => Expr::And {
+                        items: vec![gate.clone(), l.clone()],
+                    },
+                    None => gate.clone(),
+                };
+                let gate_text = source_text(&routes, *gate_line, *gate_line);
+                (
+                    condition,
+                    format!("{} ▸ {}", gate_text, own_text.trim()),
+                    Some(gate.clone()),
+                )
+            }
+            None => (local.clone().unwrap_or(Expr::Always), own_text, None),
+        };
+        block_has_route = block.is_some();
+        let mut route = Route {
             condition,
             output,
             text,
-        });
+            local: if when.is_some() { local } else { None },
+            when,
+            words: String::new(),
+        };
+        route.words = crate::humanize::route_reading(&route);
+        route_list.push(route);
+    }
+    if block.is_some() && !block_has_route {
+        return Err(err(p.line(), "a WHEN block needs at least one route"));
     }
 
     let mut guard_list = Vec::new();
@@ -617,11 +829,14 @@ pub fn parse_full(text: &str) -> Result<(Mesh, ParsedHeader)> {
             .get(p.pos.saturating_sub(1))
             .map(|t| t.line)
             .unwrap_or(start_line);
-        guard_list.push(Guard {
+        let mut guard = Guard {
             never,
             condition,
             text: source_text(&guards, start_line, end_line),
-        });
+            words: String::new(),
+        };
+        guard.words = crate::humanize::guard_reading(&guard);
+        guard_list.push(guard);
     }
 
     if route_list.is_empty() && guard_list.is_empty() {
@@ -648,6 +863,10 @@ pub fn parse_full(text: &str) -> Result<(Mesh, ParsedHeader)> {
         shadow_agreed: 0,
         shadow_proposed: 0,
         deleted_at: None,
+        autonomy: parsed_header.autonomy,
+        demoted: None,
+        fallback: false,
+        pack: None,
     };
     Ok((mesh, parsed_header))
 }
@@ -659,6 +878,9 @@ fn parse_header(lines: &[(usize, &str)]) -> Result<ParsedHeader> {
         scope: MeshScope::AllDigs,
         scope_given: false,
         priority: 0,
+        priority_given: false,
+        autonomy: None,
+        autonomy_given: false,
     };
     let mut expecting_scope = false;
     for (n, raw) in lines {
@@ -698,8 +920,28 @@ fn parse_header(lines: &[(usize, &str)]) -> Result<ParsedHeader> {
                 .trim()
                 .parse()
                 .map_err(|_| err(*n, "Priority: needs an integer"))?;
+            h.priority_given = true;
+        } else if let Some(rest) = lower.strip_prefix("autonomy:") {
+            h.autonomy = Some(match rest.trim() {
+                "observe" => Autonomy::Observe,
+                "suggest" => Autonomy::Suggest,
+                "act" => Autonomy::Act,
+                "trusted" => {
+                    return Err(err(
+                        *n,
+                        "Autonomy: a Mesh can be capped at Observe, Suggest or Act; Trusted is an account setting",
+                    ))
+                }
+                other => {
+                    return Err(err(
+                        *n,
+                        format!("Autonomy: {other:?} is not one of Observe, Suggest or Act"),
+                    ))
+                }
+            });
+            h.autonomy_given = true;
         } else {
-            return Err(err(*n, format!("unexpected header line {line:?}; expected Mesh:, Scope:, Priority:, ROUTES or GUARDS")));
+            return Err(err(*n, format!("unexpected header line {line:?}; expected Mesh:, Scope:, Priority:, Autonomy:, ROUTES or GUARDS")));
         }
     }
     if expecting_scope {
@@ -713,6 +955,246 @@ fn parse_header(lines: &[(usize, &str)]) -> Result<ParsedHeader> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_when_block_formats_back_as_a_block() {
+        let text = "Mesh: GitHub v2\n\nROUTES\n\nWHEN sender_domain = github.com\n    IF sender_name CONTAINS \"dependabot\" → Spoil\n    ELSE → Filed\nEND\n\nELSE IF sender_domain = example.com → Find: Respond\n";
+        let m = parse(text).unwrap();
+        assert_eq!(m.routes.len(), 3);
+        assert!(m.routes[0].when.is_some() && m.routes[1].local.is_none());
+        assert!(m.routes[2].when.is_none());
+        let formatted = crate::format::format(&m);
+        assert!(
+            formatted.contains("WHEN sender_domain = github.com"),
+            "{formatted}"
+        );
+        assert!(formatted.contains("END"), "{formatted}");
+        let again = parse(&formatted).unwrap();
+        let logic = |m: &Mesh| {
+            m.routes
+                .iter()
+                .map(|r| {
+                    (
+                        r.condition.clone(),
+                        r.output.clone(),
+                        r.when.clone(),
+                        r.local.clone(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(logic(&again), logic(&m));
+    }
+
+    #[test]
+    fn when_blocks_reject_malformed_structure() {
+        assert!(
+            parse("ROUTES\nWHEN sender_domain = github.com\nEND").is_err(),
+            "empty block"
+        );
+        assert!(parse("ROUTES\nEND").is_err(), "END without WHEN");
+        assert!(
+            parse("ROUTES\nWHEN sender_domain = github.com\n ELSE → Spoil").is_err(),
+            "ELSE first in a block"
+        );
+    }
+
+    #[test]
+    fn header_facts_and_contains_parse_and_format_back() {
+        let text = "Mesh: GitHub v1\n\nROUTES\n\nIF sender_name CONTAINS \"dependabot\" → Spoil\n\nELSE IF header X-GitHub-Reason = ci_activity → Filed\n";
+        let m = parse(text).unwrap();
+        assert_eq!(
+            m.routes[0].condition,
+            Expr::Fact {
+                fact: "sender_name".into(),
+                op: CmpOp::Contains,
+                value: FactValue::Text("dependabot".into())
+            }
+        );
+        assert_eq!(
+            m.routes[1].condition,
+            Expr::Fact {
+                fact: "header:x-github-reason".into(),
+                op: CmpOp::Eq,
+                value: FactValue::Text("ci_activity".into())
+            }
+        );
+        let again = parse(&crate::format::format(&m)).unwrap();
+        let logic = |m: &Mesh| {
+            m.routes
+                .iter()
+                .map(|r| (r.condition.clone(), r.output.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(logic(&again), logic(&m));
+    }
+
+    #[test]
+    fn replaces_parses_formats_back_and_reads_as_a_sentence() {
+        let text = "Mesh: Daily reminders v1\n\nROUTES\n\nIF subject CONTAINS \"Time to write\" → Find: Do + Replaces\n";
+        let m = parse(text).unwrap();
+        assert!(m.routes[0].output.replaces);
+        let formatted = crate::format::format(&m);
+        assert!(formatted.contains("Find: Do + Replaces"), "{formatted}");
+        assert_eq!(
+            parse(&formatted).unwrap().routes[0].output,
+            m.routes[0].output
+        );
+        assert!(
+            m.routes[0]
+                .words
+                .contains("a newer one from the same sender replaces it"),
+            "{}",
+            m.routes[0].words
+        );
+    }
+
+    #[test]
+    fn replaces_where_newest_means_nothing_is_rejected() {
+        let e =
+            parse("ROUTES\nIF subject CONTAINS \"digest\" → Contamination + Replaces").unwrap_err();
+        assert!(e.message.contains("needs a Find"), "{}", e.message);
+    }
+
+    #[test]
+    fn importance_and_a_minute_expiry_parse_read_as_words_and_format_back() {
+        let text = "Mesh: Codes\nROUTES\nIF subject CONTAINS \"code\" → Find: Know + Notify + Expires: 15 minutes + Importance: critical\n";
+        let m = parse(text).unwrap();
+        let o = &m.routes[0].output;
+        assert_eq!(o.importance, Some(Importance::Critical));
+        assert_eq!(o.expires, Some(Expiry::AfterMinutes { minutes: 15 }));
+        let formatted = crate::format::format(&m);
+        assert!(
+            formatted.contains("Find: Know + Notify + Expires: 15m + Importance: Critical"),
+            "{formatted}"
+        );
+        assert_eq!(parse(&formatted).unwrap().routes[0].output, *o);
+        let words = &m.routes[0].words;
+        assert!(words.contains("of critical importance"), "{words}");
+        assert!(
+            words.contains("expires 15 minutes after it arrives"),
+            "{words}"
+        );
+        // 120m is 2h, and still only for a Find.
+        let e = parse("ROUTES\nIF subject CONTAINS \"x\" → Filed + Expires: 120m").unwrap_err();
+        assert!(e.message.contains("needs a Find"), "{}", e.message);
+        let e =
+            parse("ROUTES\nIF subject CONTAINS \"x\" → Filed + Importance: urgent").unwrap_err();
+        assert!(
+            e.message.contains("Low, Normal, High or Critical"),
+            "{}",
+            e.message
+        );
+    }
+
+    #[test]
+    fn expires_takes_hours_or_days_and_formats_back_in_the_shortest_form() {
+        let text = "Mesh: Daily reminders v1\nROUTES\nIF subject CONTAINS \"Time to write\" → Find: Do + Replaces + Expires: 2 days\nELSE IF subject CONTAINS \"Prompt\" → Find: Do + Expires: 18h\n";
+        let m = parse(text).unwrap();
+        assert_eq!(
+            m.routes[0].output.expires,
+            Some(Expiry::After { hours: 48 })
+        );
+        assert_eq!(
+            m.routes[1].output.expires,
+            Some(Expiry::After { hours: 18 })
+        );
+        let formatted = crate::format::format(&m);
+        assert!(
+            formatted.contains("Find: Do + Replaces + Expires: 2d"),
+            "{formatted}"
+        );
+        assert!(formatted.contains("Find: Do + Expires: 18h"), "{formatted}");
+        assert_eq!(
+            parse(&formatted).unwrap().routes[0].output,
+            m.routes[0].output
+        );
+        assert!(
+            m.routes[0]
+                .words
+                .contains("it expires 2 days after it arrives"),
+            "{}",
+            m.routes[0].words
+        );
+        assert!(
+            m.routes[1]
+                .words
+                .contains("it expires 18 hours after it arrives"),
+            "{}",
+            m.routes[1].words
+        );
+    }
+
+    #[test]
+    fn expires_at_the_end_of_the_day_or_the_next_morning_reads_as_a_sentence() {
+        let m = parse("ROUTES\nIF mailing_list → Find: Do + Expires: End of the day\nELSE → Find: Do + Expires: tomorrow morning").unwrap();
+        assert_eq!(m.routes[0].output.expires, Some(Expiry::EndOfDay));
+        assert!(
+            m.routes[0]
+                .words
+                .contains("it expires at the end of the day it arrives"),
+            "{}",
+            m.routes[0].words
+        );
+        assert!(
+            m.routes[1]
+                .words
+                .contains("it expires at 9 am the next morning"),
+            "{}",
+            m.routes[1].words
+        );
+        let formatted = crate::format::format(&m);
+        assert!(
+            formatted.contains("Expires: end of day")
+                && formatted.contains("Expires: next morning"),
+            "{formatted}"
+        );
+    }
+
+    #[test]
+    fn a_cadence_rule_reads_as_how_often_the_sender_writes() {
+        let m = parse("ROUTES\nIF sender_cadence = daily AND sender_on_schedule AND personally_relevant@v1 > .8 → Find: Do + Replaces + Expires: end of day\nELSE IF sender_cadence != weekdays → Filed").unwrap();
+        assert!(
+            m.routes[0].words.contains("the sender writes daily"),
+            "{}",
+            m.routes[0].words
+        );
+        assert!(
+            m.routes[0]
+                .words
+                .contains("the sender writes at the same time each day"),
+            "{}",
+            m.routes[0].words
+        );
+        assert!(
+            m.routes[1]
+                .words
+                .contains("the sender does not write on weekdays"),
+            "{}",
+            m.routes[1].words
+        );
+    }
+
+    #[test]
+    fn expires_rejects_what_is_not_a_bounded_duration_or_not_a_find() {
+        for bad in [
+            "Expires: later",
+            "Expires: 0h",
+            "Expires: 91d",
+            "Expires: 1.5d",
+            "Expires",
+        ] {
+            let text = format!("ROUTES\nIF mailing_list → Find: Do + {bad}");
+            assert!(parse(&text).is_err(), "{bad} should not parse");
+        }
+        let e = parse("ROUTES\nIF mailing_list → Filed + Expires: 2d").unwrap_err();
+        assert!(e.message.contains("Expires closes Finds"), "{}", e.message);
+    }
+
+    #[test]
+    fn header_needs_a_name() {
+        assert!(parse("ROUTES\nIF header = x → Spoil").is_err());
+    }
+
     use super::*;
 
     pub const DOC_EXAMPLE: &str = "Mesh: GitHub Notifications v8\n\nScope:\nWork Digs\n\nROUTES\n\nIF review_requested@v3 > .80\n    → Find: Review\n\nELSE IF ci_failure@v4 > .85\n     AND personally_relevant@v3 > .70\n    → Find: Do\n\nELSE IF routine@v1 > .90\n     AND personally_relevant@v3 < .30\n    → Spoil\n\nELSE\n    → Escalate\n\nGUARDS\n\nNEVER Spoil IF sender IN never_hidden\n";

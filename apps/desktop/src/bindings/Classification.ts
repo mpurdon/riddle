@@ -3,6 +3,7 @@ import type { ClassificationId } from "./ClassificationId";
 import type { DecisionMechanism } from "./DecisionMechanism";
 import type { DigId } from "./DigId";
 import type { Disposition } from "./Disposition";
+import type { Importance } from "./Importance";
 import type { MeshId } from "./MeshId";
 import type { MessageId } from "./MessageId";
 import type { TraceId } from "./TraceId";
@@ -19,4 +20,16 @@ matchedRule: string | null, confidence: number | null, reason: string, traceId: 
 /**
  * True during the Shadow Period: recorded, shown, not applied (§51).
  */
-shadow: boolean, createdAt: string, supersededAt: string | null, };
+shadow: boolean, createdAt: string, supersededAt: string | null, 
+/**
+ * The `+ Replaces` series this decision belongs to (Mesh and sender):
+ * only the newest message of a series keeps its standing; the older
+ * ones are superseded by it.
+ */
+series?: string, 
+/**
+ * How much the message matters, as the rule or Sift decided it. The
+ * user's own level for the message lives beside it, not here, so a
+ * rule re-deciding the message never overwrites it.
+ */
+importance: Importance, };

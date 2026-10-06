@@ -100,11 +100,11 @@ impl Breaker {
                     .open_until
                     .map(|u| u.saturating_duration_since(Instant::now()))
                     .unwrap_or_default();
+                let secs = remaining.as_secs().max(1);
                 Err(RiddleError::llm_unavailable(format!(
-                    "circuit open for {key}; retry in {}s",
-                    remaining.as_secs().max(1)
+                    "circuit open for {key}; retry in {secs}s"
                 ))
-                .with_detail(serde_json::json!({"retryable": false, "circuit": "open"})))
+                .with_detail(serde_json::json!({"retryable": false, "circuit": "open", "retryAfterSecs": secs})))
             }
             BreakerState::HalfOpen => {
                 if c.probe_in_flight {

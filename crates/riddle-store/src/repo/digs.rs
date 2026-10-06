@@ -30,6 +30,12 @@ pub fn list(store: &Store) -> Result<Vec<Dig>> {
     })
 }
 
+/// The accounts Riddle works on: every one the user has not disabled. Work
+/// that spans accounts reads this; only account management reads `list`.
+pub fn list_enabled(store: &Store) -> Result<Vec<Dig>> {
+    Ok(list(store)?.into_iter().filter(|d| !d.disabled).collect())
+}
+
 pub fn remove(store: &Store, id: &DigId) -> Result<()> {
     store.write(|c| {
         c.execute("DELETE FROM digs WHERE id = ?1", [id.as_str()])?;

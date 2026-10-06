@@ -15,6 +15,15 @@ pub fn put_in(c: &rusqlite::Connection, id: &MessageId, f: &Facts) -> rusqlite::
     Ok(())
 }
 
+/// Every message with a stored facts row, for a refresh that walks them all.
+pub fn ids(store: &Store) -> Result<Vec<MessageId>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT message_id FROM facts")?;
+        let rows = st.query_map([], |r| Ok(MessageId(r.get(0)?)))?.collect();
+        rows
+    })
+}
+
 pub fn get(store: &Store, id: &MessageId) -> Result<Option<Facts>> {
     store.read(|c| {
         c.query_row(

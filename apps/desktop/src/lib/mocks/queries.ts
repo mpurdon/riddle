@@ -4,11 +4,23 @@
  * from every angle: a message's disposition, its Find, its trace and its
  * explanation all agree.
  */
+import type { Importance } from '@/bindings/Importance'
+import type { Disposition } from '@/bindings/Disposition'
 import type { Activity } from '@/bindings/Activity'
 import type { DecisionTrace } from '@/bindings/DecisionTrace'
+import type { ClauseCheck } from '@/bindings/ClauseCheck'
+import type { CmpOp } from '@/bindings/CmpOp'
 import type { Explanation } from '@/bindings/Explanation'
+import type { Expr } from '@/bindings/Expr'
+import type { RouteCheck } from '@/bindings/RouteCheck'
 import type { Find } from '@/bindings/Find'
+import type { Dig } from '@/bindings/Dig'
 import type { Mesh } from '@/bindings/Mesh'
+import type { MeshOrder } from '@/bindings/MeshOrder'
+import type { Pack } from '@/bindings/Pack'
+import type { PackInfo } from '@/bindings/PackInfo'
+import type { RuleCheckRow } from '@/bindings/RuleCheckRow'
+import type { RuleSample } from '@/bindings/RuleSample'
 import type { Message } from '@/bindings/Message'
 import type { MessageSummary } from '@/bindings/MessageSummary'
 import type { Page } from '@/bindings/Page'
@@ -21,14 +33,17 @@ import type { Thread } from '@/bindings/Thread'
 import type { Transition } from '@/bindings/Transition'
 import type { DispositionKind } from '@/bindings/DispositionKind'
 import type { UsageSummary } from '@/bindings/UsageSummary'
+import type { TrustStats } from '@/bindings/TrustStats'
 import type { NamedList } from '@/bindings/NamedList'
+import { belowAct } from '@/features/settings/accounts/model'
 import { u64 } from '../format'
 import type { MessageFilter, TraceStats, UpdatePreview, LogLine } from '../types'
-import { evalMesh, MeshSyntaxError, parseMeshText, type EvalInput } from './dsl'
+import { evalExpr, evalMesh, MeshSyntaxError, parseMeshText, type EvalInput } from './dsl'
 import { buildFacts, DIG_WORK } from './fixtures'
 import type { MockState } from './state'
 
-const err = (kind: RiddleError['kind'], message: string, detail: unknown = null): RiddleError => ({ kind, message, detail })
+/** A RiddleError to throw, the shape the IPC layer would deliver; every mock module throws through it. */
+export const err = (kind: RiddleError['kind'], message: string, detail: unknown = null): RiddleError => ({ kind, message, detail })
 
 function pageOf<T>(items: T[], page: PageRequest | undefined): Page<T> {
   const limit = page?.limit ?? 50
@@ -38,8 +53,21 @@ function pageOf<T>(items: T[], page: PageRequest | undefined): Page<T> {
   return { items: slice, nextCursor: next, total: u64(items.length) }
 }
 
-export function toSummary(state: MockState, m: Message): MessageSummary {
-  const c = state.classifications.get(m.id)
+/**
+ * A list row. As in the backend, a message whose only classification is a
+ * Shadow proposal reads as unsifted in the plain list and as the proposal
+ * in the Shadow review list (`shadowOnly`).
+ */
+/** As the backend derives it when no rule says: hidden mail is Low. */
+function importanceOf(d: Disposition | null): Importance {
+  return d && (d.kind === 'spoil' || d.kind === 'filed' || d.kind === 'contamination') ? 'low' : 'normal'
+}
+
+export function toSummary(state: MockState, m: Message, shadowOnly = false): MessageSummary {
+  const raw = state.classifications.get(m.id)
+  // The proposal outlives a disagreement, as the backend's shadow row does.
+  const proposal = state.shadowProposals.get(m.id) ?? (raw?.shadow ? raw.disposition : undefined)
+  const c = shadowOnly ? (proposal ? { ...(raw ?? { strata: [], findId: null, handledByUserAt: null, shadow: true }), disposition: proposal, shadow: true } : undefined) : raw?.shadow ? undefined : raw
   return {
     id: m.id,
     digId: m.digId,
@@ -54,7 +82,33 @@ export function toSummary(state: MockState, m: Message): MessageSummary {
     disposition: c?.disposition ?? null,
     strata: c?.strata ?? [],
     findId: c?.findId ?? null,
+    shadow: shadowOnly && !!c?.shadow,
+    shadowReview: shadowOnly ? (state.shadowReviews.get(m.id) ?? null) : null,
+    importance: state.importance.get(m.id) ?? importanceOf(c?.disposition ?? null),
+    importanceSetByYou: state.importance.has(m.id),
   }
+}
+
+/** What Sift does to this account's mailbox now, the way the backend's projection gate answers it. */
+export function withMailbox(state: MockState, d: Dig): Dig {
+  const level = state.settings.autonomy.perDig[d.id] ?? state.settings.autonomy.default
+  const writes = d.projection === 'none' ? 'nothing' : d.projection === 'labels_only' ? 'labels' : 'labels_and_archive'
+  if (writes === 'nothing') return { ...d, mailbox: { writes, held: null } }
+  if (belowAct(level)) return { ...d, mailbox: { writes: 'nothing', held: 'autonomy' } }
+  if (state.devInfo.dev && !state.armed) return { ...d, mailbox: { writes: 'nothing', held: 'dev_unarmed' } }
+  return { ...d, mailbox: { writes, held: null } }
+}
+
+/** The Meshes and Strata that name a group, as the backend lists them. */
+export function groupUsedBy(state: MockState, name: string): string[] {
+  const latest = new Map<string, Mesh>()
+  for (const m of state.meshes) {
+    const cur = latest.get(m.id)
+    if (!cur || m.version > cur.version) latest.set(m.id, m)
+  }
+  const meshes = [...latest.values()].filter((m) => m.status !== 'deleted' && m.scope.kind === 'dig_group' && m.scope.group === name).map((m) => `Mesh "${m.name}"`)
+  const strata = state.strata.filter((s) => !s.deletedAt && s.scopeGroup === name).map((s) => `Stratum "${s.name}"`)
+  return [...meshes, ...strata]
 }
 
 export function findTitleFor(state: MockState, messageId: string): string | null {
@@ -71,12 +125,16 @@ export function listMessages(state: MockState, args: { digId?: string | null; fi
     if (args.digId && m.digId !== args.digId) return false
     const c = state.classifications.get(m.id)
     if (f.unclassifiedOnly && c?.disposition) return false
+    // The Shadow review list: only messages with a proposal, shown as the proposal.
+    if (f.shadowOnly && !(c?.shadow || state.shadowProposals.has(m.id))) return false
     if (f.disposition && c?.disposition?.kind !== f.disposition) return false
     if (f.findType && !(c?.disposition?.kind === 'find' && c.disposition.find_type === f.findType)) return false
     if (f.label && !m.labels.includes(f.label)) return false
     if (f.stratum && !(c?.strata ?? []).includes(f.stratum)) return false
     if (f.from && !(m.from.email.toLowerCase().includes(f.from.toLowerCase()) || (m.from.name ?? '').toLowerCase().includes(f.from.toLowerCase()))) return false
     if (f.threadId && m.threadId !== f.threadId) return false
+    // The mocks keep no `+ Replaces` series, so nothing in them is superseded.
+    if (f.superseded === true) return false
     if (f.since && m.date < f.since) return false
     if (f.until && m.date > f.until) return false
     if (f.query) {
@@ -86,11 +144,31 @@ export function listMessages(state: MockState, args: { digId?: string | null; fi
     return true
   })
   items = items.sort(byDateDesc)
+  return pageOf(items.map((m) => toSummary(state, m, !!f.shadowOnly)), args.page)
+}
+
+/**
+ * The Priority inbox, as the backend derives it: a chosen label, a chosen
+ * Stratum, or a source of an open Find at or above the chosen priority (of
+ * the chosen types; none means any), OR-combined.
+ */
+export function priorityInbox(state: MockState, args: { digId?: string | null; page?: PageRequest }): Page<MessageSummary> {
+  const p = state.settings.priorityInbox
+  const min = p.minFindPriority ?? 0
+  const found = new Set(state.finds.filter((f) => f.status === 'open' && f.priority >= min && (!p.findTypes.length || p.findTypes.includes(f.findType))).flatMap((f) => f.sources.map((s) => s.messageId)))
+  const items = state.messages
+    .filter((m) => {
+      if (args.digId && m.digId !== args.digId) return false
+      const c = state.classifications.get(m.id)
+      const strata = c && !c.shadow ? c.strata : []
+      return p.labels.some((l) => m.labels.includes(l)) || strata.some((s) => p.strata.includes(s)) || found.has(m.id)
+    })
+    .sort(byDateDesc)
   return pageOf(items.map((m) => toSummary(state, m)), args.page)
 }
 
-export function search(state: MockState, args: { query: string; digId?: string | null; page?: PageRequest }): Page<MessageSummary> {
-  const filter: MessageFilter = {}
+export function search(state: MockState, args: { query: string; digId?: string | null; page?: PageRequest; shadowOnly?: boolean }): Page<MessageSummary> {
+  const filter: MessageFilter = { shadowOnly: args.shadowOnly || undefined }
   const words: string[] = []
   for (const tok of args.query.split(/\s+/).filter(Boolean)) {
     const m = /^(from|is|stratum|label|dig|has):(.+)$/i.exec(tok)
@@ -141,7 +219,62 @@ export function explain(state: MockState, digId: string, messageId: string): Exp
     traceId: t.id,
     shadow: c.shadow,
     reason: spec?.reason ?? t.matchedRule ?? '',
+    routes: mockRouteChecks(state, m, t),
+    importance: state.importance.get(m.id) ?? importanceOf(c.disposition),
+    importanceSetByYou: state.importance.has(m.id),
   }
+}
+
+const OP: Record<CmpOp, string> = { gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '=', neq: '!=', contains: 'CONTAINS' }
+const num2 = (n: number) => (n < 1 ? String(n).replace(/^0/, '') : String(n))
+function exprText(e: Expr): string {
+  switch (e.kind) {
+    case 'signal':
+      return `${e.signal}@v${e.version}${e.choice ? `:${e.choice}` : ''} ${OP[e.op]} ${num2(e.threshold)}`
+    case 'fact':
+      return e.op === 'eq' && e.value.type === 'bool' && e.value.value === true ? e.fact : `${e.fact} ${OP[e.op]} ${String(e.value.value)}`
+    case 'in_list':
+      return `${e.subject} IN ${e.list}`
+    case 'in_named_list':
+      return `${e.subject} IN list:${e.list}`
+    case 'not':
+      return `NOT ${exprText(e.item)}`
+    case 'and':
+      return e.items.map(exprText).join(' AND ')
+    case 'or':
+      return `(${e.items.map(exprText).join(' OR ')})`
+    case 'always':
+      return 'ELSE'
+  }
+}
+
+/** The mock's stand-in for the backend's route replay. */
+function mockRouteChecks(state: MockState, m: Message, t: DecisionTrace): RouteCheck[] {
+  const mesh = state.meshes.find((x) => x.name === t.meshName && x.version === t.meshVersion)
+  if (!mesh) return []
+  const input = evalInputFor(state, m)
+  const signals = input.signals
+  const check = (e: Expr): ClauseCheck => {
+    const missing: string[] = []
+    const ok = evalExpr(e, input, missing)
+    const signal = e.kind === 'signal' ? `${e.signal}@v${e.version}` : null
+    const actual = signal ? signals[signal] : e.kind === 'fact' ? input.facts[e.fact] : undefined
+    return { text: exprText(e), actual: actual === undefined ? null : typeof actual === 'number' ? actual.toFixed(2) : String(actual), result: missing.length ? 'unknown' : ok ? 'pass' : 'fail', signal }
+  }
+  let done = false
+  return mesh.routes.map((r) => {
+    const clauses = r.condition.kind === 'always' ? [] : r.condition.kind === 'and' ? r.condition.items.map(check) : [check(r.condition)]
+    let outcome: RouteCheck['outcome'] = 'not_reached'
+    if (!done) {
+      const missing: string[] = []
+      const ok = evalExpr(r.condition, input, missing)
+      outcome = ok ? 'matched' : missing.length ? 'unknown' : 'no_match'
+      done = outcome !== 'no_match'
+    }
+    const o = r.output
+    const output = [o.disposition ? (o.disposition.kind === 'find' ? `Find: ${o.disposition.find_type}` : o.disposition.kind) : o.escalate ? 'Escalate' : '', ...o.strata.map((x) => `Stratum: ${x}`)].filter(Boolean).join(' + ')
+    return { when: null, clauses, output, outcome }
+  })
 }
 
 export function listFinds(state: MockState, args: { status?: string | null; findType?: string | null; digId?: string | null; page?: PageRequest }): Page<Find> {
@@ -158,31 +291,37 @@ export function listActivity(state: MockState, args: { digId?: string | null; ac
   return pageOf(items, args.page)
 }
 
-export function summary(state: MockState): Summary {
-  const cls = [...state.classifications.values()]
-  const catching = state.digs.find((d) => d.status.state === 'catching_up')
-  const job = state.jobs.find((j) => j.kind === 'catch_up' && j.status.state === 'running')
+export function summary(state: MockState, digId: string | null = null): Summary {
+  const digs = digId ? state.digs.filter((d) => d.id === digId) : state.digs
+  const inScope = (id: string) => !digId || id === digId
+  const messageIds = new Set(state.messages.filter((m) => inScope(m.digId)).map((m) => m.id))
+  const cls = [...state.classifications.entries()].filter(([id]) => messageIds.has(id)).map(([, c]) => c)
+  const catching = digs.find((d) => d.status.state === 'catching_up')
+  const job = state.jobs.find((j) => j.kind === 'catch_up' && j.status.state === 'running' && (!j.digId || inScope(j.digId)))
   const caughtUp = !catching && !job
-  const shadowDig = state.digs.find((d) => d.status.state === 'shadow')
-  const degraded = state.digs.filter((d) => d.status.state === 'degraded').map((d) => (d.status.state === 'degraded' ? `${d.name}: ${d.status.reason}` : ''))
-  const openFinds = state.finds.filter((f) => f.status === 'open').length
+  const shadowDig = digs.find((d) => d.status.state === 'shadow')
+  const degraded = digs.filter((d) => d.status.state === 'degraded').map((d) => (d.status.state === 'degraded' ? `${d.name}: ${d.status.reason}` : ''))
+  const openFinds = state.finds.filter((f) => f.status === 'open' && (!digId || f.digIds.includes(digId))).length
+  // The fixture mailbox is a sample of a larger history; the constants stand in for the part not modelled.
+  const scale = digId ? 1 / Math.max(1, state.digs.length) : 1
+  const base = (n: number) => Math.round(n * scale)
   return {
     asOf: new Date().toISOString(),
     caughtUp,
     since: new Date(Date.now() - 22 * 3600_000).toISOString(),
-    arrived: u64(312 + state.messages.length - 62),
-    digCount: state.digs.length,
+    arrived: u64(base(312) + messageIds.size - base(62)),
+    digCount: digs.length,
     findsOpen: u64(openFinds),
     unresolved: u64(cls.filter((c) => c.disposition?.kind === 'unresolved').length),
-    filed: u64(41 + cls.filter((c) => c.disposition?.kind === 'filed').length - 10),
-    spoil: u64(236 + cls.filter((c) => c.disposition?.kind === 'spoil').length - 37),
-    contamination: u64(26 + cls.filter((c) => c.disposition?.kind === 'contamination').length - 3),
+    filed: u64(Math.max(0, base(41) + cls.filter((c) => c.disposition?.kind === 'filed').length - base(10))),
+    spoil: u64(Math.max(0, base(236) + cls.filter((c) => c.disposition?.kind === 'spoil').length - base(37))),
+    contamination: u64(Math.max(0, base(26) + cls.filter((c) => c.disposition?.kind === 'contamination').length - base(3))),
     remainingToSift: u64(job ? Number(job.progress.total) - Number(job.progress.done) : 0),
     totalToSift: u64(job ? Number(job.progress.total) : 0),
     directorNote: openFinds ? (caughtUp ? 'Two of the Finds are probably worth handling before your first meeting: the Jeep brakes and PR #412.' : 'Adam and PR #412 are worth handling first; the rest may change while catch-up finishes.') : null,
     shadow: shadowDig ? { day: shadowDig.status.state === 'shadow' ? shadowDig.status.day : 0, of: 7, wouldSpoil: u64(412), wouldFind: u64(19), disagreements: u64(6) } : null,
     lastSyncedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
-    projectionPending: u64(41),
+    projectionPending: u64(base(41)),
     degraded,
   }
 }
@@ -228,7 +367,7 @@ export function parseMesh(state: MockState, text: string): Mesh {
   const digIdByName = (n: string) => state.digs.find((d) => d.name.toLowerCase() === n.toLowerCase())?.id ?? null
   try {
     const p = parseMeshText(text, { digIdByName })
-    return { id: 'unsaved', name: p.name, version: p.version, scope: p.scope, priority: 50, routes: p.routes, guards: p.guards, status: 'draft', sourceText: text, createdAt: new Date().toISOString(), createdBy: 'user', changeNote: null, shadowStartedAt: null, shadowAgreed: 0, shadowProposed: 0, deletedAt: null }
+    return { id: 'unsaved', name: p.name, version: p.version, scope: p.scope, priority: p.priority ?? 50, routes: p.routes, guards: p.guards, autonomy: p.autonomy, status: 'draft', fallback: false, sourceText: text, createdAt: new Date().toISOString(), createdBy: 'user', changeNote: null, shadowStartedAt: null, shadowAgreed: 0, shadowProposed: 0, deletedAt: null }
   } catch (e) {
     if (e instanceof MeshSyntaxError) throw e.toRiddleError()
     throw e
@@ -343,9 +482,66 @@ export function simulate(state: MockState, args: { text?: string | null; meshId?
     changed: u64(candidates.length - unchanged),
     transitions: transitions.sort((a, b) => Number(b.count) - Number(a.count)),
     newJudgeCallsRequired: u64(judgeCalls),
+    joinsSeries: u64(0),
+    recordedChanges: u64(0),
+    rescore: u64(0),
+    takenFirstBy: [],
+    takesFrom: [],
     estimatedCostUsd: judgeCalls ? Math.round(judgeCalls * 1900 * 0.042) / 1_000_000 : 0,
     sampleChanged: sample,
     windowDays,
+  }
+}
+
+/** Running Meshes with the grades given. The mock does not record which Mesh decided a message, so every Mesh offers the same samples. */
+export function ruleCheck(state: MockState): RuleCheckRow[] {
+  const decided = [...state.classifications.values()].filter((k) => k.disposition).length
+  return latestMeshes(state, false)
+    .filter((m) => m.status === 'active' || m.status === 'shadow')
+    .sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name))
+    .map((m) => {
+      const grades = Object.entries(state.grades).filter(([k]) => k.startsWith(`${m.id}:`)).map(([, v]) => v)
+      return { meshId: m.id, meshName: m.name, priority: m.priority, status: m.status, fallback: m.fallback, decided: u64(decided), right: u64(grades.filter((g) => g === 'right').length), wrong: u64(grades.filter((g) => g === 'wrong').length) }
+    })
+}
+
+export function ruleSamples(state: MockState, meshId: string, limit: number): RuleSample[] {
+  return [...state.classifications.entries()]
+    .flatMap(([messageId, k]) => {
+      const m = state.messages.find((x) => x.id === messageId)
+      return m && k.disposition ? [{ digId: m.digId, messageId: m.id, from: m.from, subject: m.subject, date: m.date, disposition: k.disposition, strata: k.strata, grade: state.grades[`${meshId}:${m.id}`] ?? null }] : []
+    })
+    .slice(0, limit)
+}
+
+/** A small catalogue: the mock does not ship the real pack files. */
+export function packCatalogue(state: MockState): PackInfo[] {
+  const shopping: Pack = {
+    id: 'shopping',
+    name: 'Shopping and promotions',
+    version: 1,
+    area: 'Shopping',
+    summary: 'Promotions from stores that write daily or weekly are set aside; stores you name keep showing.',
+    band: 'general',
+    detect: { sender_domains: [], gmail_categories: ['promotions'], min_messages: 20, always: false },
+    lists: [{ name: 'keep_promotions', description: 'Stores whose promotions you still want to see', question: "Which stores' or services' promotions do you still want to see?", default: [] }],
+    meshes: [{ text: 'Mesh: Frequent promotions\nROUTES\nIF marketing@v1 > .70 AND NOT sender_domain IN list:keep_promotions → Spoil', band: null, fallback: false, rank: 7 }],
+  }
+  const installed = state.installedPacks.find((i) => i.id === shopping.id) ?? null
+  const keep = state.namedLists.find((l) => l.name === 'keep_promotions')
+  return [{ pack: shopping, builtin: true, installed, meshNames: ['Frequent promotions'], conflicts: [], listEntries: { keep_promotions: keep?.entries ?? [] } }]
+}
+
+/** The running Meshes in run order; the mock does not replay mail, so counts are zero. */
+export function meshOrder(state: MockState, windowDays: number): MeshOrder {
+  const specificity = (m: Mesh) => (m.scope.kind === 'dig' ? 0 : m.scope.kind === 'dig_group' ? 1 : 2)
+  const running = latestMeshes(state, false)
+    .filter((m) => m.status === 'active' || m.status === 'shadow')
+    .sort((a, b) => specificity(a) - specificity(b) || a.priority - b.priority || a.name.localeCompare(b.name))
+  return {
+    windowDays,
+    messages: u64(0),
+    rows: running.map((m, i) => ({ position: i + 1, meshId: m.id, meshName: m.name, version: m.version, status: m.status, scope: m.scope, priority: m.priority, fallback: m.fallback, decided: u64(0), takenFirstBy: [] })),
   }
 }
 
@@ -426,11 +622,11 @@ export function privacyStatement(state: MockState, digId: string | null): string
     '',
   ]
   const mode = dig?.privacy ?? state.settings.privacyDefault
-  if (mode === 'local_only') lines.push(`${dig ? `The ${dig.name} Dig` : 'By default, each Dig'} is local-only: deterministic rules and on-device processing. Nothing from its mail leaves the device.`)
+  if (mode === 'local_only') lines.push(`${dig ? `The ${dig.name} account` : 'By default, each account'} is local-only: deterministic rules and on-device processing. Nothing from its mail leaves the device.`)
   else {
-    lines.push(`${dig ? `For the ${dig.name} Dig, c` : 'C'}lassification sends a bounded state (sender, subject, a redacted body excerpt, thread facts) to TypeSafe AI's Jev decision model (jev-1.13.0) to answer Signal questions. Jev returns probabilities, not text, and does not retain state.`)
+    lines.push(`${dig ? `For the ${dig.name} account, c` : 'C'}lassification sends a bounded state (sender, subject, a redacted body excerpt, thread facts) to TypeSafe AI's Jev decision model (jev-1.13.0) to answer Signal questions. Jev returns probabilities, not text, and does not retain state.`)
     if (mode === 'cloud_reasoning') lines.push('When Signals cannot decide, the message and its Signals go to Anthropic Claude on Amazon Bedrock (us-east-1, profile dev) for one bounded judgment. The Director and Expeditions use the same model and see only the mail they retrieve for your request. Contamination never enters their context unless you open it.')
-    else lines.push('LLM reasoning is off for this Dig: undecided mail stays Unresolved rather than leaving the device.')
+    else lines.push('LLM reasoning is off for this account: undecided mail stays Unresolved rather than leaving the device.')
   }
   lines.push('', 'Nothing in your mail is used to train any model. Riddle uses Gmail under Google\'s Limited Use requirements. Logs carry identifiers only; exports and diagnostics are redacted by default. Credentials live in the macOS keychain and are never written to disk by Riddle.')
   return lines.join('\n')
@@ -476,3 +672,62 @@ export function readLogs(state: MockState, args: { limit?: number | null; catego
 export const LOG_CATEGORIES = ['sync', 'projection', 'sift', 'judge', 'llm', 'mesh', 'director', 'expedition', 'store', 'jobs', 'ui', 'actions', 'credentials', 'app']
 
 export { DIG_WORK }
+
+/**
+ * The trust card's evidence, from the fixture the same way the core computes
+ * it: Sift decisions in the window, corrections that stand, undone entries,
+ * Spoil decisions held below Act on accounts that would archive, per-rule
+ * precision, and one offer when an account's last Spoil calls all stood.
+ */
+export function trustStats(state: MockState, digId: string | null, sinceDays: number): TrustStats {
+  const since = new Date(Date.now() - sinceDays * 86_400_000)
+  const digs = digId ? state.digs.filter((d) => d.id === digId) : state.digs
+  const level = (id: string) => state.settings.autonomy.perDig[id] ?? state.settings.autonomy.default
+  let decisions = 0
+  let wouldArchive = 0
+  const perRule = new Map<string, { decisions: number; reversed: number }>()
+  let offer: TrustStats['offer'] = null
+  for (const dig of digs) {
+    const held = belowAct(level(dig.id))
+    let streak = 0
+    let streakOpen = true
+    for (const m of state.messages.filter((x) => x.digId === dig.id).sort((a, b) => (a.date < b.date ? 1 : -1))) {
+      const spec = state.specs.get(m.id)
+      const cls = state.classifications.get(m.id)
+      if (!spec || !cls?.disposition || cls.shadow) continue
+      const bySift = spec.mechanism !== 'user' && !cls.handledByUserAt
+      if (new Date(m.date) >= since && spec.mechanism !== 'user') {
+        decisions += 1
+        if (held && dig.projection === 'full' && spec.disposition?.kind === 'spoil') wouldArchive += 1
+        if (spec.meshId) {
+          const mesh = state.meshes.filter((mm) => mm.id === spec.meshId).sort((a, b) => b.version - a.version)[0]
+          const key = mesh ? `${mesh.id}@${mesh.version}` : null
+          if (key) {
+            const r = perRule.get(key) ?? { decisions: 0, reversed: 0 }
+            r.decisions += 1
+            if (cls.handledByUserAt) r.reversed += 1
+            perRule.set(key, r)
+          }
+        }
+      }
+      if (streakOpen && spec.disposition?.kind === 'spoil') {
+        if (bySift) streak += 1
+        else if (cls.handledByUserAt) streakOpen = false
+      }
+    }
+    if (held && dig.projection !== 'none' && streak >= 40 && (!offer || streak > Number(offer.spoilCalls))) {
+      offer = { digId: dig.id, digName: dig.name, spoilCalls: u64(streak), projection: dig.projection, autonomy: level(dig.id) }
+    }
+  }
+  const inScope = (a: Activity) => !digId || a.digId === digId
+  const corrected = state.activity.filter((a) => inScope(a) && a.actor === 'user' && new Date(a.createdAt) >= since && ['set_disposition', 'restore_messages', 'move_to_spoil', 'dismiss_find', 'retype_find', 'review_shadow'].includes(a.action) && a.undo.state !== 'undone').length
+  const undone = state.activity.filter((a) => inScope(a) && new Date(a.createdAt) >= since && a.undo.state === 'undone').length
+  const rules = [...perRule.entries()]
+    .map(([key, r]) => {
+      const [id, v] = key.split('@')
+      const mesh = state.meshes.find((mm) => mm.id === id && mm.version === Number(v))!
+      return { meshId: id, name: mesh.name, version: Number(v), status: mesh.status, decisions: u64(r.decisions), reversed: u64(r.reversed), shadowProposed: mesh.shadowProposed, shadowAgreed: mesh.shadowAgreed, reversedOften: r.decisions >= 20 && r.reversed * 4 >= r.decisions }
+    })
+    .sort((a, b) => Number(b.decisions) - Number(a.decisions) || a.name.localeCompare(b.name))
+  return { since: since.toISOString(), digCount: digs.length, decisions: u64(decisions), corrected: u64(corrected), undone: u64(undone), wouldArchive: u64(wouldArchive), rules, offer }
+}

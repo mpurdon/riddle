@@ -28,6 +28,8 @@ fn harness(count: u32) -> H {
         status: DigStatus::NotConnected,
         shadow_started_at: None,
         created_at: chrono::Utc::now(),
+        disabled: false,
+        mailbox: None,
     };
     repo::digs::upsert(&stores.index(), &dig).unwrap();
     repo::user_profile::put(
@@ -301,6 +303,7 @@ async fn a_projection_echo_is_not_an_external_move_but_a_move_from_another_clien
         id: ClassificationId::new(),
         message_id: ours.id.clone(),
         dig_id: h.dig.id.clone(),
+        importance: Importance::default_for(&Disposition::Spoil),
         disposition: Disposition::Spoil,
         strata: vec![],
         notify: false,
@@ -314,6 +317,7 @@ async fn a_projection_echo_is_not_an_external_move_but_a_move_from_another_clien
         shadow: false,
         created_at: chrono::Utc::now(),
         superseded_at: None,
+        series: None,
     };
     repo::classifications::record(&store, &k).unwrap();
     enqueue_classification(&store, &h.dig, &ours, &k.disposition, &k.strata).unwrap();
@@ -387,6 +391,7 @@ async fn an_expired_cursor_triggers_a_full_resync_that_reports_differences_witho
         id: ClassificationId::new(),
         message_id: m.id.clone(),
         dig_id: h.dig.id.clone(),
+        importance: Importance::default_for(&Disposition::Spoil),
         disposition: Disposition::Spoil,
         strata: vec![],
         notify: false,
@@ -400,6 +405,7 @@ async fn an_expired_cursor_triggers_a_full_resync_that_reports_differences_witho
         shadow: false,
         created_at: chrono::Utc::now(),
         superseded_at: None,
+        series: None,
     };
     repo::classifications::record(&store, &k).unwrap();
     let gone = h
@@ -531,18 +537,17 @@ async fn refresh_now_wakes_the_dig_poller() {
     }
     let rt = b.build();
     let dig = DigId::from("dig-x");
-    let notify = triggers.for_dig(&dig);
+    let mut rx = triggers.subscribe();
     let out = rt
         .invoke_as_user("refresh_now", serde_json::json!({"digId": dig}))
         .await
         .unwrap();
-    assert_eq!(out.result["woken"], 1);
-    tokio::time::timeout(std::time::Duration::from_millis(100), notify.notified())
-        .await
-        .expect("woken");
+    assert_eq!(out.result["heard"], true);
+    assert_eq!(rx.try_recv().unwrap(), Some(dig.clone()));
     let all = rt
         .invoke_as_user("refresh_now", serde_json::json!({}))
         .await
         .unwrap();
-    assert_eq!(all.result["woken"], 1);
+    assert_eq!(all.result["heard"], true);
+    assert_eq!(rx.try_recv().unwrap(), None, "no Dig named: every account");
 }

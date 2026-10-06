@@ -13,3 +13,7 @@ serde_json.workspace = true
 log.workspace = true
 keyring.workspace = true
 parking_lot.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Attribute-only keychain searches: presence without a permission dialog.
+security-framework = "2.11"

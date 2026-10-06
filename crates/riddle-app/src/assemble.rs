@@ -53,7 +53,7 @@ mod tests {
         )))
         .unwrap();
         let s = app
-            .summary(chrono::Utc::now() - chrono::Duration::days(1))
+            .summary(chrono::Utc::now() - chrono::Duration::days(1), None)
             .unwrap();
         assert_eq!(s.dig_count, 0);
         assert!(s.caught_up);

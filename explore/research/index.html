@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Riddle UX Sources</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../assets/dossier.css">
+<style>
+.files { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-top: 14px; }
+.files a { display: block; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; text-decoration: none; color: var(--ink); background: var(--paper); font-family: var(--ui); }
+.files a:hover, .files a.on { border-color: var(--ochre); }
+.files b { display: block; font-size: 15px; }
+.files span { color: var(--ink-2); font-size: 13px; }
+#doc { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 20px; }
+#doc h1 { font-size: 34px; } #doc h2 { margin-top: 28px; } #doc h3 { margin-top: 20px; }
+#doc table { display: block; overflow-x: auto; margin: 12px 0; }
+#doc pre { overflow-x: auto; background: var(--sand); padding: 12px; border-radius: 8px; font-size: 13px; }
+#doc code { background: var(--sand); padding: 0 4px; border-radius: 4px; }
+#doc pre code { background: none; padding: 0; }
+#doc blockquote { border-left: 3px solid var(--line); margin: 0; padding: 4px 14px; color: var(--ink-2); }
+#doc p, #doc li { max-width: 78ch; }
+.raw { font-family: var(--ui); font-size: 13px; color: var(--clay); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="series"><div class="crumbs"><a href="../index.html">Riddle UX study</a><span>›</span><b>Source files</b></div><div class="crumbs"><a href="../proposals.html">Proposals</a></div></div>
+  <header class="hero" style="grid-template-columns:1fr"><div><div class="eyebrow">As written by the research agents, 25 September 2026</div><h1>Source files</h1><p class="lede">The raw material behind the study: the source audit of the desktop client, the two client surveys, the research review, and the seven expert briefs with every URL that was fetched. Pick a file to read it here, or open the Markdown directly.</p></div></header>
+  <div class="files" id="files"></div>
+  <p class="raw" style="margin-top:10px">The design-expert briefs (Spool, Wroblewski, van Schoonhoven, Showalter, Whitehurst, Onyinye, Jain) moved to <code>~/Projects/designers/&lt;name&gt;/profile.md</code> on 2026-10-01.</p>
+  <p class="raw" id="rawline" style="margin-top:10px"></p>
+  <article id="doc"></article>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script>
+(function () {
+  var FILES = [
+    ['audit.md', 'Riddle desktop usability audit', 'Every flow walked from source, Nielsen heuristics scored, top twenty ranked'],
+    ['email-clients.md', 'Mail clients', '17 clients: triage model, why, correction loop, safety; patterns and failures'],
+    ['communication-clients.md', 'Communication and task tools', 'Slack, Linear, GitHub, Things, Apple Focus and more; reason-on-row, three exits'],
+    ['psychology-hci.md', 'Psychology and HCI evidence', 'About 60 studies on email behaviour, interruption, trust in automation, learnability'],
+  ];
+  var list = document.getElementById('files'), doc = document.getElementById('doc'), rawline = document.getElementById('rawline');
+  FILES.forEach(function (f) {
+    var a = document.createElement('a'); a.href = '#' + f[0].replace(/\.md$/, ''); a.dataset.file = f[0];
+    a.innerHTML = '<b></b><span></span>'; a.querySelector('b').textContent = f[1]; a.querySelector('span').textContent = f[2] || 'Ideas, contributions, quotes, sources';
+    list.appendChild(a);
+  });
+  function show() {
+    var want = location.hash.replace(/^#/, '');
+    var f = FILES.find(function (x) { return x[0].replace(/\.md$/, '') === want; });
+    Array.prototype.forEach.call(list.children, function (a) { a.classList.toggle('on', !!f && a.dataset.file === f[0]); });
+    if (!f) { doc.innerHTML = ''; rawline.textContent = ''; return; }
+    rawline.innerHTML = 'Reading <code>' + f[0] + '</code> · <a href="' + f[0] + '">open the raw Markdown</a>';
+    doc.textContent = 'Loading…';
+    fetch(f[0]).then(function (r) { return r.text(); }).then(function (md) {
+      if (window.marked) { doc.innerHTML = marked.parse(md); } else { var pre = document.createElement('pre'); pre.textContent = md; doc.innerHTML = ''; doc.appendChild(pre); }
+      doc.scrollIntoView({ block: 'start' });
+    }).catch(function () { doc.textContent = 'Could not load ' + f[0] + '. Serve this folder over HTTP rather than opening the file directly.'; });
+  }
+  window.addEventListener('hashchange', show); show();
+})();
+</script>
+</body>
+</html>

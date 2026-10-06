@@ -16,17 +16,23 @@ pub mod actions;
 pub mod defaults;
 pub mod eval;
 pub mod format;
+pub mod humanize;
+pub mod order;
+pub mod packs;
 pub mod parse;
+pub mod policy;
 pub mod service;
 pub mod shadow;
 pub mod simulate;
 pub mod validate;
 
 pub use eval::{
-    deterministic_projection, evaluate, ListMembership, MeshDecision, ProfileLists, Truth,
+    check_routes, deterministic_projection, evaluate, evaluate_with, signals_needed,
+    ListMembership, MeshDecision, ProfileLists, Truth,
 };
 pub use format::format;
 pub use parse::{parse, parse_full, ParsedHeader};
+pub use policy::ConfidencePolicy;
 pub use service::MeshService;
 pub use simulate::{simulate, SimulationInput};
 pub use validate::{validate, RegistryResolver, SignalResolver};

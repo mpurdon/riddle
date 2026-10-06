@@ -46,6 +46,7 @@ describe('the mock Action layer follows the confirmation tiers', () => {
   })
 
   it('send_message is two-step and previews the real recipients; a reply resolves its Find', async () => {
+    state.writes = 'allow'
     state.armed = true
     const pending = await expectPending('send_message', { digId: 'dig_personal', draftId: 'draft_1' })
     expect(pending.confirmation).toBe('two_step')
@@ -58,8 +59,20 @@ describe('the mock Action layer follows the confirmation tiers', () => {
     expect(state.finds.find((f) => f.id === 'find_decide_renewal')?.resolvedBy).toBe('thread_state')
   })
 
-  it('an unarmed dev build refuses provider mutations that leave the machine', async () => {
+  it('a dev build on Hold refuses what calls the provider and runs corrections, whose change waits', async () => {
     await expect(invokeAction(state, inv('send_message', { digId: 'dig_work', draftId: 'draft_1' }))).rejects.toMatchObject({ kind: 'policy_denied' })
+    const id = state.messages[0].id
+    await invokeAction(state, inv('set_disposition', { digId: state.messages[0].digId, messageId: id, disposition: { kind: 'filed' } }, { confirmed: true }))
+    expect(state.held).toBe(1)
+  })
+
+  it('a dev build on Ask sends the waiting changes with one confirmation', async () => {
+    state.writes = 'ask'
+    state.held = 7
+    const pending = await expectPending('send_held_changes', {})
+    expect(pending.summary).toBe('Write 7 waiting changes to the mailbox')
+    await invokeAction(state, inv('send_held_changes', {}, { pendingId: pending.id }))
+    expect(state.held).toBe(0)
   })
 
   it('removing a Dig needs the exact count typed', async () => {

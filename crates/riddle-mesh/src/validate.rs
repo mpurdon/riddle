@@ -68,13 +68,27 @@ fn check_expr(e: &Expr, resolver: &dyn SignalResolver, problems: &mut Vec<String
             }
         },
         Expr::Fact { fact, .. } => {
-            if !Facts::NAMES.contains(&fact.as_str()) {
+            if !Facts::NAMES.contains(&fact.as_str())
+                && !fact.starts_with(riddle_core::HEADER_PREFIX)
+            {
                 problems.push(format!("fact {fact} does not exist"));
             }
         }
         Expr::InList { subject, .. } => {
             if subject != "sender" {
                 problems.push(format!("IN applies to sender, not {subject}"));
+            }
+        }
+        Expr::InNamedList { subject, list } => {
+            if subject != "sender" && subject != "sender_domain" {
+                problems.push(format!(
+                    "IN list:{list} applies to sender or sender_domain, not {subject}"
+                ));
+            }
+            if !riddle_core::NamedListDef::valid_name(list) {
+                problems.push(format!(
+                    "list:{list} is not a list name (lowercase letters, digits and _)"
+                ));
             }
         }
         Expr::And { items } | Expr::Or { items } => {

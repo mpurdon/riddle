@@ -1,52 +1,37 @@
-//! "Refresh now" wiring. The poller for each Dig waits on a `Notify`; the
-//! `refresh_now` Action and Demo Mode's injection poke it. Defined here
-//! rather than in `riddle-sync` so Actions in this crate can trigger a
-//! refresh without depending on the sync engine.
+//! "Refresh now" wiring: one channel every refresh request goes down, drained
+//! by one task in the app that turns each request into a sync job. It used
+//! to be a `Notify` per Dig with a listener spawned per Dig at boot, so an
+//! account added after launch had no listener and "Sync now" on it woke
+//! nobody. Defined here rather than in `riddle-sync` so Actions in this crate
+//! can trigger a refresh without depending on the sync engine.
 
-use parking_lot::RwLock;
 use riddle_core::DigId;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::Notify;
+use tokio::sync::broadcast;
 
-#[derive(Default)]
 pub struct RefreshTriggers {
-    per_dig: RwLock<HashMap<DigId, Arc<Notify>>>,
+    tx: broadcast::Sender<Option<DigId>>,
+}
+
+impl Default for RefreshTriggers {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RefreshTriggers {
     pub fn new() -> Self {
-        Self::default()
+        let (tx, _rx) = broadcast::channel(64);
+        Self { tx }
     }
 
-    /// The Notify a poller for `dig` selects on; created on first use.
-    pub fn for_dig(&self, dig: &DigId) -> Arc<Notify> {
-        if let Some(n) = self.per_dig.read().get(dig) {
-            return n.clone();
-        }
-        let n = Arc::new(Notify::new());
-        self.per_dig.write().insert(dig.clone(), n.clone());
-        n
+    /// Ask for one Dig's refresh, or every Dig's with `None`. Returns whether
+    /// anything is listening: false in a process with no background work.
+    pub fn trigger(&self, dig: Option<&DigId>) -> bool {
+        self.tx.send(dig.cloned()).is_ok()
     }
 
-    /// Wake one poller, or all of them.
-    pub fn trigger(&self, dig: Option<&DigId>) -> usize {
-        match dig {
-            Some(d) => {
-                self.for_dig(d).notify_one();
-                1
-            }
-            None => {
-                let all = self.per_dig.read();
-                for n in all.values() {
-                    n.notify_one();
-                }
-                all.len()
-            }
-        }
-    }
-
-    pub fn remove(&self, dig: &DigId) {
-        self.per_dig.write().remove(dig);
+    /// The stream of requests; the app's one drain task holds it.
+    pub fn subscribe(&self) -> broadcast::Receiver<Option<DigId>> {
+        self.tx.subscribe()
     }
 }

@@ -62,6 +62,16 @@ pub trait DirectorReads: Send + Sync {
     ) -> Result<Value>;
     /// `{ digId?, actor?, action?, since?, until?, page }` -> `Page<Activity>`.
     async fn list_activity(&self, scope: &ReadScope, args: Value) -> Result<Value>;
+    /// `{ meshId?, text?, windowDays? }` -> `SimulationReport`. Saves nothing.
+    async fn simulate_mesh(&self, _scope: &ReadScope, _args: Value) -> Result<Value> {
+        Err(RiddleError::invalid("simulate_mesh is not available here"))
+    }
+    /// `{ meshId? }` -> `{ suggestions, corrections }`.
+    async fn mesh_corrections(&self, _scope: &ReadScope, _args: Value) -> Result<Value> {
+        Err(RiddleError::invalid(
+            "mesh_corrections is not available here",
+        ))
+    }
 }
 
 /// Sized handle for `Services::insert`, like `ProjectionHookHandle`.
@@ -173,5 +183,11 @@ impl DirectorReads for ScriptedReads {
     }
     async fn list_activity(&self, _scope: &ReadScope, args: Value) -> Result<Value> {
         self.next("list_activity", args)
+    }
+    async fn simulate_mesh(&self, _scope: &ReadScope, args: Value) -> Result<Value> {
+        self.next("simulate_mesh", args)
+    }
+    async fn mesh_corrections(&self, _scope: &ReadScope, args: Value) -> Result<Value> {
+        self.next("mesh_corrections", args)
     }
 }

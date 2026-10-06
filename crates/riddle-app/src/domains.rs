@@ -19,7 +19,7 @@ use riddle_projection::outbox::OutboxProcessor;
 use riddle_store::repo;
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JudgeConfig {
     /// `jev`, `scripted` or `null`.
     pub provider: String,
@@ -43,13 +43,150 @@ impl Default for JudgeConfig {
 }
 
 /// Writes Sift's decisions into the provider through the outbox (§15).
+/// The autonomy name projection is governed by; a per-action override in
+/// settings can set it apart from the Dig's level.
+pub const PROJECTION_AUTONOMY: &str = "apply_projection";
+
+/// Whether a Mesh's `Autonomy:` cap keeps its decisions inside Riddle: a
+/// cap below Act does; no cap follows the account. The one predicate behind
+/// `mesh_projection_held` and the projection hook's cache.
+fn cap_holds(cap: Option<Autonomy>) -> bool {
+    cap.is_some_and(|a| a < Autonomy::Act)
+}
+
+/// Why this Mesh's decisions stay in Riddle whatever the account allows:
+/// the Mesh carries an `Autonomy:` cap below Act (Flow 7, per-rule
+/// autonomy). `None` when the Mesh follows the account.
+pub fn mesh_projection_held(mesh: &Mesh) -> Option<String> {
+    mesh.autonomy
+        .filter(|a| cap_holds(Some(*a)))
+        .map(|a| format!("Mesh {} is capped at {}", mesh.name, a.as_str()))
+}
+
+/// Why Sift's decision for this Dig stays in Riddle, or `None` when it may
+/// be queued for the mailbox.
+///
+/// Projection writes labels and archive state in the user's mailbox, but
+/// Sift's decisions reached Gmail without passing the Action layer, so
+/// Observe and Suggest let them through: the only brake was a Shadow Period
+/// nothing ever started. Sift now needs the Dig at Act or above. The user's
+/// own moves are Actions, already authorized, and are not held here.
+pub fn sift_projection_held(
+    policy: &riddle_actions::policy::AutonomyPolicy,
+    dig: &DigId,
+) -> Option<String> {
+    let level = policy.level_for(Some(dig), PROJECTION_AUTONOMY);
+    (level < Autonomy::Act).then(|| {
+        format!(
+            "autonomy is {}; Sift changes Gmail from Act",
+            level.as_str()
+        )
+    })
+}
+
+/// What Sift's decisions do to this account's mailbox right now, from the
+/// same functions that gate projection, so every client phrases one typed
+/// answer instead of re-deriving the rule.
+pub fn mailbox_effect(policy: &riddle_actions::policy::AutonomyPolicy, dig: &Dig) -> MailboxEffect {
+    let writes = match dig.projection {
+        ProjectionMode::None => MailboxWrites::Nothing,
+        ProjectionMode::LabelsOnly => MailboxWrites::Labels,
+        ProjectionMode::Full => MailboxWrites::LabelsAndArchive,
+    };
+    if writes == MailboxWrites::Nothing {
+        return MailboxEffect { writes, held: None };
+    }
+    if sift_projection_held(policy, &dig.id).is_some() {
+        return MailboxEffect {
+            writes: MailboxWrites::Nothing,
+            held: Some(HeldReason::Autonomy),
+        };
+    }
+    if sending_held(policy).is_some() {
+        return MailboxEffect {
+            writes: MailboxWrites::Nothing,
+            held: Some(HeldReason::DevUnarmed),
+        };
+    }
+    MailboxEffect { writes, held: None }
+}
+
+/// Why the outbox may not send on its own now, whoever queued it: a dev
+/// build on Hold or Ask (§59). On Ask the user sends what is waiting with
+/// `send_held_changes`; on Hold nothing goes until they choose otherwise.
+pub fn sending_held(policy: &riddle_actions::policy::AutonomyPolicy) -> Option<String> {
+    (policy.dev && policy.writes != riddle_core::ProviderWrites::Allow).then(|| {
+        format!(
+            "this dev build's mailbox writes are on {}",
+            policy.writes.as_str()
+        )
+    })
+}
+
 pub struct OutboxProjection {
     stores: Arc<riddle_store::Stores>,
+    runtime: Arc<riddle_actions::Runtime>,
+    /// A Mesh version's autonomy cap never changes once written, so the hook
+    /// remembers each one it has looked up: the Sift pipeline calls this once
+    /// per message, and a catch-up must not read the same Mesh row ten
+    /// thousand times.
+    caps: std::sync::Mutex<std::collections::HashMap<(MeshId, u32), Option<Autonomy>>>,
+}
+
+impl OutboxProjection {
+    pub fn new(stores: Arc<riddle_store::Stores>, runtime: Arc<riddle_actions::Runtime>) -> Self {
+        Self {
+            stores,
+            runtime,
+            caps: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// The cap of one Mesh version, read once. Absent Meshes cache as `None`.
+    fn mesh_cap(
+        &self,
+        index: &riddle_store::Store,
+        mid: &MeshId,
+        version: u32,
+    ) -> Result<Option<Autonomy>> {
+        let key = (mid.clone(), version);
+        if let Some(cap) = self
+            .caps
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&key)
+        {
+            return Ok(*cap);
+        }
+        let cap = repo::meshes::get(index, mid, version)?.and_then(|m| m.autonomy);
+        self.caps
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key, cap);
+        Ok(cap)
+    }
 }
 
 impl ProjectionHook for OutboxProjection {
     fn project(&self, dig_id: &DigId, classification: &Classification) -> Result<()> {
+        // Below Act, Sift's decision stays in Riddle. It is not queued for
+        // later either, so raising autonomy never releases a backlog. Your own
+        // corrections (Move to Spoil, set disposition) come through this hook
+        // too, as User classifications, and are already authorized.
+        if classification.mechanism != DecisionMechanism::User
+            && sift_projection_held(&self.runtime.policy.read(), dig_id).is_some()
+        {
+            return Ok(());
+        }
         let index = self.stores.index();
+        // A rule may hold its own decisions below what the account allows.
+        if classification.mechanism != DecisionMechanism::User {
+            if let (Some(mid), Some(v)) = (&classification.mesh_id, classification.mesh_version) {
+                if cap_holds(self.mesh_cap(&index, mid, v)?) {
+                    return Ok(());
+                }
+            }
+        }
         let Some(dig) = repo::digs::get(&index, dig_id)? else {
             return Ok(());
         };
@@ -98,16 +235,19 @@ impl App {
         self: &Arc<Self>,
         gmail: Option<riddle_gmail::GmailOAuthConfig>,
     ) -> Result<Arc<Domains>> {
-        let credentials = Arc::new(if self.config.data_dir.is_some() {
+        let credentials = Arc::new(if self.config.data_dir.is_some() && !self.config.offline {
             Credentials::keyring(self.config.dev)
         } else {
             Credentials::in_memory()
         });
         let providers = Arc::new(ProviderRegistry::new(self.stores.clone()));
-        providers.set_gmail_factory(Arc::new(riddle_gmail::GmailProviderFactory::new(
+        let gmail_factory = Arc::new(riddle_gmail::GmailProviderFactory::new(
             gmail,
             credentials.clone(),
-        )));
+        ));
+        providers.set_gmail_factory(gmail_factory.clone());
+        // Kept so a changed client id reaches sync without a restart (`live`).
+        self.services.insert(gmail_factory);
         let triggers = Arc::new(RefreshTriggers::new());
         let finds = Arc::new(FindService::new(
             self.stores.clone(),
@@ -115,9 +255,10 @@ impl App {
             self.events.clone(),
         ));
         let outbox = Arc::new(OutboxProcessor::new(self.stores.clone(), providers.clone()));
-        let projection: Arc<dyn ProjectionHook> = Arc::new(OutboxProjection {
-            stores: self.stores.clone(),
-        });
+        let projection: Arc<dyn ProjectionHook> = Arc::new(OutboxProjection::new(
+            self.stores.clone(),
+            self.runtime.clone(),
+        ));
 
         self.services.insert(credentials.clone());
         self.services.insert(providers.clone());
@@ -181,7 +322,21 @@ impl App {
                     model: cfg.model.clone(),
                     ..Default::default()
                 };
-                match JevJudge::from_source(config, &source).await {
+                // The keychain key is the `jev_api_key` item the app stores
+                // and reports presence for (`set_secret`). The older
+                // `<service>/jev` item is still read if that one is absent.
+                let stored = (cfg.key_source == "keychain")
+                    .then(|| self.services.get::<Credentials>())
+                    .flatten()
+                    .and_then(|c| c.get(riddle_credentials::JEV_API_KEY).ok().flatten())
+                    .filter(|k| !k.trim().is_empty());
+                let built = match stored {
+                    Some(key) => {
+                        JevJudge::new(config, riddle_judge::secret::SecretString::new(key))
+                    }
+                    None => JevJudge::from_source(config, &source).await,
+                };
+                match built {
                     Ok(j) => Some(Arc::new(j.with_usage_recorder(recorder))),
                     Err(e) => {
                         rwarn!(

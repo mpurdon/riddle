@@ -6,7 +6,10 @@ use crate::gates::{contamination_evidence, find_supported, never_hidden_reason};
 use crate::{Sift, SiftInput, SiftOutcome};
 use riddle_core::*;
 use riddle_errors::{ErrorKind, Result};
-use riddle_mesh::{deterministic_projection, evaluate, MeshDecision, MeshService, ProfileLists};
+use riddle_mesh::{
+    deterministic_projection, evaluate_with, ConfidencePolicy, MeshDecision, MeshService,
+    ProfileLists,
+};
 use riddle_observability::{rdebug, rinfo, rwarn, Category};
 use riddle_signals::{
     assign_to_sets, cached_or_evaluate, select_sets, Registry, SetId, StateBuilder, StateInput,
@@ -21,6 +24,9 @@ struct Draft {
     disposition: Disposition,
     strata: Vec<String>,
     notify: bool,
+    /// The output of the route that decided, for what a Find it raises
+    /// carries (`+ Replaces`, `+ Expires:`).
+    route: Option<MeshOutput>,
     mechanism: DecisionMechanism,
     mesh_id: Option<MeshId>,
     mesh_version: Option<u32>,
@@ -48,6 +54,7 @@ impl Draft {
             disposition: Disposition::Unresolved,
             strata: vec![],
             notify: false,
+            route: None,
             mechanism: DecisionMechanism::Deterministic,
             mesh_id: None,
             mesh_version: None,
@@ -76,17 +83,10 @@ enum Confidence {
     Uncertain(String),
 }
 
-fn required_margin(sift: &Sift, d: &Disposition) -> f64 {
-    match d {
-        Disposition::Spoil => sift.opts.margin_spoil,
-        Disposition::Find { .. } => sift.opts.margin_find,
-        Disposition::Filed => sift.opts.margin_filed,
-        Disposition::Contamination => sift.opts.margin_contamination,
-        Disposition::Unresolved => 0.0,
-    }
-}
-
-fn assess(sift: &Sift, decision: &MeshDecision, non_english: bool) -> Confidence {
+/// Whether the decision stands under the confidence policy, and if not why:
+/// the same `ConfidencePolicy::hold_reason` the simulator applies, so a
+/// preview and a decision never disagree about the same message.
+fn assess(policy: &ConfidencePolicy, decision: &MeshDecision, language: &str) -> Confidence {
     let Some(output) = &decision.output else {
         return Confidence::Uncertain(if decision.unresolved_signal_refs.is_empty() {
             "no route matched".into()
@@ -103,24 +103,10 @@ fn assess(sift: &Sift, decision: &MeshDecision, non_english: bool) -> Confidence
     let Some(d) = &output.disposition else {
         return Confidence::Uncertain("the route produced no disposition".into());
     };
-    if matches!(d, Disposition::Unresolved) {
-        return Confidence::Confident;
+    match policy.hold_reason(d.kind(), decision.margin, language) {
+        Some(why) => Confidence::Uncertain(why),
+        None => Confidence::Confident,
     }
-    let required = required_margin(sift, d);
-    if let Some(m) = decision.margin {
-        if m < required {
-            return Confidence::Uncertain(format!(
-                "weakest Signal margin {m:.2} is below the {required:.2} required for {}",
-                d.kind().as_str()
-            ));
-        }
-    }
-    if non_english && decision.margin.is_some() {
-        return Confidence::Uncertain(
-            "the message is not in English; Signals are less reliable".into(),
-        );
-    }
-    Confidence::Confident
 }
 
 fn confidence_from(decision: &MeshDecision) -> Option<f64> {
@@ -141,6 +127,26 @@ fn identity_key(m: &Message) -> String {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| m.thread_id.provider_id().to_string())
+}
+
+/// The least priority a Find from a `+ Notify` route has.
+const NOTIFY_PRIORITY: u8 = 95;
+
+/// How much a message matters when no route says: hidden mail is Low, a
+/// Find takes the band its priority score falls in, the rest is Normal;
+/// "tell me now" (`+ Notify`) is Critical, which also sorts it first, as
+/// Notify always has.
+fn derived_importance(disposition: &Disposition, priority: u8, notify: bool) -> Importance {
+    let level = match disposition {
+        Disposition::Find { .. } => Importance::from_priority(priority),
+        Disposition::Spoil | Disposition::Filed | Disposition::Contamination => Importance::Low,
+        Disposition::Unresolved => Importance::Normal,
+    };
+    if notify {
+        Importance::Critical
+    } else {
+        level
+    }
 }
 
 fn priority_for(facts: &Facts, evaluations: &[SignalEvaluation], never_hidden: bool) -> u8 {
@@ -212,6 +218,19 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
     timing.facts_ms = t.elapsed().as_millis() as u64;
     stage(sift, &message_id, "facts", timing.facts_ms);
 
+    // A draft is the user's own unfinished writing: filed, never judged, and
+    // no Thread State, because nothing has been asked or promised yet. Read
+    // as received mail, a draft to yourself looked like a first-time sender.
+    if facts.is_draft {
+        draft.disposition = Disposition::Filed;
+        draft.mechanism = DecisionMechanism::Deterministic;
+        draft.matched_rule = Some("drafts are Filed".into());
+        draft.reason = "Your draft; Riddle files drafts without judging them.".into();
+        return Ok(finish(
+            sift, &input, facts, draft, timing, cost, started, now,
+        ));
+    }
+
     // 2. Gates.
     let never_hidden = never_hidden_reason(&facts, &input);
     let contamination = contamination_evidence(&facts, &input.people);
@@ -248,6 +267,8 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
     // 3. Signal Selection and 4. the judge (cache first).
     let registry = Registry::new(index.clone());
     let meshes = MeshService::new(index.clone()).in_scope(&dig_id, input.dig.group.as_deref())?;
+    // The user's named lists (`sender IN list:banks`), read once per message.
+    let named = repo::lists::named(&index)?;
     let judge = sift
         .judge
         .as_ref()
@@ -255,7 +276,14 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
     let (needed, unresolvable) = if input.message.is_sent {
         select_sent(&registry)
     } else {
-        select_signals(&registry, &meshes)
+        let sender = input.message.from.email.to_ascii_lowercase();
+        let lists = ProfileLists {
+            profile: &input.profile,
+            sender: &sender,
+            facts: &facts,
+            named: &named,
+        };
+        select_signals(&registry, &meshes, &facts, &lists)
     };
     let mut judge_reason: Option<String> = None;
     if judge.is_none() {
@@ -389,13 +417,20 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
         profile: &input.profile,
         sender: &sender,
         facts: &facts,
+        named: &named,
     };
     let routed_meshes: Vec<Mesh> = if draft.judge_unavailable {
         meshes.iter().map(deterministic_projection).collect()
     } else {
         meshes.clone()
     };
-    let mut decision = evaluate(&routed_meshes, &facts, &draft.evaluations, &lists);
+    let mut decision = evaluate_with(
+        &routed_meshes,
+        &facts,
+        &draft.evaluations,
+        &lists,
+        Some(&sift.opts.policy),
+    );
     timing.mesh_ms = t.elapsed().as_millis() as u64;
     stage(sift, &message_id, "mesh", timing.mesh_ms);
     if !unresolvable.is_empty() {
@@ -407,9 +442,7 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
     }
 
     // 6. Confidence policy and 7. escalation.
-    let non_english =
-        sift.opts.escalate_non_english && facts.language != "en" && facts.language != "und";
-    let mut verdict = assess(sift, &decision, non_english);
+    let mut verdict = assess(&sift.opts.policy, &decision, &facts.language);
     let mut refined_by_llm = false;
     if let Confidence::Uncertain(reason) = &verdict {
         if draft.judge_unavailable {
@@ -474,9 +507,22 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
                                 latency_ms: resp.latency_ms,
                             });
                             let t = Instant::now();
-                            decision = evaluate(&meshes, &facts, &draft.evaluations, &lists);
+                            decision = evaluate_with(
+                                &meshes,
+                                &facts,
+                                &draft.evaluations,
+                                &lists,
+                                Some(&sift.opts.policy),
+                            );
                             timing.mesh_ms += t.elapsed().as_millis() as u64;
-                            verdict = assess(sift, &decision, false);
+                            // The non-English hold is for Signals scored
+                            // without reading the message; the refiner has
+                            // read it, so only the margins still apply.
+                            let read = ConfidencePolicy {
+                                escalate_non_english: false,
+                                ..sift.opts.policy
+                            };
+                            verdict = assess(&read, &decision, &facts.language);
                             refined_by_llm = true;
                             if let Confidence::Uncertain(still) = &verdict {
                                 draft.reason = format!("Unresolved after escalation: {still}.");
@@ -520,6 +566,7 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
                 .unwrap_or(Disposition::Unresolved);
             draft.strata = output.strata.clone();
             draft.notify = output.notify;
+            draft.route = Some(output.clone());
             draft.confidence = confidence_from(&decision);
             draft.mechanism = if refined_by_llm {
                 DecisionMechanism::Llm
@@ -533,16 +580,30 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
                 .as_ref()
                 .map(|n| format!("{n} v{}", decision.mesh_version.unwrap_or(0)))
                 .unwrap_or_default();
-            draft.reason = if decision.vetoed() {
-                format!(
-                    "{mesh_key} routed it, but a guard vetoed: {}",
-                    decision.vetoes.join("; ")
-                )
-            } else {
+            // The reason is the route in words (riddle_mesh::humanize); the
+            // rule as written stays in `matched_rule` for the inspector.
+            let words = decision.words.clone().unwrap_or_else(|| {
                 format!(
                     "{mesh_key}: {}",
                     decision.matched_rule.clone().unwrap_or_default()
                 )
+            });
+            // A thin match an earlier Mesh made, passed over for this one.
+            let words = if decision.passed_over.is_empty() {
+                words
+            } else {
+                format!(
+                    "{words} Passed over first, too close to call: {}.",
+                    decision.passed_over.join("; ")
+                )
+            };
+            draft.reason = if decision.vetoed() {
+                format!(
+                    "{words} A guard vetoed it: {}.",
+                    decision.veto_words.join("; ")
+                )
+            } else {
+                words
             };
         }
         _ => {
@@ -609,10 +670,15 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
     ))
 }
 
-fn select_signals(registry: &Registry, meshes: &[Mesh]) -> (Vec<Signal>, Vec<String>) {
+fn select_signals(
+    registry: &Registry,
+    meshes: &[Mesh],
+    facts: &Facts,
+    lists: &dyn riddle_mesh::ListMembership,
+) -> (Vec<Signal>, Vec<String>) {
     let mut refs: Vec<(String, u32)> = Vec::new();
     for m in meshes {
-        for r in m.signal_refs() {
+        for r in riddle_mesh::signals_needed(m, facts, lists) {
             if !refs.contains(&r) {
                 refs.push(r);
             }
@@ -667,8 +733,26 @@ fn finish(
         .gate
         .as_deref()
         .is_some_and(|g| g.starts_with("never_hidden"));
+    // The `+ Replaces` series (Mesh and sender): a Find carries it as its
+    // FindSeries, Spoil and Filed on the classification.
+    let series = draft
+        .mesh_id
+        .as_ref()
+        .filter(|_| draft.route.as_ref().is_some_and(|r| r.replaces))
+        .map(|mesh| series_key(mesh, &input.message.from.email));
+    let score = priority_for(&facts, &draft.evaluations, never_hidden);
+    // A route's own level wins, when the route's decision is the one that
+    // stood (a gate can leave its match Unresolved); the score keeps the
+    // order within the level.
+    let importance = draft
+        .route
+        .as_ref()
+        .filter(|r| r.disposition.as_ref() == Some(&draft.disposition))
+        .and_then(|r| r.importance)
+        .unwrap_or_else(|| derived_importance(&draft.disposition, score, draft.notify));
     let find = match &draft.disposition {
         Disposition::Find { find_type } if !input.message.is_sent => Some(FindProposal {
+            code: Some(facts.verification_code.clone()).filter(|c| !c.is_empty()),
             find_type: *find_type,
             title: input.message.subject.clone(),
             summary: if input.message.snippet.trim().is_empty() {
@@ -676,7 +760,12 @@ fn finish(
             } else {
                 input.message.snippet.clone()
             },
-            priority: priority_for(&facts, &draft.evaluations, never_hidden),
+            // "Tell me now" also means "first in the list".
+            priority: if draft.notify && importance == Importance::Critical {
+                importance.clamp_priority(score).max(NOTIFY_PRIORITY)
+            } else {
+                importance.clamp_priority(score)
+            },
             reason: draft.reason.clone(),
             identity_key: identity_key(&input.message),
             due_at: facts
@@ -693,6 +782,17 @@ fn finish(
             confidence: draft.confidence,
             classification_id: Some(classification_id.clone()),
             trace_id: Some(trace_id.clone()),
+            series: series.clone().map(|key| FindSeries {
+                key,
+                message_at: input.message.date,
+            }),
+            // From the message's own date, so a reminder sifted late (or
+            // re-decided from history) expires when it would have anyway,
+            // in the user's timezone for "end of day" and "next morning".
+            expires_at: draft.route.as_ref().and_then(|r| r.expires).map(|e| {
+                crate::expiry::expires_at(e, input.message.date, input.profile.timezone.as_deref())
+            }),
+            notify: draft.notify,
         }),
         _ => None,
     };
@@ -719,6 +819,9 @@ fn finish(
         shadow: draft.shadow,
         created_at: now,
         superseded_at: None,
+        series: series
+            .filter(|_| matches!(draft.disposition, Disposition::Spoil | Disposition::Filed)),
+        importance,
     };
     let trace = DecisionTrace {
         id: trace_id,
@@ -781,6 +884,7 @@ fn finish(
         mesh_decision: draft.decision,
         note,
         truncated: draft.truncated,
+        superseded: vec![],
     }
 }
 
@@ -829,6 +933,11 @@ pub fn persist(sift: &Sift, outcome: &mut SiftOutcome) -> Result<Option<FindProp
     );
     if outcome.shadow {
         return Ok(None);
+    }
+    // Spoil and Filed with `+ Replaces`: the series settles now, so the
+    // store's previous sale is superseded the moment the next one is sifted.
+    if let Some(key) = outcome.classification.series.as_deref() {
+        outcome.superseded = repo::message_series::settle(&store, key, &sift.clock.now())?;
     }
     Ok(outcome.find.clone())
 }

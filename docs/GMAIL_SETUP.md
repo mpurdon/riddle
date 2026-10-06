@@ -77,25 +77,38 @@ but treat it as something to confirm rather than a promise.
    loopback redirects on any port, which is what lets Riddle bind
    `http://127.0.0.1:<random port>/callback` fresh for each sign-in.
 
-5. **Copy the client id.** It looks like
-   `1234567890-abcdefghijklmnopqrstuvwx.apps.googleusercontent.com`. Ignore
-   the client secret if one is shown; Riddle does not use it.
+5. **Download the client JSON.** The dialog after **Create** (or the
+   client's row under **Clients**) offers **Download JSON**, a
+   `client_secret_<id>.json` file holding the client id and, if Google
+   issued one, the client secret. Keep it out of this repository and delete
+   it once imported. Or copy the client id, which looks like
+   `1234567890-abcdefghijklmnopqrstuvwx.apps.googleusercontent.com`, and the
+   secret by hand.
 
 ## In Riddle
 
-1. **Settings → Providers** → paste the client id into the Gmail field →
-   save. It is stored in `settings.toml` in the clear, which is correct: it
-   is not a secret.
+1. **Settings → Accounts → Add account → Gmail.** The wizard walks the rest:
 
-2. **Dev builds only:** a development build starts unarmed and refuses every
-   provider mutation, so connecting a real mailbox is blocked until you arm
-   it in **Developer Mode** (press and hold). Release builds skip this.
+   - **Google client.** Import the downloaded JSON (or enter the id and
+     secret by hand). This happens once; later accounts skip the step. The
+     client id goes to `settings.toml` in the clear, which is correct: it is
+     not a secret. The client secret goes to the keychain, and a file
+     without one removes any stored secret. A file for a *Web application*
+     client is refused; create a Desktop app client instead. The same
+     controls live under **Settings → Accounts → Google sign-in**.
+   - **Behaviour.** Name, group, autonomy, Gmail changes and privacy. New
+     accounts start at **Observe** with **no Gmail changes**, so you can
+     look at what Riddle makes of the mail before it touches anything.
+   - **Sign in.** In a development build the wizard first asks you to arm
+     it (hold the button): a dev build refuses to talk to a real mailbox
+     until armed. Release builds skip this. Then your browser opens
+     Google's consent screen; approve it and come back. The wizard waits,
+     shows the account when Google returns, and says why if it does not.
 
-3. **Settings → Digs → Connect Gmail.** Your browser opens Google's consent
-   screen; approve it, and the tab says you can close it. Riddle then reads
-   the account's address from Google, creates the Dig and queues its first
-   sync. The button stays disabled with the reason shown until a client id
-   exists.
+2. **Afterwards**, everything about the account is in its pane under
+   **Settings → Accounts**: status, Sync now, Test connection, autonomy,
+   Gmail changes, privacy, group, and Remove. The "Right now" line there
+   says in one sentence what Riddle will do to the mailbox.
 
 The same thing from the command line, which is useful when the window is not
 running:
@@ -132,8 +145,8 @@ overwriting anything.
 | What you see | What it means |
 |---|---|
 | `admin_policy_enforced` | A Workspace administrator blocks unconfigured third-party apps. They need to mark your client id Trusted in the admin console; Riddle shows this error with what to ask for. |
-| "Google did not return a refresh token" | Google only issues one on first consent. Remove Riddle from the account's third-party access list (<https://myaccount.google.com/connections>) and sign in again. |
-| Sign-in works, then stops after a week | The app is External and still in Testing: authorisations expire seven days after consent. Publish it, or move to an Internal client on a Workspace domain. |
+| "Google did not return a refresh token" | Google only issues one on first consent. Remove Riddle from the account's third-party access list (<https://myaccount.google.com/connections>), then open the account in Settings → Accounts and choose **Sign in again**. |
+| Sign-in works, then stops after a week | The app is External and still in Testing: authorisations expire seven days after consent. **Sign in again** from the account in Settings → Accounts keeps everything Riddle learned; publish the app, or move to an Internal client on a Workspace domain, to stop it recurring. |
 | An "unverified app" warning | Expected for an External app that has not been through verification. Fine for your own use; not something to put in front of other people. |
 | Sign-in fails after many reconnects | Google allows 100 refresh tokens per client id per account; the oldest are revoked silently. |
 
@@ -163,6 +176,7 @@ take Riddle beyond your own use:
   development build can never reach a mailbox a release build connected).
   The webview is only ever told whether a credential is present, never its
   value.
+- **Signing in again**: open the account in Settings → Accounts and choose Sign in again. The refresh token is replaced under the same keychain key; the account keeps its name, settings, corrections and history, and a catch-up runs.
 - **Disconnecting**: remove the Dig in Settings. That purges its store, its
   traces, its exports and its keychain entry. To revoke from Google's side as
   well, remove Riddle at <https://myaccount.google.com/connections>.

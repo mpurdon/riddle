@@ -23,6 +23,26 @@ const DIG: &[Migration] = &[
         name: "embeddings",
         sql: include_str!("../migrations/dig/0002_embeddings.sql"),
     },
+    Migration {
+        version: 3,
+        name: "shadow_reviews",
+        sql: include_str!("../migrations/dig/0003_shadow_reviews.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "message_series",
+        sql: include_str!("../migrations/dig/0004_message_series.sql"),
+    },
+    Migration {
+        version: 5,
+        name: "trace_recency",
+        sql: include_str!("../migrations/dig/0005_trace_recency.sql"),
+    },
+    Migration {
+        version: 6,
+        name: "importance",
+        sql: include_str!("../migrations/dig/0006_importance.sql"),
+    },
 ];
 const INDEX: &[Migration] = &[
     Migration {
@@ -34,6 +54,16 @@ const INDEX: &[Migration] = &[
         version: 2,
         name: "usage",
         sql: include_str!("../migrations/index/0002_usage.sql"),
+    },
+    Migration {
+        version: 3,
+        name: "find_series_and_expiry",
+        sql: include_str!("../migrations/index/0003_find_series_and_expiry.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "find_kept",
+        sql: include_str!("../migrations/index/0004_find_kept.sql"),
     },
 ];
 

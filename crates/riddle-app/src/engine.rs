@@ -25,12 +25,81 @@ type SiftGroups = std::collections::BTreeMap<
     (Vec<MessageId>, u64, u64, Option<TraceId>),
 >;
 
+/// The Mesh version whose route did something: (mesh id, version, name).
+type MeshKey = (String, u32, String);
+
+/// What a rule did in a pass, per Mesh version, with the trace of the first.
+type MeshGroups<T> = std::collections::BTreeMap<MeshKey, (Vec<T>, TraceId)>;
+
+fn mesh_key(t: &DecisionTrace) -> MeshKey {
+    (
+        t.mesh_id
+            .as_ref()
+            .map(|m| m.to_string())
+            .unwrap_or_default(),
+        t.mesh_version.unwrap_or(0),
+        t.mesh_name.clone().unwrap_or_default(),
+    )
+}
+
+fn mesh_provenance((id, version, name): &MeshKey, trace: TraceId) -> Provenance {
+    Provenance {
+        mechanism: DecisionMechanism::Mesh,
+        mesh_id: Some(MeshId::from(id.as_str())),
+        mesh_version: Some(*version),
+        mesh_name: Some(name.clone()),
+        trace_id: Some(trace),
+        note: None,
+    }
+}
+
+/// An Activity a rule's side effect records, undone through `action`.
+struct RuleActivity {
+    action: &'static str,
+    summary: String,
+    why: String,
+    affected: Vec<EntityRef>,
+    restore: serde_json::Value,
+    undo_label: &'static str,
+    dig: Option<DigId>,
+    provenance: Option<Provenance>,
+}
+
+/// "Replaced an older Find: Time to write" / "Replaced 3 Finds; 1 Find
+/// expired": each closed Find's status says which rule closed it.
+fn closed_summary(finds: &[Find]) -> String {
+    if let [one] = finds {
+        return match one.status {
+            FindStatus::Expired => format!("{} expired: {}", one.find_type.label(), one.title),
+            _ => format!("Replaced an older Find: {}", one.title),
+        };
+    }
+    let expired = finds
+        .iter()
+        .filter(|f| f.status == FindStatus::Expired)
+        .count();
+    let replaced = finds.len() - expired;
+    let mut parts = Vec::new();
+    if replaced > 0 {
+        parts.push(format!("Replaced {}", plural(replaced, "older Find")));
+    }
+    if expired > 0 {
+        parts.push(format!("{} expired", plural(expired, "Find")));
+    }
+    parts.join("; ")
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SiftPassReport {
     pub processed: u64,
     pub finds_created: u64,
     pub finds_joined: u64,
+    /// Finds settling closed: replaced by a newer one of their series, or
+    /// past their `+ Expires:` when decided.
+    pub finds_closed: u64,
+    /// Spoil and Filed messages a newer one of their series superseded.
+    pub messages_superseded: u64,
     pub unresolved: u64,
     pub hidden: u64,
     pub failed: u64,
@@ -124,11 +193,21 @@ impl App {
         );
         let domains = self.domains()?;
         let store = self.stores.dig(&dig.id)?;
-        let sift = Sift::from_services(&self.services);
+        let mut sift = Sift::from_services(&self.services);
+        if let Some(settings) = self.services.get::<riddle_settings::SettingsStore>() {
+            sift = sift.with_budget(Arc::new(EscalationCap {
+                stores: self.stores.clone(),
+                settings,
+            }));
+        }
         let ids = repo::messages::unclassified_ids(&store, limit)?;
         let mut report = SiftPassReport::default();
         // Grouped for the ledger: (mesh id, version, name, disposition kind) -> (ids, cached, fresh, trace of first).
         let mut groups: SiftGroups = std::collections::BTreeMap::new();
+        // Finds settling closed, by the Mesh version whose route closed them.
+        let mut closed: MeshGroups<Find> = std::collections::BTreeMap::new();
+        // Messages superseded, by the Mesh version whose route did it.
+        let mut superseded: MeshGroups<MessageId> = std::collections::BTreeMap::new();
         for id in ids {
             if cancel.is_some_and(|c| c.is_cancelled()) {
                 break;
@@ -199,13 +278,29 @@ impl App {
                             self.services.clock.now(),
                         );
                     }
+                    if !outcome.superseded.is_empty() {
+                        report.messages_superseded += outcome.superseded.len() as u64;
+                        superseded
+                            .entry(mesh_key(&outcome.trace))
+                            .or_insert_with(|| (Vec::new(), outcome.trace.id.clone()))
+                            .0
+                            .extend(outcome.superseded.iter().cloned());
+                    }
                     if let Some(proposal) = outcome.find.as_ref().filter(|_| !outcome.shadow) {
                         match domains.finds.apply_proposal(proposal) {
-                            Ok((_, joined)) => {
-                                if joined {
+                            Ok(applied) => {
+                                if applied.joined {
                                     report.finds_joined += 1
                                 } else {
                                     report.finds_created += 1
+                                }
+                                if !applied.closed.is_empty() {
+                                    report.finds_closed += applied.closed.len() as u64;
+                                    closed
+                                        .entry(mesh_key(&outcome.trace))
+                                        .or_insert_with(|| (Vec::new(), outcome.trace.id.clone()))
+                                        .0
+                                        .extend(applied.closed);
                                 }
                             }
                             Err(e) => rwarn!(
@@ -227,11 +322,83 @@ impl App {
             }
         }
         self.record_sift_activity(dig, groups);
+        for (key, (finds, trace)) in closed {
+            let ids: Vec<&FindId> = finds.iter().map(|f| &f.id).collect();
+            self.record_rule_activity(RuleActivity {
+                action: "close_finds",
+                summary: closed_summary(&finds),
+                why: format!(
+                    "Mesh: {} v{} says a newer one replaces them, or when they expire",
+                    key.2, key.1
+                ),
+                affected: ids
+                    .iter()
+                    .map(|id| EntityRef::new(EntityKind::Find, *id))
+                    .collect(),
+                restore: serde_json::json!({ "findIds": ids }),
+                undo_label: if ids.len() > 1 {
+                    "Keep them open"
+                } else {
+                    "Keep it open"
+                },
+                dig: Some(dig.id.clone()),
+                provenance: Some(mesh_provenance(&key, trace)),
+            });
+        }
+        for (key, (ids, trace)) in superseded {
+            self.record_rule_activity(RuleActivity {
+                action: "supersede_messages",
+                summary: format!("{} superseded by newer mail", plural(ids.len(), "message")),
+                why: format!(
+                    "Mesh: {} v{} says only the newest from a sender matters",
+                    key.2, key.1
+                ),
+                affected: ids
+                    .iter()
+                    .map(|id| EntityRef::new(EntityKind::Message, id))
+                    .collect(),
+                restore: serde_json::json!({ "digId": dig.id, "messageIds": ids }),
+                undo_label: if ids.len() > 1 {
+                    "Keep them"
+                } else {
+                    "Keep it"
+                },
+                dig: Some(dig.id.clone()),
+                provenance: Some(mesh_provenance(&key, trace)),
+            });
+        }
         report.remaining = repo::messages::unclassified_count(&store)?;
         rinfo!(Category::Sift, "pass {}: processed {} ({} cached, {} fresh signals), finds +{} joined {}, unresolved {}, hidden {}, remaining {}",
             dig.id, report.processed, report.cached_signals, report.fresh_signals, report.finds_created, report.finds_joined, report.unresolved, report.hidden, report.remaining);
         self.events.emit_summary();
         Ok(report)
+    }
+
+    /// The Activity for what a rule closed as a side effect: Finds a newer
+    /// one or an expiry closed (`close_finds`), mail a newer one superseded
+    /// (`supersede_messages`). Bookkeeping: a failure is logged, never the
+    /// pass's.
+    fn record_rule_activity(&self, a: RuleActivity) {
+        let mut entry = riddle_activity::Entry::new(Actor::Sift, a.action, a.summary)
+            .why(a.why)
+            .inputs(serde_json::json!({ "count": a.affected.len() }))
+            .affected(a.affected)
+            .undoable(a.restore, a.undo_label);
+        if let Some(dig) = a.dig {
+            entry = entry.dig(dig);
+        }
+        if let Some(p) = a.provenance {
+            if let Some(trace) = p.trace_id.clone() {
+                entry = entry.trace(trace);
+            }
+            entry = entry.provenance(p);
+        }
+        riddle_activity::Ledger::new(
+            self.stores.index(),
+            self.events.clone(),
+            self.services.clock.clone(),
+        )
+        .try_append(entry);
     }
 
     /// One Activity per (Mesh version, disposition) group of a pass (§47).
@@ -342,13 +509,57 @@ impl App {
                 dig.id
             );
         }
+        self.redecide_on_spam_verdicts(dig, &externals);
         let _ = engine.fetch_bodies(200, on_progress, cancel).await;
         Ok(report)
+    }
+
+    /// Gmail's spam verdict is read when a message is sifted; a verdict that
+    /// arrives later used to be stored on the message and read by nothing, so
+    /// a scam Gmail moved to Spam days after it arrived stayed Unresolved
+    /// (`ARCHITECTURE.md` §15: Gmail is authoritative for what it owns).
+    /// Riddle never writes Gmail's `SPAM` label, so a change to it is Gmail's
+    /// or the user's: the message goes back to Sift, which recomputes its
+    /// facts and meets the Contamination gate, or, after "Not spam", no
+    /// longer does. A decision the user made stays. A failure here is
+    /// reported and the sync still succeeds.
+    fn redecide_on_spam_verdicts(&self, dig: &Dig, externals: &[riddle_sync::ExternalMove]) {
+        let changed: Vec<(DigId, MessageId)> = externals
+            .iter()
+            .filter(|m| m.added.iter().chain(&m.removed).any(|l| l == "SPAM"))
+            .map(|m| (dig.id.clone(), m.message_id.clone()))
+            .collect();
+        if changed.is_empty() {
+            return;
+        }
+        let count = changed.len();
+        match crate::actions::send_back_to_sift(&self.services, changed.into_iter()) {
+            Ok(sent) => rinfo!(
+                Category::Sync,
+                "{} of {count} messages whose Gmail spam verdict changed went back to Sift on {}",
+                sent.restored.len(),
+                dig.id
+            ),
+            Err(e) => rwarn!(
+                Category::Sync,
+                "spam verdict changes on {} not sent back to Sift: {e}",
+                dig.id
+            ),
+        }
     }
 
     /// Apply queued projection writes for a Dig.
     pub async fn projection_pass(&self, dig: &Dig) -> Result<(u64, u64)> {
         if dig.projection == ProjectionMode::None {
+            return Ok((0, 0));
+        }
+        // Queued rows wait, not drop, so arming releases them.
+        if let Some(reason) = crate::domains::sending_held(&self.runtime.policy.read()) {
+            rdebug!(
+                Category::Projection,
+                "projection held for {}: {reason}",
+                dig.id
+            );
             return Ok((0, 0));
         }
         let domains = self.domains()?;
@@ -370,6 +581,39 @@ impl App {
         let outcomes = domains.finds.tick(&TemporalOptions::default())?;
         for o in &outcomes {
             rdebug!(Category::Sift, "temporal: {}", o.summary);
+        }
+        let expired: Vec<_> = outcomes
+            .iter()
+            .filter(|o| o.kind == riddle_finds::temporal::TemporalOutcomeKind::Expired)
+            .collect();
+        if !expired.is_empty() {
+            let summary = match expired.as_slice() {
+                [one] => one.summary.clone(),
+                many => format!("{} expired", plural(many.len(), "Find")),
+            };
+            let ids: Vec<FindId> = expired.iter().map(|o| o.find_id.clone()).collect();
+            let dig = match expired.as_slice() {
+                [one] => one.dig_id.clone(),
+                _ => None,
+            };
+            self.record_rule_activity(RuleActivity {
+                action: "close_finds",
+                summary,
+                why: "Their time passed: a date, or the Expires: of the Mesh that raised them"
+                    .into(),
+                affected: ids
+                    .iter()
+                    .map(|id| EntityRef::new(EntityKind::Find, id))
+                    .collect(),
+                restore: serde_json::json!({ "findIds": ids }),
+                undo_label: if ids.len() > 1 {
+                    "Keep them open"
+                } else {
+                    "Keep it open"
+                },
+                dig,
+                provenance: None,
+            });
         }
         Ok(outcomes.into_iter().map(|o| o.summary).collect())
     }
@@ -454,5 +698,30 @@ trait EmitSummary {
 impl EmitSummary for Arc<crate::events::Broadcast> {
     fn emit_summary(&self) {
         self.emit(RiddleEvent::SummaryChanged);
+    }
+}
+
+/// The per-Dig daily cap on escalation spend (`budgets.escalationPerDigUsd`),
+/// read from settings on each check so a saved change applies at once. A
+/// ledger that cannot be read allows escalation: bookkeeping never fails
+/// the work, and the daily LLM budget still bounds spend.
+struct EscalationCap {
+    stores: Arc<riddle_store::Stores>,
+    settings: Arc<riddle_settings::SettingsStore>,
+}
+
+impl riddle_sift::EscalationBudget for EscalationCap {
+    fn allows(&self, dig: &DigId) -> bool {
+        let settings = self.settings.settings();
+        let limit = settings.budgets.escalation_per_dig_usd;
+        // The provider the spend is booked under is whichever is configured;
+        // a hardcoded name silently disabled the cap for every other one.
+        let provider = crate::ops::ai_config(&settings).provider;
+        let spent = self
+            .stores
+            .dig(dig)
+            .and_then(|s| repo::usage::spent_today_on(&s, &provider, UsageTask::Sift))
+            .unwrap_or(0.0);
+        spent < limit
     }
 }

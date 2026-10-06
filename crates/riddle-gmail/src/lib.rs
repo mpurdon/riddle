@@ -5,6 +5,7 @@
 //! user's OAuth client (deferred, see `docs/BUILD_PLAN.md`).
 
 pub mod client;
+pub mod client_file;
 pub mod oauth;
 pub mod parse;
 pub mod provider;
@@ -12,6 +13,7 @@ pub mod quota;
 pub mod types;
 
 pub use client::{http_client, Format, GmailClient};
+pub use client_file::{parse_client_file, ClientFile};
 pub use oauth::{AuthFlow, GmailOAuthConfig, TokenManager, GMAIL_MODIFY_SCOPE};
 pub use provider::{GmailProvider, GmailProviderFactory};
 pub use quota::QuotaLimiter;

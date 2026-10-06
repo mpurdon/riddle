@@ -1,8 +1,10 @@
 /**
- * Activity (README "Activity & Provenance", "Undo"): filterable by Dig,
+ * Activity (README "Activity & Provenance", "Undo"): filterable by account,
  * actor, action and time; each entry rendered with its provenance line,
- * note, and View Messages · View Reasoning · Edit Mesh · Undo / Undo All.
- * Undone entries say so; partial results list what was skipped.
+ * note, and View Messages · Edit Mesh · Undo / Undo All, plus Inspect
+ * decision in Developer Mode (it opens the developer trace viewer, which
+ * meant nothing to anyone else). Undone entries say so; partial results
+ * list what was skipped.
  */
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -12,7 +14,7 @@ import type { Activity } from '@/bindings/Activity'
 import type { Actor } from '@/bindings/Actor'
 import { listActivity, page, qk } from '@/lib/api'
 import { cx, fmtClock, fmtDateTime, fmtTime } from '@/lib/format'
-import { useDigContext, useActionsMeta } from '@/lib/queries'
+import { useDigContext, useActionsMeta, useSettings } from '@/lib/queries'
 import { actorLabel, canUndo, isBulk, provenanceLine, skippedLines, skippedSummary } from '@/lib/selectors'
 import { useAction } from '@/lib/useAction'
 import { Button } from '@/components/ui/Button'
@@ -41,6 +43,7 @@ export default function ActivityPage() {
   const [until, setUntil] = useState('')
   const [digFilter, setDigFilter] = useState<string>('ctx')
   const metas = useActionsMeta()
+  const developerMode = useSettings().data?.developerMode ?? false
   const effectiveDig = digFilter === 'ctx' ? digId : digFilter === 'all' ? null : digFilter
   const q = useInfiniteQuery({
     queryKey: [...qk.activity, effectiveDig, actor, action, since, until],
@@ -62,7 +65,7 @@ export default function ActivityPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader title="Activity" subtitle="What happened, who did it, why, and whether it can be undone. Product Activity, not software logs.">
-        <Select label="Dig" size="sm" value={digFilter} onChange={setDigFilter} options={[{ value: 'ctx', label: `Current: ${digName(digId)}` }, { value: 'all', label: 'All Digs' }, ...digs.map((d) => ({ value: d.id, label: d.name }))]} />
+        <Select label="Account" size="sm" value={digFilter} onChange={setDigFilter} options={[{ value: 'ctx', label: `Current: ${digId ? digName(digId) : 'All accounts'}` }, { value: 'all', label: 'All accounts' }, ...digs.map((d) => ({ value: d.id, label: d.name }))]} />
         <Select label="Actor" size="sm" value={actor} onChange={(v) => setActor(v as Actor | 'all')} options={ACTORS} />
         <Select label="Action" size="sm" value={action} onChange={setAction} options={[{ value: 'all', label: 'Any action' }, ...actionNames.map((n) => ({ value: n, label: n }))]} />
         <Input type="date" value={since} onChange={(e) => setSince(e.target.value)} aria-label="Since" className="h-6 w-36 text-xs" />
@@ -72,10 +75,10 @@ export default function ActivityPage() {
         {q.data && !items.length ? <EmptyState icon={<ActivityIcon />} title="No Activity matches." body="Every meaningful mutation, by you, the Director, the Sift, a Mesh or automation, leaves an entry here. Loosen the filters or wait for the Sift." /> : null}
         {byDay.map(([day, entries]) => (
           <section key={day} className="mb-4">
-            <h2 className="sticky top-0 z-10 bg-paper py-1 text-[11px] font-semibold uppercase tracking-wide text-clay">{day === new Date().toDateString() ? 'Today' : day}</h2>
+            <h2 className="sticky top-0 z-10 bg-paper py-1 text-2xs font-semibold uppercase tracking-wide text-clay">{day === new Date().toDateString() ? 'Today' : day}</h2>
             <ol className="flex flex-col gap-2">
               {entries.map((a) => (
-                <ActivityEntry key={a.id} a={a} digName={digName} />
+                <ActivityEntry key={a.id} a={a} digName={digName} developerMode={developerMode} />
               ))}
             </ol>
           </section>
@@ -92,7 +95,8 @@ export default function ActivityPage() {
   )
 }
 
-export function ActivityEntry({ a, digName, compact }: { a: Activity; digName: (id: string | null) => string; compact?: boolean }) {
+/** `developerMode` adds Inspect decision; the page reads the setting once and passes it down rather than each row asking. */
+export function ActivityEntry({ a, digName, compact, developerMode = false }: { a: Activity; digName: (id: string | null) => string; compact?: boolean; developerMode?: boolean }) {
   const nav = useNavigate()
   const { run } = useAction()
   const prov = provenanceLine(a)
@@ -151,9 +155,9 @@ export function ActivityEntry({ a, digName, compact }: { a: Activity; digName: (
                   View Messages{messages.length > 1 ? ` (${messages.length})` : ''}
                 </Button>
               ) : null}
-              {a.traceId && a.digId ? (
+              {developerMode && a.traceId && a.digId ? (
                 <Button size="sm" variant="ghost" onClick={() => nav(`/developer/messages/${a.digId}/${a.traceId}`)}>
-                  View Reasoning
+                  Inspect decision
                 </Button>
               ) : null}
               {meshRef ? (

@@ -105,6 +105,8 @@ fn dig(id: &str, name: &str, privacy: PrivacyMode) -> Dig {
         status: DigStatus::Synced,
         shadow_started_at: None,
         created_at: chrono::Utc::now(),
+        disabled: false,
+        mailbox: None,
     }
 }
 
@@ -597,4 +599,139 @@ async fn send_spawns_the_turn_and_a_read_only_action_runs_as_a_tool() {
     assert!(events
         .iter()
         .any(|e| matches!(e, RiddleEvent::DirectorDone { error: None, .. })));
+}
+
+#[tokio::test]
+async fn a_failed_turn_carries_the_wait_and_retry_runs_the_message_again_without_it() {
+    // The loop tries once more without the cache hint, so the breaker answers twice.
+    let tripped = || {
+        ScriptedResponse::Error(
+            riddle_errors::RiddleError::llm_unavailable("circuit open for sonnet; retry in 3s")
+                .with_detail(json!({"retryable": false, "circuit": "open", "retryAfterSecs": 3})),
+        )
+    };
+    let h = harness(
+        vec![tripped(), tripped()],
+        ScriptedReads::new(),
+        vec![dig("d1", "Personal", PrivacyMode::CloudReasoning)],
+    );
+    let id = h
+        .director
+        .send_and_wait(SendRequest {
+            message: "Which invoices are unpaid?".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let conv = repo::conversations::get(&h.stores.index(), &id)
+        .unwrap()
+        .unwrap();
+    let last = conv.turns.last().unwrap();
+    assert!(matches!(last.role, TurnRole::Director));
+    assert!(
+        last.content
+            .starts_with("I could not complete that: circuit open"),
+        "{}",
+        last.content
+    );
+    let failure = last.failure.as_ref().expect("the turn says it failed");
+    assert_eq!(failure.kind, riddle_errors::ErrorKind::LlmUnavailable);
+    assert_eq!(failure.retry_after_secs, Some(3));
+
+    // The wait passes; the client retries. The failed turn comes off and the
+    // model answers the same message, never having seen the error as its own words.
+    h.llm.push(ScriptedLlm::text("Two invoices are unpaid."));
+    h.director.retry_and_wait(&id).await.unwrap();
+    let conv = repo::conversations::get(&h.stores.index(), &id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(conv.turns.len(), 2, "user, then the answer");
+    assert!(matches!(conv.turns[0].role, TurnRole::User));
+    assert_eq!(conv.turns[1].content, "Two invoices are unpaid.");
+    assert!(conv.turns[1].failure.is_none());
+
+    // With an answer in place there is nothing to retry.
+    let err = h.director.retry_and_wait(&id).await.unwrap_err();
+    assert_eq!(err.kind, riddle_errors::ErrorKind::Invalid);
+}
+
+fn last_turn(h: &Harness, id: &ConversationId) -> (Turn, Conversation) {
+    let conv = repo::conversations::get(&h.stores.index(), id)
+        .unwrap()
+        .unwrap();
+    (conv.turns.last().unwrap().clone(), conv)
+}
+
+#[tokio::test]
+async fn the_same_call_failing_twice_ends_the_turn_s_tool_use_and_says_why() {
+    let draft = json!({"text": "Mesh: X\nROUTES\nIF sender = a@b → Spoil"});
+    let h = harness(
+        vec![
+            ScriptedLlm::tool_call("simulate_mesh", draft.clone()),
+            ScriptedLlm::tool_call("simulate_mesh", draft),
+            ScriptedLlm::text("The draft does not parse; here is what I know."),
+        ],
+        ScriptedReads::new(),
+        vec![dig("d1", "Personal", PrivacyMode::CloudReasoning)],
+    );
+    let id = h
+        .director
+        .send_and_wait(SendRequest {
+            message: "Draft a Mesh for this sender".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let (turn, _) = last_turn(&h, &id);
+    assert_eq!(turn.tool_calls.len(), 2);
+    let why = turn.stopped_early.expect("the turn says it stopped early");
+    assert!(
+        why.contains("the same simulate_mesh call failed twice"),
+        "{why}"
+    );
+}
+
+#[tokio::test]
+async fn continue_for_n_allows_that_many_calls_once_and_keep_going_lasts_the_conversation() {
+    let h = harness(
+        vec![
+            ScriptedLlm::tool_call("list_signals", json!({})),
+            ScriptedLlm::tool_call("list_signals", json!({})),
+            ScriptedLlm::text("One look was all I had room for."),
+            ScriptedLlm::text("Carrying on."),
+        ],
+        ScriptedReads::new()
+            .on("list_signals", json!([]))
+            .on("list_signals", json!([])),
+        vec![dig("d1", "Personal", PrivacyMode::CloudReasoning)],
+    );
+    let id = h
+        .director
+        .send_and_wait(SendRequest {
+            message: "continue for 1".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let (turn, conv) = last_turn(&h, &id);
+    assert_eq!(h.reads.calls().len(), 1, "one tool call, as allowed");
+    assert!(turn.stopped_early.unwrap().contains("1 tool calls"));
+    let a = conv.allowance.unwrap();
+    assert_eq!(a.next_turn_tool_calls, None, "spent by the turn it was for");
+    assert!(!a.keep_going);
+
+    h.director
+        .send_and_wait(SendRequest {
+            conversation_id: Some(id.clone()),
+            message: "Keep going.".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let (turn, conv) = last_turn(&h, &id);
+    assert_eq!(turn.stopped_early, None);
+    assert!(
+        conv.allowance.unwrap().keep_going,
+        "until a new conversation"
+    );
 }

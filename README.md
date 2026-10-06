@@ -4,7 +4,7 @@
 
 **Status:** first build (v0.1.0, 2026-09-22): the Rust core, the Tauri desktop client, a CLI twin and an MCP server exist and run end to end on a synthetic Fixture Dig with Jev judging and Bedrock escalating. Gmail is built but waits for an OAuth client id. See `ARCHITECTURE.md` for the technical design, `ARCHITECTURE-REVIEW.md` for the review, `APPLICATION_FEATURES.md` for the desktop conventions this project follows, `docs/GMAIL_SETUP.md` for connecting a real mailbox, `docs/BUILD_PLAN.md` for what was built and what is deferred, and `docs/BUILD_LEDGER.md` for what the build cost.
 
-**Run it:** `cd apps/desktop && pnpm install && pnpm tauri dev` (the dev build uses its own data directory and starts unarmed). `tauri dev` runs a bare binary, so the Dock shows a generic icon there; for a double-clickable app with the real icon, `pnpm tauri build --debug --bundles app` writes `target/debug/bundle/macos/Riddle.app`. Headless: `cargo run -p riddle-cli -- serve` then open `http://127.0.0.1:1430/?bridge=<port>:<token>` from `pnpm dev`, or drive it with `scripts/bridge.py`. Offline, no spend: `riddle serve --offline`.
+**Run it:** `cd apps/desktop && pnpm install && pnpm tauri dev` (the dev build uses its own data directory and starts unarmed). On macOS the dev binary is signed on launch with your first Developer ID or Apple Development identity (`scripts/run-signed.sh`, set `RIDDLE_CODESIGN_IDENTITY` to choose), so the keychain's "Always Allow" for the Gmail token survives rebuilds; without an identity it runs unsigned and asks after every rebuild. `tauri dev` runs a bare binary, so the Dock shows a generic icon there; for a double-clickable app with the real icon, `pnpm tauri build --debug --bundles app` writes `target/debug/bundle/macos/Riddle.app`. Headless: `cargo run -p riddle-cli -- serve` then open `http://127.0.0.1:1430/?bridge=<port>:<token>` from `pnpm dev`, or drive it with `scripts/bridge.py`. Offline, no spend: `riddle serve --offline`. Any command takes `--offline` to boot with the scripted judge, no model and no keychain, which is how to simulate or create Meshes from a script without a keychain prompt on a fresh build.
 
 ## Product Vision
 
@@ -727,7 +727,7 @@ Triage is keyboard-first. Moving through Finds, filing, spoiling, snoozing, and 
 
 One table drives both the shortcuts and the help sheet, so a shortcut cannot exist without being documented. `?` opens the sheet.
 
-Guided tours introduce the Find, Spoil, and Mesh loop once, on the user's first visit, and never again unless asked.
+Three pull tips introduce Finds, Unresolved and the Director, each once, on the first visit to that page, and never again unless asked from Settings. Nothing tours an empty page: before an account is connected the Summary offers to connect Gmail or to start with sample mail.
 
 Every empty state is an instruction or a proof. A new Dig says what to do next. The Attention Zero screen shows its evidence:
 

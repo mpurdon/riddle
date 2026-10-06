@@ -37,6 +37,15 @@ pub struct MessageFilterArgs {
     pub stratum: Option<String>,
     #[serde(default)]
     pub unclassified_only: bool,
+    /// The Shadow review list: only messages with a proposal, shown as the proposal.
+    #[serde(default)]
+    pub shadow_only: bool,
+    /// `false` hides mail a newer one of its series superseded, `true`
+    /// lists only that; absent is both.
+    pub superseded: Option<bool>,
+    /// Only messages at this level or above.
+    #[serde(default)]
+    pub min_importance: Option<riddle_core::Importance>,
 }
 
 impl From<MessageFilterArgs> for repo::messages::MessageFilter {
@@ -52,7 +61,11 @@ impl From<MessageFilterArgs> for repo::messages::MessageFilter {
             until: a.until,
             unclassified_only: a.unclassified_only,
             include_shadow: false,
+            shadow_only: a.shadow_only,
             stratum: a.stratum,
+            priority: None,
+            superseded: a.superseded,
+            min_importance: a.min_importance,
         }
     }
 }
@@ -67,6 +80,7 @@ pub const COMMANDS: &[&str] = &[
     "get_thread",
     "explain",
     "search",
+    "priority_inbox",
     "list_finds",
     "get_find",
     "list_activity",
@@ -86,13 +100,16 @@ pub const COMMANDS: &[&str] = &[
     "recent_traces",
     "usage_summary",
     "trace_stats",
+    "trust_stats",
     "invoke_action",
     "list_actions",
     "list_pending",
     "dev_armed",
+    "mailbox_writes",
     "list_conversations",
     "get_conversation",
     "director_send",
+    "director_retry",
     "task_centre",
     "get_settings",
     "privacy_statement",
@@ -102,6 +119,11 @@ pub const COMMANDS: &[&str] = &[
     "update_preview",
     "parse_mesh",
     "simulate_mesh",
+    "mesh_order",
+    "list_named_lists",
+    "list_packs",
+    "rule_check",
+    "rule_samples",
     "ui_log",
     "dev_info",
     "read_app_logs",
@@ -114,11 +136,14 @@ pub const COMMANDS: &[&str] = &[
 pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
     let index = app.stores.index();
     Ok(match command {
-        "summary" => {
-            serde_json::to_value(app.summary(chrono::Utc::now() - chrono::Duration::hours(24))?)?
-        }
-        "list_digs" => serde_json::to_value(app.list_digs()?)?,
-        "list_dig_groups" => serde_json::to_value(repo::digs::list_groups(&index)?)?,
+        "summary" => serde_json::to_value(app.summary(
+            chrono::Utc::now() - chrono::Duration::hours(24),
+            opt::<DigId>(&args, "digId").as_ref(),
+        )?)?,
+        // The client manages accounts, so it sees disabled ones too and
+        // leaves them out of its views itself.
+        "list_digs" => serde_json::to_value(app.list_all_digs()?)?,
+        "list_dig_groups" => serde_json::to_value(app.list_dig_groups()?)?,
         "list_messages" => {
             let filter: repo::messages::MessageFilter = opt::<MessageFilterArgs>(&args, "filter")
                 .unwrap_or_default()
@@ -142,6 +167,7 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
         "search" => {
             let filter = repo::messages::MessageFilter {
                 query: Some(arg(&args, "query")?),
+                shadow_only: opt::<bool>(&args, "shadowOnly").unwrap_or(false),
                 ..Default::default()
             };
             let page: PageRequest = opt(&args, "page").unwrap_or_default();
@@ -150,6 +176,10 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
                 &filter,
                 &page,
             )?)?
+        }
+        "priority_inbox" => {
+            let page: PageRequest = opt(&args, "page").unwrap_or_default();
+            serde_json::to_value(app.priority_inbox(opt::<DigId>(&args, "digId").as_ref(), &page)?)?
         }
         "list_finds" => {
             let status = opt::<String>(&args, "status").and_then(|s| match s.as_str() {
@@ -192,21 +222,24 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             repo::activities::get(&index, &arg(&args, "activityId")?)?
                 .ok_or_else(|| RiddleError::not_found("activity"))?,
         )?,
-        "list_meshes" => serde_json::to_value(repo::meshes::list_latest(
-            &index,
-            opt(&args, "includeDeleted").unwrap_or(false),
-        )?)?,
+        // Mesh reads go through the service, which gives a Mesh stored before
+        // routes carried their wording its sentences on the way out.
+        "list_meshes" => serde_json::to_value(
+            riddle_mesh::service::MeshService::new(index.clone())
+                .list(opt(&args, "includeDeleted").unwrap_or(false))?,
+        )?,
         "get_mesh" => {
             let id: MeshId = arg(&args, "meshId")?;
-            let m = match opt::<u32>(&args, "version") {
-                Some(v) => repo::meshes::get(&index, &id, v)?,
-                None => repo::meshes::latest(&index, &id)?,
-            };
-            serde_json::to_value(m.ok_or_else(|| RiddleError::not_found("mesh"))?)?
+            let svc = riddle_mesh::service::MeshService::new(index.clone());
+            serde_json::to_value(match opt::<u32>(&args, "version") {
+                Some(v) => svc.get(&id, v)?,
+                None => svc.latest(&id)?,
+            })?
         }
-        "mesh_versions" => {
-            serde_json::to_value(repo::meshes::versions(&index, &arg(&args, "meshId")?)?)?
-        }
+        "mesh_versions" => serde_json::to_value(
+            riddle_mesh::service::MeshService::new(index.clone())
+                .versions(&arg(&args, "meshId")?)?,
+        )?,
         "list_signals" => serde_json::to_value(repo::signals::list(&index)?)?,
         "signal_versions" => serde_json::to_value(repo::signals::versions(
             &index,
@@ -236,6 +269,10 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
         "usage_summary" => serde_json::to_value(app.usage_summary(
             chrono::Utc::now()
                 - chrono::Duration::days(opt::<i64>(&args, "sinceDays").unwrap_or(30)),
+        )?)?,
+        "trust_stats" => serde_json::to_value(app.trust_stats(
+            opt::<u32>(&args, "sinceDays").unwrap_or(7),
+            opt::<DigId>(&args, "digId").as_ref(),
         )?)?,
         "trace_stats" => {
             let since = chrono::Utc::now()
@@ -272,6 +309,7 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
         "list_actions" => serde_json::to_value(app.runtime.list_actions())?,
         "list_pending" => serde_json::to_value(repo::pending::list_pending(&index)?)?,
         "dev_armed" => json!(app.runtime.is_armed()),
+        "mailbox_writes" => serde_json::to_value(app.mailbox_writes()?)?,
         "list_conversations" => serde_json::to_value(repo::conversations::list(&index, 100)?)?,
         "get_conversation" => serde_json::to_value(
             repo::conversations::get(&index, &arg(&args, "conversationId")?)?
@@ -289,6 +327,15 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
                 allow_contamination: opt(&args, "allowContamination").unwrap_or(false),
             };
             let id = director.send(req)?;
+            json!({ "conversationId": id })
+        }
+        "director_retry" => {
+            let director = app
+                .services
+                .get::<riddle_agent::director::Director>()
+                .ok_or_else(|| RiddleError::llm_unavailable("the Director is not configured"))?;
+            let id: ConversationId = arg(&args, "conversationId")?;
+            director.retry(&id)?;
             json!({ "conversationId": id })
         }
         "task_centre" => serde_json::to_value(app.task_centre()?)?,
@@ -353,8 +400,23 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             let started = std::time::Instant::now();
             match domains.providers.provider_for(&dig) {
                 Ok(p) => match p.profile().await {
-                    Ok(_) => {
-                        json!({ "ok": true, "latencyMs": started.elapsed().as_millis() as u64, "message": format!("{:?} provider answered", dig.provider) })
+                    Ok(profile) => {
+                        // Say what the probe proved and how far sync has got,
+                        // so "answered" is not read as "synced".
+                        let local = app
+                            .stores
+                            .dig(&dig.id)
+                            .and_then(|s| repo::messages::count(&s))
+                            .unwrap_or(0);
+                        let remote = profile
+                            .messages_total
+                            .map(|n| format!("the mailbox has {n} messages"))
+                            .unwrap_or_else(|| "the mailbox answered".into());
+                        json!({
+                            "ok": true,
+                            "latencyMs": started.elapsed().as_millis() as u64,
+                            "message": format!("Signed in as {}; {remote}; Riddle has {local} so far", profile.email),
+                        })
                     }
                     Err(e) => {
                         json!({ "ok": false, "latencyMs": started.elapsed().as_millis() as u64, "message": format!("{}: {}", e.kind.as_str(), e.message) })
@@ -476,8 +538,17 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             )?;
             serde_json::to_value(mesh)?
         }
+        "rule_check" => serde_json::to_value(app.rule_check()?)?,
+        "rule_samples" => {
+            let mesh_id: MeshId = arg(&args, "meshId")?;
+            let limit = opt::<usize>(&args, "limit").unwrap_or(10).min(50);
+            serde_json::to_value(app.rule_samples(&mesh_id, limit)?)?
+        }
+        "list_packs" => serde_json::to_value(riddle_mesh::packs::catalogue(&index)?)?,
+        "list_named_lists" => serde_json::to_value(repo::lists::all(&index)?)?,
+        "mesh_order" => serde_json::to_value(app.mesh_order(window_days(&args, 30))?)?,
         "simulate_mesh" => {
-            let window_days: u32 = opt(&args, "windowDays").unwrap_or(90);
+            let window_days = window_days(&args, 90);
             let mesh_id: Option<MeshId> = opt(&args, "meshId");
             let candidate = match (opt::<String>(&args, "text"), &mesh_id) {
                 (Some(text), Some(id)) => {

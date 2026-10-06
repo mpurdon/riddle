@@ -295,8 +295,9 @@ impl GmailProviderFactory {
         }
     }
     /// The user supplies the client id in settings; update without a restart.
-    pub fn set_config(&self, config: GmailOAuthConfig) {
-        *self.config.write() = Some(config);
+    /// `None` when the id was cleared.
+    pub fn set_config(&self, config: Option<GmailOAuthConfig>) {
+        *self.config.write() = config;
     }
     pub fn config(&self) -> Option<GmailOAuthConfig> {
         self.config.read().clone()

@@ -32,6 +32,8 @@ fn dig(id: &str, privacy: PrivacyMode) -> Dig {
         status: DigStatus::Synced,
         shadow_started_at: None,
         created_at: chrono::Utc::now(),
+        disabled: false,
+        mailbox: None,
     }
 }
 

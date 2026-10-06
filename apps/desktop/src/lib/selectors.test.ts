@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { Activity } from '@/bindings/Activity'
 import type { Summary } from '@/bindings/Summary'
 import type { TaskCentre } from '@/bindings/TaskCentre'
+import type { Job } from '@/bindings/Job'
 import { u64 } from './format'
-import { digStatusChip, errorAffordance, skippedLines, skippedSummary, summaryCopy, taskCentreIndicator } from './selectors'
+import { digStatusChip, errorAffordance, jobPriorityLabel, skippedLines, skippedSummary, summaryCopy, taskCentreIndicator, digPipeline } from './selectors'
 
 const summary = (over: Partial<Summary> = {}): Summary => ({
   asOf: '2026-09-22T07:42:00.000Z',
@@ -52,25 +53,61 @@ describe('the morning summary is honest about whether Riddle has finished', () =
     const notZero = summaryCopy(summary({ findsOpen: u64(0), unresolved: u64(1) }), now)
     expect(notZero.attentionZero).toBe(false)
   })
+
+  it('invites you to connect an account instead of claiming attention zero when there is none', () => {
+    const c = summaryCopy(summary({ digCount: 0, findsOpen: u64(0), unresolved: u64(0), arrived: u64(0) }))
+    expect(c.firstRun).toBe(true)
+    expect(c.attentionZero).toBe(false)
+    expect(c.headline).toBe('Connect an account to start.')
+    expect(c.reviewRoute).toBeNull()
+  })
+
+  it('counts accounts, not Digs, and opens the brief with when it starts', () => {
+    const c = summaryCopy(summary(), new Date('2026-09-22T09:00:00.000Z'))
+    expect(c.arrived).toBe('312 messages arrived across your 3 accounts.')
+    expect(c.since).toBe('Since yesterday')
+  })
+
+  it('sends Start review to Finds first, then Unresolved, then nowhere', () => {
+    expect(summaryCopy(summary()).reviewRoute).toBe('/finds')
+    expect(summaryCopy(summary({ findsOpen: u64(0), unresolved: u64(2) })).reviewRoute).toBe('/unresolved')
+    expect(summaryCopy(summary({ findsOpen: u64(0), unresolved: u64(0) })).reviewRoute).toBeNull()
+  })
 })
 
-describe('per-Dig status chips', () => {
+describe('per-account status chips', () => {
   it('render every DigStatus variant', () => {
     expect(digStatusChip({ state: 'synced' }).label).toBe('Synced')
     expect(digStatusChip({ state: 'catching_up', remaining: u64(1240), total: u64(4981) }).label).toBe('Catching up 1,240')
     expect(digStatusChip({ state: 'sifting', remaining: u64(12) }).label).toBe('Sifting 12')
-    expect(digStatusChip({ state: 'projection', pending: u64(41) }).label).toBe('Projection 41')
+    expect(digStatusChip({ state: 'projection', pending: u64(41) }).label).toBe('41 waiting for Gmail')
     const d = digStatusChip({ state: 'degraded', reason: 'judge unavailable' })
     expect(d.label).toBe('Degraded')
     expect(d.title).toMatch(/Nothing is hidden/)
     expect(digStatusChip({ state: 'shadow', day: 3, of: 7 }).label).toBe('Shadow day 3')
   })
+
+  it('tells a signed-out account where to sign in again rather than to remove itself', () => {
+    const c = digStatusChip({ state: 'not_connected' })
+    expect(c.label).toBe('Not signed in')
+    expect(c.title).toMatch(/Sign in again/)
+    expect(c.title).not.toMatch(/remove/)
+  })
 })
 
 describe('the Task Centre indicator', () => {
-  const tc = (over: Partial<TaskCentre>): TaskCentre => ({ overall: 'caught_up', digs: [], jobs: [], storeFault: null, asOf: '2026-09-22T07:42:00.000Z', ...over })
+  const tc = (over: Partial<TaskCentre>): TaskCentre => ({ overall: 'caught_up', digs: [{ digId: 'a', name: 'Work', status: { state: 'synced' } }], jobs: [], storeFault: null, asOf: '2026-09-22T07:42:00.000Z', ...over })
   it('is Caught up when nothing is catching up and nothing is degraded', () => {
     expect(taskCentreIndicator(tc({})).label).toBe('Caught up')
+  })
+  it('says Nothing connected, in a neutral tone, when there is no account to be caught up with', () => {
+    const i = taskCentreIndicator(tc({ digs: [] }))
+    expect(i.label).toBe('Nothing connected')
+    expect(i.tone).toBe('neutral')
+  })
+  it('puts a job priority into words', () => {
+    expect(jobPriorityLabel('catch_up')).toBe('Catching up')
+    expect(jobPriorityLabel('interactive')).toBe('For you now')
   })
   it('is Catching up with the remaining total across Digs', () => {
     const i = taskCentreIndicator(tc({ overall: 'catching_up', digs: [{ digId: 'a', name: 'Work', status: { state: 'catching_up', remaining: u64(1000), total: u64(2000) } }, { digId: 'b', name: 'Home', status: { state: 'sifting', remaining: u64(240) } }] }))
@@ -113,5 +150,31 @@ describe('typed errors map to affordances', () => {
     expect(errorAffordance({ kind: 'policy_denied', message: 'not at this level', detail: null }).action).toBe('none')
     expect(errorAffordance({ kind: 'policy_denied', message: 'dev build is not armed', detail: null }).action).toBe('arm_dev')
     expect(errorAffordance({ kind: 'conflict', message: '', detail: null }).action).toBe('reconcile')
+  })
+})
+
+describe('digPipeline', () => {
+  const job = (step: string, done = 3, total: number | null = 12): Job => ({ id: 'j', kind: 'incremental_sync', priority: 'interactive', status: { state: 'running' }, digId: 'd', label: 'Refresh', progress: { done: u64(done), total: total === null ? null : u64(total), unit: 'messages', step, etaSeconds: null }, checkpoint: null, cancellable: true, attempts: 1, createdAt: '', startedAt: '', finishedAt: null, updatedAt: '' })
+  const states = (p: ReturnType<typeof digPipeline>) => p.stages.map((s) => s.state).join(' ')
+
+  it('lights the stage the account is in and says what the running job is doing', () => {
+    const fetching = digPipeline({ state: 'catching_up', remaining: u64(120), total: u64(400) }, job('Fetching headers', 280, 400))
+    expect(states(fetching)).toBe('active todo todo')
+    expect(fetching.detail).toBe('Fetching headers · 280 of 400 messages')
+    expect(fetching.busy).toBe(true)
+    const sifting = digPipeline({ state: 'sifting', remaining: u64(12) }, null)
+    expect(states(sifting)).toBe('done active todo')
+    expect(sifting.detail).toBe('12 messages waiting for the Sift')
+    expect(states(digPipeline({ state: 'projection', pending: u64(3) }, null))).toBe('done done active')
+  })
+
+  it('is all done when up to date, and off when not connected or degraded', () => {
+    const done = digPipeline({ state: 'synced' }, null)
+    expect(states(done)).toBe('done done done')
+    expect(done.detail).toBe('Up to date')
+    expect(done.busy).toBe(false)
+    expect(states(digPipeline({ state: 'synced' }, job('Checking for new mail')))).toBe('active todo todo')
+    expect(states(digPipeline({ state: 'not_connected' }, null))).toBe('off off off')
+    expect(digPipeline({ state: 'degraded', reason: 'token expired' }, null).detail).toBe('Degraded: token expired')
   })
 })

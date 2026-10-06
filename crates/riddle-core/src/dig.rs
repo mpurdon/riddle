@@ -82,6 +82,17 @@ pub struct Dig {
     /// When the Shadow Period started; `None` until the first sync.
     pub shadow_started_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Switched off by the user: not synced, not sifted, left out of every
+    /// list, count, notification, simulation and the Director, with its mail
+    /// and decisions kept. Removing an account purges it; this was added so a
+    /// fixture account could stop cluttering the real one without that.
+    #[serde(default)]
+    pub disabled: bool,
+    /// Computed at read time from the account's settings and the build;
+    /// never stored. `None` only for a Dig read straight from the store.
+    #[serde(default)]
+    #[ts(optional)]
+    pub mailbox: Option<MailboxEffect>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -90,4 +101,40 @@ pub struct Dig {
 pub struct DigGroup {
     pub name: String,
     pub digs: Vec<DigId>,
+    /// Rules that name this group (`Mesh "X"`, `Stratum "Y"`): while any
+    /// exist the group cannot be renamed or deleted, and the client says so
+    /// on the control instead of re-deriving the list.
+    #[serde(default)]
+    pub used_by: Vec<String>,
+}
+
+/// What Sift's decisions do to this account's mailbox right now, computed
+/// by the same functions that gate projection, so the client phrases one
+/// typed answer instead of re-deriving the rule in four places.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MailboxEffect {
+    pub writes: MailboxWrites,
+    /// Why nothing is written although the projection setting would write.
+    pub held: Option<HeldReason>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum MailboxWrites {
+    Nothing,
+    Labels,
+    LabelsAndArchive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum HeldReason {
+    /// The account's rung is below Act.
+    Autonomy,
+    /// A development build that is not armed.
+    DevUnarmed,
 }

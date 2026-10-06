@@ -11,7 +11,7 @@ import type { PageRequest } from '@/bindings/PageRequest'
 import type { MessageFilter } from '../types'
 import { buildState, type MockState } from './state'
 import { invokeAction, listActions } from './actions'
-import { directorSend } from './director'
+import { directorSend, directorRetry } from './director'
 import * as q from './queries'
 
 let state: MockState = buildState()
@@ -34,15 +34,17 @@ export function registerMocks(): void {
   mock('list_actions', () => listActions())
   mock('list_pending', () => [...state.pending.values()])
 
-  mock('summary', () => q.summary(state))
+  mock('summary', (a) => q.summary(state, opt(a, 'digId') as string | null))
+  mock('trust_stats', (a) => q.trustStats(state, opt(a, 'digId') as string | null, (opt(a, 'sinceDays') as number | null) ?? 7))
   mock('task_centre', () => q.taskCentre(state))
-  mock('list_digs', () => state.digs)
-  mock('list_dig_groups', () => state.digGroups)
+  mock('list_digs', () => state.digs.map((d) => q.withMailbox(state, d)))
+  mock('list_dig_groups', () => state.digGroups.map((g) => ({ ...g, usedBy: q.groupUsedBy(state, g.name) })))
   mock('list_messages', (a) => q.listMessages(state, { digId: opt(a, 'digId') as string | null, filter: (a.filter ?? {}) as MessageFilter, page: a.page as PageRequest }))
   mock('get_message', (a) => q.getMessage(state, str(a, 'digId'), str(a, 'messageId')))
   mock('get_thread', (a) => q.getThread(state, str(a, 'digId'), str(a, 'threadId')))
   mock('explain', (a) => q.explain(state, str(a, 'digId'), str(a, 'messageId')))
-  mock('search', (a) => q.search(state, { query: str(a, 'query'), digId: opt(a, 'digId') as string | null, page: a.page as PageRequest }))
+  mock('search', (a) => q.search(state, { query: str(a, 'query'), digId: opt(a, 'digId') as string | null, page: a.page as PageRequest, shadowOnly: !!a.shadowOnly }))
+  mock('priority_inbox', (a) => q.priorityInbox(state, { digId: opt(a, 'digId') as string | null, page: a.page as PageRequest }))
   mock('list_finds', (a) => q.listFinds(state, { status: opt(a, 'status') as string | null, findType: opt(a, 'findType') as string | null, digId: opt(a, 'digId') as string | null, page: a.page as PageRequest }))
   mock('get_find', (a) => {
     const f = state.finds.find((x) => x.id === a.findId)
@@ -59,6 +61,11 @@ export function registerMocks(): void {
   mock('get_mesh', (a) => q.getMesh(state, str(a, 'meshId'), (opt(a, 'version') as number | null)))
   mock('mesh_versions', (a) => state.meshes.filter((m) => m.id === a.meshId).sort((x, y) => y.version - x.version))
   mock('parse_mesh', (a) => q.parseMesh(state, str(a, 'text')))
+  mock('rule_check', () => q.ruleCheck(state))
+  mock('rule_samples', (a) => q.ruleSamples(state, str(a, 'meshId'), (opt(a, 'limit') as number | null) ?? 10))
+  mock('list_packs', () => q.packCatalogue(state))
+  mock('list_named_lists', () => state.namedLists)
+  mock('mesh_order', (a) => q.meshOrder(state, (opt(a, 'windowDays') as number | null) ?? 30))
   mock('simulate_mesh', async (a) => {
     await new Promise((r) => setTimeout(r, 350))
     return q.simulate(state, { text: opt(a, 'text') as string | null, meshId: opt(a, 'meshId') as string | null, version: opt(a, 'version') as number | null, windowDays: opt(a, 'windowDays') as number | null })
@@ -81,6 +88,7 @@ export function registerMocks(): void {
     return c
   })
   mock('director_send', (a) => directorSend(state, { conversationId: opt(a, 'conversationId') as string | null, message: str(a, 'message'), digIds: opt(a, 'digIds') as string[] | null }))
+  mock('director_retry', (a) => directorRetry(state, { conversationId: str(a, 'conversationId') }))
   mock('list_expeditions', () => state.expeditions)
   mock('get_expedition', (a) => {
     const e = state.expeditions.find((x) => x.id === a.expeditionId)
@@ -97,6 +105,7 @@ export function registerMocks(): void {
   mock('trace_stats', (a) => q.traceStats(state, { digId: opt(a, 'digId') as string | null, sinceDays: opt(a, 'sinceDays') as number | null }))
   mock('dev_info', () => ({ ...state.devInfo, uptimeSeconds: state.devInfo.uptimeSeconds + Math.round(performance.now() / 1000) }))
   mock('dev_armed', () => state.armed)
+  mock('mailbox_writes', () => ({ dev: state.devInfo.dev, writes: state.writes, held: u64(state.held) }))
   mock('probe_judge', async () => {
     await new Promise((r) => setTimeout(r, 420))
     return { ok: true, latencyMs: 184, message: 'jev-1.13.0 answered 1 question (2 choices); key from ssm dev' }
@@ -105,6 +114,7 @@ export function registerMocks(): void {
     await new Promise((r) => setTimeout(r, 900))
     return { ok: true, latencyMs: 812, message: 'bedrock us-east-1 us.anthropic.claude-haiku-4-5 responded; profile dev' }
   })
+  mock('test_notification', () => ({ sent: true }))
   mock('probe_provider', async (a) => {
     await new Promise((r) => setTimeout(r, 300))
     const dig = state.digs.find((d) => d.id === a.digId)

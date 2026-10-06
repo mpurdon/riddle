@@ -15,9 +15,13 @@ pub mod dispatch;
 pub mod domains;
 pub mod engine;
 pub mod events;
+pub mod facts_refresh;
+pub mod live;
+pub mod notify;
 pub mod ops;
 pub mod paths;
 pub mod reads;
+pub mod words;
 
 use riddle_actions::{Runtime, Services};
 use riddle_core::BuildStamp;
@@ -32,6 +36,13 @@ pub struct AppConfig {
     pub dev: bool,
     pub build: BuildStamp,
     pub keychain_service: String,
+    /// No network and no keychain for this run: the scripted judge and no
+    /// LLM are applied in memory at boot, and credentials live in memory.
+    /// The CLI's `--offline` sets it, for rule work on the local store and
+    /// for scripts: macOS asks for permission the first time a freshly built
+    /// binary reads a keychain item, and a headless command that reads one
+    /// at boot hangs on that dialog.
+    pub offline: bool,
 }
 
 impl AppConfig {
@@ -42,6 +53,7 @@ impl AppConfig {
             dev: true,
             build,
             keychain_service: "dev.codenaked.riddle.test".into(),
+            offline: false,
         }
     }
 }

@@ -48,7 +48,26 @@ impl Registry {
         if seeded > 0 {
             rinfo!(Category::Sift, "seeded {seeded} system signals");
         }
+        self.apply_vocabulary_deprecations()?;
         Ok(seeded)
+    }
+
+    /// A store seeded before a system Signal was deprecated holds it
+    /// Active; flip it once. Once, so a user who promotes it again keeps it.
+    fn apply_vocabulary_deprecations(&self) -> Result<()> {
+        const KEY: &str = "system_signal_deprecations_v1";
+        if repo::kv::get(&self.index, KEY)?.is_some() {
+            return Ok(());
+        }
+        for name in crate::vocabulary::DEPRECATED {
+            if let Some(s) = repo::signals::get(&self.index, name, 1)? {
+                if s.status == SignalStatus::Active {
+                    self.set_status(name, 1, SignalStatus::Deprecated)?;
+                    rinfo!(Category::Sift, "deprecated system signal {name}");
+                }
+            }
+        }
+        repo::kv::set(&self.index, KEY, "1")
     }
 
     /// Propose a new version of a Signal: validate, assign the next version,
@@ -201,6 +220,41 @@ mod tests {
         assert!(first >= 27);
         assert_eq!(r.seed_system().unwrap(), 0);
         assert_eq!(r.resolve_active("review_requested").unwrap().version, 1);
+    }
+
+    #[test]
+    fn a_deprecated_system_signal_is_seeded_deprecated_and_flipped_once_on_an_older_store() {
+        let r = registry();
+        r.seed_system().unwrap();
+        assert_eq!(
+            r.resolve("human_authored", 1).unwrap().status,
+            SignalStatus::Deprecated
+        );
+        // An older store: Active, and the migration not yet run.
+        r.set_status("human_authored", 1, SignalStatus::Active)
+            .unwrap();
+        r.store()
+            .write(|c| {
+                c.execute(
+                    "DELETE FROM kv WHERE key = 'system_signal_deprecations_v1'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        r.seed_system().unwrap();
+        assert_eq!(
+            r.resolve("human_authored", 1).unwrap().status,
+            SignalStatus::Deprecated
+        );
+        // Promoted again by the user: a restart leaves it.
+        r.set_status("human_authored", 1, SignalStatus::Active)
+            .unwrap();
+        r.seed_system().unwrap();
+        assert_eq!(
+            r.resolve("human_authored", 1).unwrap().status,
+            SignalStatus::Active
+        );
     }
 
     #[test]

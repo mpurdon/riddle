@@ -13,6 +13,13 @@
 //! Partial restoration needs restore data keyed by entity (`RestoreMap`);
 //! opaque restore data is all-or-nothing, and the engine says so rather
 //! than restoring entities the user has since handled.
+//!
+//! "Handled since" means a later Activity by someone other than Sift. Sift
+//! only classifies unclassified messages, so a later row with the Sift
+//! actor is either the undone Activity's own consequence (it sent the
+//! message back to Sift) or the message's first classification, never a
+//! hand-edit; the first undo of "decide again" was skipped as "handled
+//! since by sift_classify" every time until that row stopped counting.
 
 use crate::format::undo_sentence;
 use crate::ledger::{Entry, Ledger};
@@ -20,7 +27,7 @@ use async_trait::async_trait;
 use riddle_actions::runtime::Runtime;
 use riddle_actions::{ActionContext, ActionResult};
 use riddle_core::{
-    Activity, ActivityId, ActivityResult, EntityKind, EntityRef, Principal, RestoreMap,
+    Activity, ActivityId, ActivityResult, Actor, EntityKind, EntityRef, Principal, RestoreMap,
     SkippedEntity, UndoConflict, UndoInfo, UndoPreview, UndoReport,
 };
 use riddle_errors::{Result, RiddleError};
@@ -112,6 +119,11 @@ impl UndoEngine {
             a.id != activity.id && (a.created_at > activity.created_at || a.id > activity.id)
         }) {
             if matches!(later.result, ActivityResult::Failed { .. }) {
+                continue;
+            }
+            // Sift's rows are consequences or first classifications, never
+            // hand-edits (module doc).
+            if later.actor == Actor::Sift {
                 continue;
             }
             for e in &later.affected {
@@ -285,13 +297,18 @@ impl UndoEngine {
             ));
         }
 
-        // The arm gate (§59) applies to undo as to the forward action.
+        // Hold (§59) applies to undo as to the forward action. Undo is the
+        // user's own click, so Ask lets it through; a projected Action's
+        // undo only queues writes, which wait in the outbox.
         let meta = runtime.action(&plan.activity.action)?.meta();
         {
             let policy = runtime.policy.read();
-            if policy.dev && meta.external_side_effect && !policy.armed {
+            if policy.dev
+                && meta.external_side_effect
+                && policy.writes == riddle_core::ProviderWrites::Hold
+            {
                 return Err(RiddleError::policy_denied(
-                    "dev build is not armed for provider mutations; arm it in Developer Mode",
+                    riddle_actions::policy::HOLD_DENIAL,
                 ));
             }
         }

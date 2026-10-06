@@ -252,6 +252,7 @@ impl Action for CreateFind {
         dig_ids.sort();
         dig_ids.dedup();
         let find = Find {
+            code: None,
             id: FindId::new(),
             find_type,
             title: a.title.trim().to_string(),
@@ -272,6 +273,10 @@ impl Action for CreateFind {
             classification_id: None,
             trace_id: None,
             superseded_by: None,
+            series: None,
+            expires_at: None,
+            kept_open_at: None,
+            notify: false,
         };
         riddle_store::repo::finds::upsert(&index, &find)?;
         ctx.services

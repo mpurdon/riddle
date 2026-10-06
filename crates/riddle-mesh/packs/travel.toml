@@ -1,0 +1,23 @@
+id = "travel"
+name = "Travel"
+version = 1
+area = "Travel"
+summary = "Bookings, tickets and changes to a trip become a Find you can see before you go; travel deals are left to the promotion rules."
+band = "general"
+
+[detect]
+sender_domains = ["expedia.com", "booking.com", "airbnb.com", "aircanada.ca", "westjet.com", "vrbo.com", "hotels.com"]
+min_messages = 2
+
+[[meshes]]
+rank = 2
+text = '''
+Mesh: Travel
+Scope:
+All Digs
+
+ROUTES
+
+IF marketing@v1 < .50 AND travel_reservation@v1 > .85
+    → Find: Know + Stratum: Travel
+'''

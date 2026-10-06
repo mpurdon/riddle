@@ -27,6 +27,13 @@ pub const JEV_API_KEY: &str = "jev_api_key";
 /// Where secrets live. Implementations must never log values.
 pub trait CredentialBackend: Send + Sync {
     fn get(&self, service: &str, key: &str) -> Result<Option<String>>;
+    /// Whether an item exists, without reading it. A backend that can answer
+    /// from the item's attributes alone must override this: on macOS reading
+    /// the value is what raises the permission dialog, and presence is asked
+    /// on every settings read.
+    fn exists(&self, service: &str, key: &str) -> Result<bool> {
+        Ok(self.get(service, key)?.is_some())
+    }
     fn set(&self, service: &str, key: &str, value: &str) -> Result<()>;
     fn delete(&self, service: &str, key: &str) -> Result<()>;
 }
@@ -55,6 +62,28 @@ impl KeyringBackend {
 }
 
 impl CredentialBackend for KeyringBackend {
+    /// macOS: search by attributes only. The keychain guards an item's value,
+    /// not its existence, so this never raises the permission dialog that
+    /// `get` does on a rebuilt binary.
+    #[cfg(target_os = "macos")]
+    fn exists(&self, service: &str, key: &str) -> Result<bool> {
+        use security_framework::item::{ItemClass, ItemSearchOptions};
+        const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+        match ItemSearchOptions::new()
+            .class(ItemClass::generic_password())
+            .service(service)
+            .account(key)
+            .load_attributes(true)
+            .search()
+        {
+            Ok(items) => Ok(!items.is_empty()),
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(false),
+            Err(e) => Err(RiddleError::internal(format!(
+                "cannot search the OS keychain: {e}"
+            ))),
+        }
+    }
+
     fn get(&self, service: &str, key: &str) -> Result<Option<String>> {
         match Self::entry(service, key)?.get_password() {
             Ok(v) => Ok(Some(v)),
@@ -138,11 +167,15 @@ impl Credentials {
     }
 
     pub fn get(&self, key: &str) -> Result<Option<String>> {
-        if let Some(hit) = self.cache.lock().get(key) {
+        // The lock is held across the backend read on purpose: two callers
+        // asking for the same key at boot used to reach the keychain
+        // together and raise two permission dialogs for one item.
+        let mut cache = self.cache.lock();
+        if let Some(hit) = cache.get(key) {
             return Ok(hit.clone());
         }
         let value = self.backend.get(&self.service, key)?;
-        self.cache.lock().insert(key.to_string(), value.clone());
+        cache.insert(key.to_string(), value.clone());
         rdebug!(
             Category::Credentials,
             "read {} ({})",
@@ -168,10 +201,17 @@ impl Credentials {
         Ok(())
     }
 
-    /// The only thing the webview is told about a secret.
+    /// The only thing the webview is told about a secret. Answered from the
+    /// process cache when the value was already read, else from the item's
+    /// existence, never by reading it: presence used to decrypt the Gmail
+    /// client secret on every settings read, which on a rebuilt dev binary
+    /// meant a keychain dialog at every launch.
     pub fn present(&self, key: &str) -> bool {
-        match self.get(key) {
-            Ok(v) => v.is_some_and(|s| !s.is_empty()),
+        if let Some(hit) = self.cache.lock().get(key) {
+            return hit.as_ref().is_some_and(|s| !s.is_empty());
+        }
+        match self.backend.exists(&self.service, key) {
+            Ok(v) => v,
             Err(e) => {
                 rwarn!(
                     Category::Credentials,
@@ -198,6 +238,63 @@ fn redact_key(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Counts backend reads, so a test can prove presence never reads and
+    /// that concurrent readers share one keychain trip.
+    #[derive(Default)]
+    struct Counting {
+        inner: MemoryBackend,
+        reads: std::sync::atomic::AtomicUsize,
+    }
+    impl CredentialBackend for Counting {
+        fn get(&self, service: &str, key: &str) -> Result<Option<String>> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            self.inner.get(service, key)
+        }
+        fn exists(&self, service: &str, key: &str) -> Result<bool> {
+            Ok(self
+                .inner
+                .items
+                .lock()
+                .contains_key(&(service.to_string(), key.to_string())))
+        }
+        fn set(&self, service: &str, key: &str, value: &str) -> Result<()> {
+            self.inner.set(service, key, value)
+        }
+        fn delete(&self, service: &str, key: &str) -> Result<()> {
+            self.inner.delete(service, key)
+        }
+    }
+
+    #[test]
+    fn presence_never_reads_the_value_and_concurrent_reads_share_one_trip() {
+        let backend = Arc::new(Counting::default());
+        let c = Arc::new(Credentials::new("t", backend.clone()));
+        c.set(GMAIL_CLIENT_SECRET, "s").unwrap();
+        c.forget_cache();
+        assert!(c.present(GMAIL_CLIENT_SECRET));
+        assert!(!c.present(JEV_API_KEY));
+        assert_eq!(
+            backend.reads.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "presence is attributes only"
+        );
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let c = c.clone();
+                std::thread::spawn(move || c.get(GMAIL_CLIENT_SECRET).unwrap())
+            })
+            .collect();
+        for h in handles {
+            assert_eq!(h.join().unwrap().as_deref(), Some("s"));
+        }
+        assert_eq!(
+            backend.reads.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "one keychain trip for four readers"
+        );
+    }
 
     #[test]
     fn a_value_round_trips_and_presence_reflects_it() {

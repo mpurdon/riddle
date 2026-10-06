@@ -4,11 +4,26 @@
 //! neighbouring Signals is phrased to contrast (`receipt` is proof of a
 //! completed payment; `invoice` presents an amount still due). Each version
 //! here is v1; changing any text means a new version through the registry,
-//! never an edit in place, because Meshes pin `name@vN`.
+//! never an edit in place, because Meshes pin `name@vN`. A Signal added
+//! later is seeded at boot where absent; `claims_prior_contact` came with
+//! cold outreach, where a stranger's invented shared past ("I noticed your
+//! comment on my channel") contradicts a history Riddle can check.
+//! `donation_appeal` came with the Payments review: `marketing` plus
+//! `payment_related` read Patreon discounts, toll-road offers and concert
+//! tickets as fundraising, and no fact tells an appeal from an ad.
 
 use riddle_core::{
     CreatedBy, Signal, SignalChoice, SignalId, SignalInputs, SignalPrimitive, SignalStatus,
 };
+
+/// System Signals kept for the decisions that cite them but no longer
+/// offered: seeded Deprecated, out of every Signal Set, and flipped once on
+/// stores that already hold them Active (`Registry::seed_system`).
+/// `human_authored` never scored above 0.6 on any of 6,198 messages of one
+/// mailbox, a person's mail sat near 0.2 and a scam opener at 0.21; who
+/// wrote is read from facts (`known_sender`, `automated_sender`,
+/// `cold_outreach`) and `claims_prior_contact` instead.
+pub const DEPRECATED: &[&str] = &["human_authored"];
 
 struct Def {
     name: &'static str,
@@ -46,6 +61,8 @@ const DEFS: &[Def] = &[
     Def { name: "social_notification", definition: "A social platform reports activity such as likes, follows, mentions or comments.", yes: "A social network or community platform reports activity on the recipient's profile or posts.", no: "The message is about something other than social platform activity.", thread: false, slices: &[] },
     Def { name: "receipt", definition: "The message is proof of a completed purchase or payment.", yes: "The message confirms a payment that has already been made.", no: "The message asks for payment, or is about something other than a completed payment.", thread: false, slices: &[] },
     Def { name: "invoice", definition: "The message presents an amount that is due to be paid.", yes: "An amount is presented as owed, with a due date or a request to pay.", no: "The message confirms a completed payment, or is about something other than an amount due.", thread: false, slices: &[] },
+    Def { name: "claims_prior_contact", definition: "The author says they already know the reader from an earlier interaction.", yes: "The author refers to meeting, speaking or writing before, or to something the reader did that the author saw, such as a comment, a post, a profile or an application.", no: "The author introduces themselves for the first time, or writes as a service, a list or a campaign.", thread: false, slices: &[] },
+    Def { name: "donation_appeal", definition: "The author asks the reader to donate to a charity, cause or non-profit organisation.", yes: "The message asks for a donation, pledge or gift to a charity, fundraiser, foundation or non-profit.", no: "The message sells a product or subscription, bills the reader, or asks for nothing.", thread: false, slices: &[] },
     Def { name: "travel_reservation", definition: "The message confirms or changes a travel booking such as a flight, hotel, train or car.", yes: "A travel booking is confirmed, changed or ticketed.", no: "The message is about something other than a travel booking.", thread: false, slices: &[] },
 ];
 
@@ -88,7 +105,11 @@ fn build(d: &Def) -> Signal {
             context_slices: d.slices.iter().map(|s| s.to_string()).collect(),
         },
         language_scope: vec!["en".into()],
-        status: SignalStatus::Active,
+        status: if DEPRECATED.contains(&d.name) {
+            SignalStatus::Deprecated
+        } else {
+            SignalStatus::Active
+        },
         calibration: None,
         created_at: chrono::DateTime::from_timestamp(1_758_499_200, 0).unwrap_or_default(),
         created_by: CreatedBy::System,
@@ -140,6 +161,8 @@ mod tests {
             "receipt",
             "invoice",
             "travel_reservation",
+            "claims_prior_contact",
+            "donation_appeal",
         ] {
             assert!(names.contains(&required), "missing {required}");
         }

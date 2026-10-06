@@ -15,6 +15,7 @@ import type { Signal } from '@/bindings/Signal'
 import type { Stratum } from '@/bindings/Stratum'
 import type { Job } from '@/bindings/Job'
 import type { Activity } from '@/bindings/Activity'
+import type { Autonomy } from '@/bindings/Autonomy'
 import type { DecisionTrace } from '@/bindings/DecisionTrace'
 import type { Facts } from '@/bindings/Facts'
 import type { SignalEvaluation } from '@/bindings/SignalEvaluation'
@@ -65,6 +66,7 @@ export function buildDigs(): Dig[] {
       projection: 'labels_only',
       status: { state: 'catching_up', remaining: u64(1240), total: u64(4981) },
       shadowStartedAt: daysAgo(21),
+      disabled: false,
       createdAt: daysAgo(21),
     },
     {
@@ -77,6 +79,7 @@ export function buildDigs(): Dig[] {
       projection: 'full',
       status: { state: 'synced' },
       shadowStartedAt: daysAgo(40),
+      disabled: false,
       createdAt: daysAgo(40),
     },
     {
@@ -89,6 +92,7 @@ export function buildDigs(): Dig[] {
       projection: 'none',
       status: { state: 'shadow', day: 3, of: 7 },
       shadowStartedAt: daysAgo(2.4),
+      disabled: false,
       createdAt: daysAgo(2.4),
     },
   ]
@@ -96,9 +100,9 @@ export function buildDigs(): Dig[] {
 
 export function buildDigGroups(): DigGroup[] {
   return [
-    { name: 'Work', digs: [DIG_WORK] },
-    { name: 'Personal', digs: [DIG_PERSONAL] },
-    { name: 'Consulting', digs: [DIG_CONSULTING] },
+    { name: 'Work', digs: [DIG_WORK], usedBy: [] },
+    { name: 'Personal', digs: [DIG_PERSONAL], usedBy: [] },
+    { name: 'Consulting', digs: [DIG_CONSULTING], usedBy: [] },
   ]
 }
 
@@ -512,7 +516,7 @@ export function messageSpecs(): MessageSpec[] {
       reason: 'Sent from Gmail on the web; it resolved the Respond Find and recorded a commitment.',
       mechanism: 'deterministic',
     },
-    // --- Unresolved (2) ---
+    // --- Unresolved (5) ---
     {
       id: 'm_pers_lisbon',
       dig: DIG_PERSONAL,
@@ -552,6 +556,67 @@ export function messageSpecs(): MessageSpec[] {
       matchedRule: null,
       escalated: { reason: 'requires_response .47 / personally_relevant .44 below the .80 auto threshold', rationale: 'A first-time sender references an unnamed matter. There is not enough context to know whether Matthew is expected to act. Unresolved.' },
       reason: 'Too little context: a first-time sender about an unnamed matter.',
+      mechanism: 'llm',
+    },
+    // --- Unresolved: three alerts from one sender, so the sender cluster has something to group ---
+    {
+      id: 'm_work_uptime_1',
+      dig: DIG_WORK,
+      from: { email: 'alerts@uptime.example', name: 'Uptime monitor' },
+      to: [ME[DIG_WORK]],
+      subject: '[Down] api.example.com is DOWN',
+      snippet: 'Monitor api.example.com is DOWN: HTTP 503 from eu-west-1. Retrying every 60 s.',
+      text: 'Monitor api.example.com is DOWN: HTTP 503 from eu-west-1. Retrying every 60 s.\n\nThis is an automated alert. Manage monitors at https://uptime.example/dashboard',
+      hoursAgo: 1.1,
+      labels: ['INBOX', 'CATEGORY_UPDATES'],
+      disposition: { kind: 'unresolved' },
+      strata: [],
+      facts: { senderDomain: 'uptime.example', firstTimeSender: true, directlyAddressed: false },
+      signals: { requires_response: 0.22, personally_relevant: 0.38, routine: 0.52, urgency: 0.61 },
+      meshId: null,
+      matchedRule: null,
+      escalated: { reason: 'routine .52 / urgency .61: an alert from a sender no Mesh mentions', rationale: 'Automated monitoring alerts can be noise or an outage that needs someone. No rule names this sender and the Signals disagree, so it stays Unresolved for a decision.' },
+      reason: 'An alert from a monitoring sender no rule mentions; the Signals disagree on whether it needs you.',
+      mechanism: 'llm',
+    },
+    {
+      id: 'm_work_uptime_2',
+      dig: DIG_WORK,
+      from: { email: 'alerts@uptime.example', name: 'Uptime monitor' },
+      to: [ME[DIG_WORK]],
+      subject: '[Up] api.example.com is UP',
+      snippet: 'Monitor api.example.com is back UP after 4 minutes: HTTP 200 from eu-west-1.',
+      text: 'Monitor api.example.com is back UP after 4 minutes: HTTP 200 from eu-west-1.\n\nThis is an automated alert. Manage monitors at https://uptime.example/dashboard',
+      hoursAgo: 1.0,
+      labels: ['INBOX', 'CATEGORY_UPDATES'],
+      disposition: { kind: 'unresolved' },
+      strata: [],
+      facts: { senderDomain: 'uptime.example', firstTimeSender: false, directlyAddressed: false },
+      signals: { requires_response: 0.22, personally_relevant: 0.38, routine: 0.52, urgency: 0.61 },
+      meshId: null,
+      matchedRule: null,
+      escalated: { reason: 'routine .52 / urgency .61: an alert from a sender no Mesh mentions', rationale: 'Automated monitoring alerts can be noise or an outage that needs someone. No rule names this sender and the Signals disagree, so it stays Unresolved for a decision.' },
+      reason: 'An alert from a monitoring sender no rule mentions; the Signals disagree on whether it needs you.',
+      mechanism: 'llm',
+    },
+    {
+      id: 'm_work_uptime_3',
+      dig: DIG_WORK,
+      from: { email: 'alerts@uptime.example', name: 'Uptime monitor' },
+      to: [ME[DIG_WORK]],
+      subject: '[Down] db-replica-2 is DOWN',
+      snippet: 'Monitor db-replica-2 is DOWN: connection refused on port 5432.',
+      text: 'Monitor db-replica-2 is DOWN: connection refused on port 5432.\n\nThis is an automated alert. Manage monitors at https://uptime.example/dashboard',
+      hoursAgo: 0.6,
+      labels: ['INBOX', 'CATEGORY_UPDATES'],
+      disposition: { kind: 'unresolved' },
+      strata: [],
+      facts: { senderDomain: 'uptime.example', firstTimeSender: false, directlyAddressed: false },
+      signals: { requires_response: 0.22, personally_relevant: 0.38, routine: 0.52, urgency: 0.61 },
+      meshId: null,
+      matchedRule: null,
+      escalated: { reason: 'routine .52 / urgency .61: an alert from a sender no Mesh mentions', rationale: 'Automated monitoring alerts can be noise or an outage that needs someone. No rule names this sender and the Signals disagree, so it stays Unresolved for a decision.' },
+      reason: 'An alert from a monitoring sender no rule mentions; the Signals disagree on whether it needs you.',
       mechanism: 'llm',
     },
     // --- Contamination (3) ---
@@ -622,7 +687,7 @@ export function messageSpecs(): MessageSpec[] {
       text: 'Order #204-5581923-1120314\n\nUbiquiti U6 Lite access point — £89.00\n\nArriving tomorrow by 9pm.',
       html: '<p>Order <b>#204-5581923-1120314</b></p><table><tr><td>Ubiquiti U6 Lite access point</td><td>£89.00</td></tr></table><p>Arriving tomorrow by 9pm.</p><img src="https://amazon.example/track/px.gif">',
       hoursAgo: 14,
-      labels: ['INBOX', 'CATEGORY_UPDATES'],
+      labels: ['INBOX', 'CATEGORY_UPDATES', 'STARRED'],
       disposition: { kind: 'filed' },
       strata: ['Purchases', 'Receipts'],
       facts: { senderDomain: 'amazon.example', autoSubmitted: true, hasStructuredReceipt: true, gmailCategory: 'updates' },
@@ -1087,6 +1152,8 @@ interface MeshSpec {
   shadowStartedAt: string | null
   shadowAgreed: number
   shadowProposed: number
+  /** `Autonomy:` header cap, if the fixture text carries one. */
+  autonomy?: Autonomy | null
   deletedAt: string | null
 }
 
@@ -1187,6 +1254,8 @@ export function buildMeshes(digIdByName: (n: string) => string | null): Mesh[] {
         shadowAgreed: spec.shadowAgreed,
         shadowProposed: spec.shadowProposed,
         deletedAt: spec.deletedAt,
+        autonomy: spec.autonomy ?? undefined,
+        fallback: false,
       })
     }
   }
@@ -1286,7 +1355,7 @@ export function buildFinds(messages: Message[], specs: MessageSpec[]): Find[] {
       confidence: f.confidence,
       classificationId: first ? `cls_${first.id}` : null,
       traceId: first ? `tr_${first.id}` : null,
-      supersededBy: null,
+      supersededBy: null, notify: false,
     }
   })
 }
@@ -1315,6 +1384,7 @@ export function buildMessage(s: MessageSpec): Message {
     snippet: s.snippet ?? s.text.split('\n')[0],
     labels: s.labels ?? ['INBOX'],
     headers: {
+      extra: {},
       messageId: `<${s.id}@${domain}>`,
       inReplyTo: null,
       references: [],
@@ -1337,7 +1407,27 @@ export function buildMessage(s: MessageSpec): Message {
 
 export function buildFacts(s: MessageSpec, from: Address): Facts {
   const base: Facts = {
+    senderCadence: '',
+    senderOnSchedule: false,
+    governmentSender: false,
+    fromMe: false,
+    spoofsMe: false,
+    isDraft: false,
+    isReply: false,
+    freeMailSender: false,
+    glyphSubstitution: false,
+    suspiciousDomain: false,
     senderDomain: from.email.split('@')[1],
+    sender: from.email.toLowerCase(),
+    senderName: from.name ?? '',
+    subject: s.subject ?? '',
+    headers: {},
+    githubReason: null,
+    githubEvent: null,
+    listId: '',
+    verificationCode: '',
+    paymentFailed: false,
+    paymentRecovered: false,
     senderInContacts: false,
     senderRepliedToBefore: false,
     firstTimeSender: false,
@@ -1959,6 +2049,8 @@ export function buildSettings(): Settings {
     developerMode: true,
     logLevel: 'debug',
     notifyPriorityThreshold: 70,
+    notifications: { mode: 'brief', briefTimes: ['09:00', '16:00'], immediateTypes: ['pay', 'respond'], dueWithinHours: 24, neverHiddenImmediate: true },
+    priorityInbox: { strata: [], labels: ['STARRED'], minFindPriority: 70, findTypes: [], minImportance: 'high' },
     shadowPeriodDays: 7,
     judge: { provider: 'jev', model: 'jev-1.13.0', keySource: 'ssm', ssmProfile: 'dev', ssmParameter: '/riddle/jev/api-key', apiKeyPresent: true },
     llm: { provider: 'bedrock', profile: 'dev', region: 'us-east-1', escalationModel: 'us.anthropic.claude-haiku-4-5', directorModel: 'us.anthropic.claude-sonnet-5' },
@@ -1969,7 +2061,6 @@ export function buildSettings(): Settings {
     privacyDefault: 'cloud_judgment',
     launchAtLogin: false,
     closeToHide: true,
-    spoilDigest: 'daily',
   }
 }
 

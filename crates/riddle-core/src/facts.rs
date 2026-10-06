@@ -10,6 +10,65 @@ use ts_rs::TS;
 #[ts(export)]
 pub struct Facts {
     pub sender_domain: String,
+    /// How often the sender writes (`Cadence::as_str`); empty while there
+    /// is too little mail from them to say.
+    #[serde(default)]
+    pub sender_cadence: String,
+    /// The sender writes about once a day at the same local time
+    /// (`Person::on_schedule`).
+    #[serde(default)]
+    pub sender_on_schedule: bool,
+    /// An official government sender: a government domain (see
+    /// `riddle_sift::facts::government_domain`) whose mail passed DMARC, so
+    /// the From address is theirs and not a scammer's use of their name.
+    #[serde(default)]
+    pub government_sender: bool,
+    /// The message is the user's own: from one of their addresses, and sent,
+    /// a draft, or authenticated. Mail that only claims an own address on
+    /// the From line is not; that is a classic scam (see `riddle_sift::gates`).
+    #[serde(default)]
+    pub from_me: bool,
+    /// One of the user's addresses on the From line of mail that is neither
+    /// sent nor a draft and failed DMARC outright: "I have access to your
+    /// account" sent as if from the user. An absent verdict is not a failure.
+    #[serde(default)]
+    pub spoofs_me: bool,
+    /// The message answers another (`In-Reply-To` or `References`): a
+    /// business replying to a website form the user filled in has no thread
+    /// in the mailbox, but it is not an opener.
+    #[serde(default)]
+    pub is_reply: bool,
+    /// A Gmail draft; Sift files it without judging it.
+    #[serde(default)]
+    pub is_draft: bool,
+    /// The sender uses a consumer mailbox anyone can open (`gmail.com`,
+    /// `outlook.com`, `icloud.com`…; `riddle_sift::facts::free_mail_domain`).
+    /// Authentication there proves the account sent it, not who owns it.
+    #[serde(default)]
+    pub free_mail_sender: bool,
+    /// Letters disguised to slip past filters: a pipe or a lone `l`
+    /// standing for the pronoun I ("| look forward"), or a word mixing Latin
+    /// with Cyrillic letters (`riddle_sift::facts::glyph_substitution`).
+    #[serde(default)]
+    pub glyph_substitution: bool,
+    /// The sender's domain ends in a top-level domain that does not exist
+    /// (`.zbc`, `.jzl`) or its name is a random string of letters and
+    /// digits (`628ydjfg.us`): throwaway domains phishing runs from
+    /// (`riddle_sift::facts::suspicious_domain`).
+    #[serde(default)]
+    pub suspicious_domain: bool,
+    /// The sender's address, lowercase.
+    #[serde(default)]
+    pub sender: String,
+    /// The sender's display name, e.g. `dependabot[bot]`.
+    #[serde(default)]
+    pub sender_name: String,
+    #[serde(default)]
+    pub subject: String,
+    /// `MessageHeaders::extra`, keyed lowercase; read as `header <Name>`.
+    #[serde(default)]
+    #[ts(type = "Record<string, string>")]
+    pub headers: std::collections::BTreeMap<String, String>,
     pub sender_in_contacts: bool,
     pub sender_replied_to_before: bool,
     pub first_time_sender: bool,
@@ -43,6 +102,35 @@ pub struct Facts {
     pub lookalike_domain: bool,
     pub sender_in_never_hidden: bool,
     pub sender_is_vip: bool,
+    /// Why GitHub sent a notification: `review_requested`, `mention`,
+    /// `assign`, `author`, `comment`, `subscribed`, `ci_activity`, `state_change`,
+    /// `security_alert`, `team_mention`, `push`, `manual`. From the
+    /// `X-GitHub-Reason` header, or the footer of mail synced before that
+    /// header was kept. Empty for anything else.
+    #[serde(default)]
+    pub github_reason: Option<String>,
+    /// What happened on GitHub: `review_requested_you`,
+    /// `review_requested_team`, `changes_requested`, `approved`,
+    /// `commented`, `merged`, `closed`, `pushed`, `run_failed`, `opened`
+    /// (`riddle_sift::facts::github_event`). Empty for anything else.
+    #[serde(default)]
+    pub github_event: Option<String>,
+    /// The List-Id identifier, lowercase (`platform.northwind.github.com`);
+    /// empty when the mail is not from a list.
+    #[serde(default)]
+    pub list_id: String,
+    /// The one-time sign-in or verification code the message carries
+    /// (`riddle_sift::facts::verification_code`); empty when none.
+    #[serde(default)]
+    pub verification_code: String,
+    /// A payment that did not go through: failed, declined, unsuccessful
+    /// (`riddle_sift::facts::payment_failed`).
+    #[serde(default)]
+    pub payment_failed: bool,
+    /// A payment that went through on a backup method after the main one
+    /// failed (`riddle_sift::facts::payment_recovered`).
+    #[serde(default)]
+    pub payment_recovered: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -55,6 +143,10 @@ pub struct Deadline {
     pub past: bool,
 }
 
+/// How a header fact is named inside a Mesh: `header X-GitHub-Reason`
+/// parses to the fact `header:x-github-reason`.
+pub const HEADER_PREFIX: &str = "header:";
+
 impl Facts {
     /// Look a fact up by its Mesh name. Booleans are 1/0, numbers as-is,
     /// strings as strings; unknown names are `None` so a Mesh referencing a
@@ -62,8 +154,24 @@ impl Facts {
     /// evaluating false.
     pub fn get(&self, name: &str) -> Option<FactValue> {
         use FactValue::*;
+        // An absent header is empty text: `=` fails and `!=` holds, rather
+        // than the condition being unknown.
+        if let Some(h) = name.strip_prefix(HEADER_PREFIX) {
+            return Some(Text(self.headers.get(h).cloned().unwrap_or_default()));
+        }
         Some(match name {
             "sender_domain" => Text(self.sender_domain.clone()),
+            "sender" => Text(self.sender.clone()),
+            "sender_name" => Text(self.sender_name.clone()),
+            "sender_cadence" => Text(self.sender_cadence.clone()),
+            "sender_on_schedule" => Bool(self.sender_on_schedule),
+            "government_sender" => Bool(self.government_sender),
+            "from_me" => Bool(self.from_me),
+            "free_mail_sender" => Bool(self.free_mail_sender),
+            "glyph_substitution" => Bool(self.glyph_substitution),
+            "cold_outreach" => Bool(self.cold_outreach()),
+            "suspicious_domain" => Bool(self.suspicious_domain),
+            "subject" => Text(self.subject.clone()),
             "sender_in_contacts" => Bool(self.sender_in_contacts),
             "sender_replied_to_before" => Bool(self.sender_replied_to_before),
             "first_time_sender" => Bool(self.first_time_sender),
@@ -100,19 +208,37 @@ impl Facts {
             "lookalike_domain" => Bool(self.lookalike_domain),
             "sender_in_never_hidden" => Bool(self.sender_in_never_hidden),
             "sender_is_vip" => Bool(self.sender_is_vip),
+            "github_reason" => Text(self.github_reason.clone().unwrap_or_default()),
+            "github_event" => Text(self.github_event.clone().unwrap_or_default()),
+            "list_id" => Text(self.list_id.clone()),
+            "verification_code" => Text(self.verification_code.clone()),
+            "has_verification_code" => Bool(!self.verification_code.is_empty()),
+            "payment_failed" => Bool(self.payment_failed),
+            "payment_recovered" => Bool(self.payment_recovered),
             "automated_sender" => Bool(
                 self.mailing_list
                     || self.precedence_bulk
                     || self.auto_submitted
                     || self.list_unsubscribe,
             ),
-            "known_sender" => Bool(self.sender_in_contacts || self.sender_replied_to_before),
+            "known_sender" => Bool(self.known()),
             _ => return None,
         })
     }
 
     pub const NAMES: &'static [&'static str] = &[
         "sender_domain",
+        "sender",
+        "sender_name",
+        "sender_cadence",
+        "sender_on_schedule",
+        "government_sender",
+        "from_me",
+        "free_mail_sender",
+        "glyph_substitution",
+        "cold_outreach",
+        "suspicious_domain",
+        "subject",
         "sender_in_contacts",
         "sender_replied_to_before",
         "first_time_sender",
@@ -143,9 +269,94 @@ impl Facts {
         "lookalike_domain",
         "sender_in_never_hidden",
         "sender_is_vip",
+        "github_reason",
+        "github_event",
+        "list_id",
+        "verification_code",
+        "has_verification_code",
+        "payment_failed",
+        "payment_recovered",
         "automated_sender",
         "known_sender",
     ];
+
+    /// The user has a relationship with the sender, or is the sender.
+    pub fn known(&self) -> bool {
+        self.sender_in_contacts || self.sender_replied_to_before || self.from_me
+    }
+
+    /// Unsolicited one-to-one mail from a stranger's free mailbox: nobody the
+    /// user knows or protects, a consumer domain, none of the headers bulk
+    /// mail carries, not a reply, and a thread the user has not answered. It describes
+    /// how the mail arrived, not what it says; scams open this way ("I saw
+    /// your comment", a recruiter from a Gmail address), and so do some real
+    /// people, which is why a rule pairs it with a Signal.
+    pub fn cold_outreach(&self) -> bool {
+        self.free_mail_sender
+            && !self.known()
+            && !self.is_sent
+            && !self.same_organisation
+            && !self.sender_in_never_hidden
+            && !self.sender_is_vip
+            && !self.mailing_list
+            && !self.list_unsubscribe
+            && !self.precedence_bulk
+            && !self.auto_submitted
+            && !self.is_reply
+            && self.my_last_reply_at.is_none()
+            && self.thread_length <= 1
+    }
+}
+
+/// Consumer mailboxes anyone can open in a minute. Exact domains, plus the
+/// big providers under any country ending (`yahoo.co.uk`, `hotmail.fr`).
+/// ISP mailboxes (`bell.net`, `rogers.com`, `sympatico.ca`) are not here:
+/// they come with a paid account tied to a customer, and the first list put
+/// a shop's reply from one under cold outreach.
+const FREE_MAIL: &[&str] = &[
+    "gmail.com",
+    "googlemail.com",
+    "msn.com",
+    "ymail.com",
+    "rocketmail.com",
+    "icloud.com",
+    "me.com",
+    "mac.com",
+    "proton.me",
+    "protonmail.com",
+    "pm.me",
+    "mail.com",
+    "zoho.com",
+    "tutanota.com",
+    "tuta.io",
+    "fastmail.com",
+    "hushmail.com",
+    "mail.ru",
+    "qq.com",
+    "163.com",
+    "126.com",
+];
+
+/// Providers whose free mailboxes exist under many country endings.
+const FREE_MAIL_BRANDS: &[&str] = &[
+    "hotmail", "outlook", "live", "yahoo", "aol", "gmx", "yandex",
+];
+
+/// Whether a sender domain is a consumer mailbox (see `FREE_MAIL`); the
+/// `free_mail_sender` fact, and never an organisation domain. A brand
+/// counts only under a bare public ending (`outlook.com`, `yahoo.co.uk`), so
+/// `outlook.office365.com` or `live.nation.com` is not one.
+pub fn free_mail_domain(domain: &str) -> bool {
+    let d = domain.trim_end_matches('.').to_ascii_lowercase();
+    if FREE_MAIL.contains(&d.as_str()) {
+        return true;
+    }
+    let Some((brand, ending)) = d.split_once('.') else {
+        return false;
+    };
+    FREE_MAIL_BRANDS.contains(&brand)
+        && ending.split('.').count() <= 2
+        && ending.split('.').all(|l| (2..=3).contains(&l.len()))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

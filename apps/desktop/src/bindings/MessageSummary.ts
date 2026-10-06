@@ -3,10 +3,35 @@ import type { Address } from "./Address";
 import type { DigId } from "./DigId";
 import type { Disposition } from "./Disposition";
 import type { FindId } from "./FindId";
+import type { Importance } from "./Importance";
 import type { MessageId } from "./MessageId";
+import type { ShadowReview } from "./ShadowReview";
 import type { ThreadId } from "./ThreadId";
 
 /**
  * The paged list row: everything a list needs and nothing a body carries.
  */
-export type MessageSummary = { id: MessageId, digId: DigId, threadId: ThreadId, subject: string, from: Address, date: string, snippet: string, labels: Array<string>, isSent: boolean, hasAttachments: boolean, disposition: Disposition | null, strata: Array<string>, findId: FindId | null, };
+export type MessageSummary = { id: MessageId, digId: DigId, threadId: ThreadId, subject: string, from: Address, date: string, snippet: string, labels: Array<string>, isSent: boolean, hasAttachments: boolean, disposition: Disposition | null, strata: Array<string>, findId: FindId | null, 
+/**
+ * True when `disposition` is a Shadow proposal (listed with
+ * `include_shadow`), not a decision that applied.
+ */
+shadow: boolean, 
+/**
+ * The user's review of the Shadow proposal, when they gave one.
+ */
+shadowReview: ShadowReview | null, 
+/**
+ * A newer message of the same `+ Replaces` series (a store's next sale)
+ * made this one moot: it reads as read and sinks below its list.
+ */
+supersededBy?: MessageId, 
+/**
+ * The level the message has: the user's own when they set one,
+ * otherwise the decision's.
+ */
+importance: Importance, 
+/**
+ * True when `importance` is the user's own setting for this message.
+ */
+importanceSetByYou: boolean, };

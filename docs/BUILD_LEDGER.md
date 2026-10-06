@@ -83,3 +83,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 - Bedrock: Haiku 4.5 escalations at about $0.009 each (roughly 110 across all runs, about $1.0), plus two Director turns on Sonnet 4.5 (about $0.12) and Track C's live probes (under $0.01). Total external spend for the night is about $1.2.
 - The escalation tail dominates, as ARCHITECTURE.md §18 predicted: the judge cost per message is two orders of magnitude below one LLM refinement.
 
+| 27 | feat: rule packs, importance, sign-in codes, failed payments, Hold/Ask/Allow mailbox writes | 19961 | 3937814 | 1489649746 | 4134 | 56 |

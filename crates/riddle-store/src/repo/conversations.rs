@@ -74,6 +74,8 @@ mod tests {
                 created_at: now,
                 input_tokens: 0,
                 output_tokens: 0,
+                failure: None,
+                stopped_early: None,
                 cost_usd: None,
             }],
             read_untrusted: false,
@@ -82,6 +84,7 @@ mod tests {
             prompt_version: None,
             created_at: now,
             updated_at: now,
+            allowance: None,
         };
         upsert(&store, &c).unwrap();
         assert_eq!(get(&store, &c.id).unwrap().unwrap().turns.len(), 1);

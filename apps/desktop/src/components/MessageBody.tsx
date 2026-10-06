@@ -8,7 +8,7 @@
 import { useMemo, useState } from 'react'
 import { ExternalLink, ImageOff } from 'lucide-react'
 import { Button } from './ui/Button'
-import { isTauri, log } from '@/lib/ipc'
+import { openExternal } from '@/lib/ipc'
 
 export interface PreparedHtml {
   html: string
@@ -63,29 +63,21 @@ export function prepareHtml(source: string, loadRemote: boolean): PreparedHtml {
   return { html: `<!doctype html><html><head>${head}</head><body>${body}</body></html>`, remoteImages, links }
 }
 
-export function openExternal(href: string): void {
-  if (isTauri) {
-    void import('@tauri-apps/plugin-opener')
-      .then((m) => m.openUrl(href))
-      .catch((e) => log('warn', 'ui', `openUrl failed: ${String((e as Error)?.message ?? e)}`))
-  } else {
-    window.open(href, '_blank', 'noopener,noreferrer')
-  }
-}
 
-export function MessageBody({ html, text }: { html: string | null; text: string | null }) {
+/** `maxHeight` caps the frame: a preview pane wants less than the full page. */
+export function MessageBody({ html, text, maxHeight = 1200 }: { html: string | null; text: string | null; maxHeight?: number }) {
   const [loadRemote, setLoadRemote] = useState(false)
   const prepared = useMemo(() => (html ? prepareHtml(html, loadRemote) : null), [html, loadRemote])
   if (!prepared) {
     return <pre className="whitespace-pre-wrap rounded border border-line bg-paper p-4 font-sans text-sm leading-6 selectable">{text ?? <span className="text-clay">This message has no body yet. It will be fetched with the next sync.</span>}</pre>
   }
   const lines = (text ?? html ?? '').split('\n').length
-  const height = Math.min(1200, Math.max(220, lines * 22 + 80))
+  const height = Math.min(maxHeight, Math.max(220, lines * 22 + 80))
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 selectable">
       {prepared.remoteImages > 0 ? (
         <div className="flex items-center gap-2 rounded border border-line bg-sand px-2 py-1 text-xs text-ink-2">
-          <ImageOff className="size-3.5" />
+          <ImageOff className="size-3.5 shrink-0" aria-hidden />
           {loadRemote ? (
             <span>Remote images loaded for this message.</span>
           ) : (

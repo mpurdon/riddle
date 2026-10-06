@@ -1,30 +1,40 @@
 /**
  * The Director (README "The Director"): a chat panel with streaming deltas,
  * tool-call cards (with the "read untrusted content" badge that explains
- * egress gating), proposal cards with Preview / Apply / Dismiss, and the
- * conversation list. Prefilled questions arrive from Finds and the search
- * box.
+ * egress gating), the proposals panel, and the conversation list.
+ *
+ * Prefilled questions arrive from Finds, messages and the search box, and
+ * only ever land in the composer: the UX study watched a "Talk to the
+ * Director" button spend a turn before the person had read what it asked,
+ * so nothing sends until the person presses Enter in the composer (⌘↵ also
+ * sends, from anywhere on the page). Shift+Enter adds a line, the way every
+ * chat does; the earlier "Enter adds a line, ⌘↵ sends" was the one place in
+ * the app that broke that habit. There is no Stop button: the backend
+ * cannot cancel a running turn, and a control that pretends to would be a
+ * lie the person discovers at the worst moment.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Bot, Check, Eye, MessageSquare, Plus, Send, ShieldAlert, X } from 'lucide-react'
+import { AlertTriangle, Bot, Check, Plus, RefreshCw, Send, ShieldAlert, X } from 'lucide-react'
 import type { ToolCall } from '@/bindings/ToolCall'
-import type { PendingAction } from '@/bindings/PendingAction'
-import { directorSend, getConversation, listConversations, listPending, qk } from '@/lib/api'
-import { cx, fmtMs, fmtRelative, fmtUsd, num, safeJson } from '@/lib/format'
+import type { Turn } from '@/bindings/Turn'
+import { directorRetry, directorSend, getConversation, listConversations, qk } from '@/lib/api'
+import { cx, fmtMs, fmtRelative, fmtUsd, num } from '@/lib/format'
 import { useDigContext } from '@/lib/queries'
-import { useDirector, useProposals, toast } from '@/lib/stores'
-import { useAction, showError } from '@/lib/useAction'
+import { keysLabel } from '@/lib/shortcuts'
+import { useDirector } from '@/lib/stores'
+import { showError } from '@/lib/useAction'
 import { useShortcuts } from '@/lib/useShortcuts'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
-import { Dialog } from '@/components/ui/Dialog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Note } from '@/components/ui/Note'
 import { Tip } from '@/components/ui/Tooltip'
 import { ErrorCard } from '@/components/ErrorCard'
 import { PageHeader } from '@/components/Bits'
+import { ProposalsPanel } from './ProposalsPanel'
+import { Resizable } from '@/components/Resizable'
 
 const SUGGESTIONS = [
   'What actually needs my attention this morning?',
@@ -54,9 +64,60 @@ function Markdown({ text }: { text: string }) {
   )
 }
 
+/**
+ * The last turn, when it is an error: the message, a countdown when the
+ * provider named a wait (a tripped circuit breaker says "retry in 29s"),
+ * and the retry itself once the wait is over, without a click. The person
+ * used to read the error and re-type the question; the failed turn stays
+ * until the retry starts, then the conversation drops it.
+ */
+function FailedTurn({ t, working, onRetry }: { t: Turn; working: boolean; onRetry: () => void }) {
+  const deadline = t.failure?.retryAfterSecs != null ? new Date(t.createdAt).getTime() + t.failure.retryAfterSecs * 1000 : null
+  const [now, setNow] = useState(() => Date.now())
+  const fired = useRef(false)
+  const left = deadline === null ? null : Math.max(0, Math.ceil((deadline - now) / 1000))
+  // One tick a second while the countdown runs, and none once it reaches
+  // zero: a retry that failed used to leave the turn re-rendering four times
+  // a second until the conversation unmounted.
+  useEffect(() => {
+    if (deadline === null || left === 0) return
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [deadline, left])
+  useEffect(() => {
+    if (left === 0 && !fired.current && !working) {
+      fired.current = true
+      onRetry()
+    }
+  }, [left, working, onRetry])
+  return (
+    <div className="max-w-[78%] rounded-lg border border-rust/40 bg-rust/5 px-4 py-2.5 text-sm selectable">
+      <div className="mb-1.5 flex items-center gap-2 text-2xs text-clay">
+        <Bot className="size-3.5" /> Director
+      </div>
+      <Markdown text={t.content} />
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-2">
+        {left !== null && left > 0 ? <span role="status">Retrying in {left}s…</span> : left === 0 ? <span role="status">Retrying…</span> : null}
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<RefreshCw />}
+          disabledReason={working ? 'The Director is still working on the last message' : null}
+          title="Run your last message again now"
+          onClick={() => {
+            fired.current = true
+            onRetry()
+          }}
+        >
+          Retry now
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export default function DirectorPage() {
   const { conversationId } = useParams()
-  const [params, setParams] = useSearchParams()
   const nav = useNavigate()
   const qc = useQueryClient()
   const { digId, digs } = useDigContext()
@@ -71,17 +132,16 @@ export default function DirectorPage() {
   const [sending, setSending] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const working = !!live && !live.done
 
   useEffect(() => {
+    // A prefill is a draft, never a send: show it, focus it, wait for ⌘↵.
     if (prefill) {
       setText(prefill)
       setPrefill(null)
-      if (params.get('send') === '1') {
-        setParams(new URLSearchParams(), { replace: true })
-        void send(prefill)
-      } else inputRef.current?.focus()
+      inputRef.current?.focus()
     }
-  }, [prefill]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [prefill, setPrefill])
   useEffect(() => {
     if (live?.done && conversationId) {
       void qc.invalidateQueries({ queryKey: qk.conversation(conversationId) }).then(() => clear(conversationId))
@@ -91,14 +151,15 @@ export default function DirectorPage() {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight })
   }, [conv.data, live?.text, live?.toolCalls.length])
 
-  const send = async (msg?: string) => {
-    const m = (msg ?? text).trim()
-    if (!m || sending) return
+  // `message` is a Continue control's words; otherwise the composer's text.
+  const send = async (message?: string) => {
+    const m = (message ?? text).trim()
+    if (!m || sending || working) return
     setSending(true)
     try {
       const out = await directorSend({ conversationId: conversationId ?? null, message: m, digIds: digId ? [digId] : digs.map((d) => d.id) })
       begin(out.conversationId)
-      setText('')
+      if (message === undefined) setText('')
       if (out.conversationId !== conversationId) nav(`/director/${out.conversationId}`)
       else void qc.invalidateQueries({ queryKey: qk.conversation(out.conversationId) })
       void qc.invalidateQueries({ queryKey: qk.conversations })
@@ -108,28 +169,63 @@ export default function DirectorPage() {
       setSending(false)
     }
   }
+  // A failed turn: the failed Director turns come off, the last message runs again.
+  const retry = useCallback(async () => {
+    if (!conversationId || working) return
+    begin(conversationId)
+    try {
+      await directorRetry(conversationId)
+      void qc.invalidateQueries({ queryKey: qk.conversation(conversationId) })
+    } catch (e) {
+      clear(conversationId)
+      showError(e)
+    }
+  }, [conversationId, working, begin, clear, qc])
   useShortcuts('director', { director_send: () => void send() })
+  const suggest = (s: string) => {
+    setText(s)
+    inputRef.current?.focus()
+  }
 
   const turns = conv.data?.turns ?? []
   const readUntrusted = conv.data?.readUntrusted ?? false
+  const sendDisabled = working ? 'The Director is still working on the last message' : text.trim() ? null : 'Type a message'
+  /** Said once, on the Send button and under the composer. */
+  // One source for the two key labels: the button title says it in plain text, the footer as keycaps.
+  const keys = { send: keysLabel('enter').join(''), newline: keysLabel('shift+enter').join('') }
+  const composerHint = `${keys.send} sends · ${keys.newline} adds a line`
+  // Enter sends; Shift+Enter (and Alt+Enter) keep the newline; ⌘↵ is the page shortcut. A key
+  // pressed while an input method is still composing belongs to the composition, not to us.
+  // The composer grows with the text, three lines to about ten, then scrolls; a prefilled question
+  // from a Find used to arrive cut off at two lines with its end hidden.
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [text])
+  const onComposerKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey || e.nativeEvent.isComposing) return
+    e.preventDefault()
+    if (!sendDisabled) void send()
+  }
   return (
     <div className="flex min-h-0 flex-1">
-      <section className="flex w-64 shrink-0 flex-col border-r border-line">
+      <Resizable as="section" id="director" side="left" initial={256} min={180} max={480} label="Resize the conversation list" className="flex flex-col border-r border-line">
         <PageHeader title="Director" actions={<Button size="sm" icon={<Plus />} onClick={() => nav('/director')}>New</Button>} />
         <div className="min-h-0 flex-1 overflow-auto" role="listbox" aria-label="Conversations">
           {(convs.data ?? []).map((c) => (
             <div key={c.id} role="option" aria-selected={c.id === conversationId} onClick={() => nav(`/director/${c.id}`)} className={cx('cursor-default border-b border-line/60 px-3 py-2', c.id === conversationId ? 'row-selected' : 'hover:bg-sand/60')}>
               <div className="truncate text-sm font-medium">{c.title}</div>
-              <div className="flex items-center gap-1 text-[11px] text-clay">
+              <div className="flex items-center gap-1 text-2xs text-clay">
                 {fmtRelative(c.updatedAt)}
                 {c.readUntrusted ? <Chip tone="warn">read mail</Chip> : null}
               </div>
             </div>
           ))}
-          {convs.data && !convs.data.length ? <div className="p-4 text-xs text-clay">Conversations are not state: everything the Director does lands in Finds, drafts, Meshes and Activity.</div> : null}
+          {convs.data && !convs.data.length ? <div className="p-4 text-xs text-clay">Conversations are just talk; what the Director does lands in Finds, drafts, Meshes and Activity.</div> : null}
         </div>
-        <ProposalsPanel />
-      </section>
+      </Resizable>
       <section className="flex min-w-0 flex-1 flex-col">
         <div ref={scroller} className="min-h-0 flex-1 overflow-auto px-6 py-4">
           {!conversationId ? (
@@ -138,11 +234,12 @@ export default function DirectorPage() {
               title="Ask the Director."
               body={
                 <div>
-                  <p>It works with the same Digs, Finds, Strata, Meshes and drafts you do, through the same Actions. Before anything leaves the machine it shows you the real recipients and asks.</p>
+                  <p>It works with the same accounts, Finds, Strata, Meshes and drafts you do, through the same Actions. Before anything leaves the machine it shows you the real recipients and asks.</p>
+                  <p className="mt-2 text-xs text-clay">Pick a question to start with; edit it, then press Enter to send.</p>
                   <ul className="mt-3 flex flex-col gap-1 text-left">
                     {SUGGESTIONS.map((s) => (
                       <li key={s}>
-                        <button type="button" className="rounded px-2 py-1 text-left text-sm text-ochre hover:bg-sand" onClick={() => void send(s)}>
+                        <button type="button" className="rounded px-2 py-1 text-left text-sm text-ochre hover:bg-sand" onClick={() => suggest(s)} title="Put this in the composer; nothing is sent until you press send">
                           {s}
                         </button>
                       </li>
@@ -162,11 +259,16 @@ export default function DirectorPage() {
             </Note>
           ) : null}
           <div className="flex flex-col gap-4">
-            {turns.map((t, i) => (
+            {turns.map((t, i) =>
+              t.failure && i === turns.length - 1 ? (
+                <div key={i} className="flex justify-start">
+                  <FailedTurn t={t} working={working} onRetry={() => void retry()} />
+                </div>
+              ) : (
               <div key={i} className={cx('flex', t.role === 'user' ? 'justify-end' : 'justify-start')}>
-                <div className={cx('max-w-[78%] rounded-lg px-4 py-2.5 text-sm', t.role === 'user' ? 'bg-ochre/10' : 'border border-line bg-sand')}>
+                <div className={cx('max-w-[78%] rounded-lg px-4 py-2.5 text-sm selectable', t.role === 'user' ? 'bg-ochre/10' : t.failure ? 'border border-rust/40 bg-rust/5' : 'border border-line bg-sand')}>
                   {t.role !== 'user' ? (
-                    <div className="mb-1.5 flex items-center gap-2 text-[11px] text-clay">
+                    <div className="mb-1.5 flex items-center gap-2 text-2xs text-clay">
                       <Bot className="size-3.5" /> Director
                       {t.costUsd !== null ? <span>· {fmtUsd(t.costUsd)} · {num(t.inputTokens)} in / {num(t.outputTokens)} out</span> : null}
                     </div>
@@ -179,13 +281,25 @@ export default function DirectorPage() {
                     </div>
                   ) : null}
                   <Markdown text={t.content} />
+                  {t.stoppedEarly && i === turns.length - 1 ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-line pt-2 text-2xs text-clay">
+                      <span role="status">Stopped early: {t.stoppedEarly}.</span>
+                      <Button size="sm" disabledReason={working ? 'The Director is still working' : null} onClick={() => void send('continue')} title="One more turn with the usual limits">
+                        Continue
+                      </Button>
+                      <Button size="sm" disabledReason={working ? 'The Director is still working' : null} onClick={() => void send('keep going')} title="No round limit for the rest of this conversation; the cost limit still applies">
+                        Keep going
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
-            ))}
-            {live && !live.done ? (
+              ),
+            )}
+            {working ? (
               <div className="flex justify-start">
-                <div className="max-w-[78%] rounded-lg border border-line bg-sand px-4 py-2.5 text-sm">
-                  <div className="mb-1.5 flex items-center gap-2 text-[11px] text-clay">
+                <div className="max-w-[78%] rounded-lg border border-line bg-sand px-4 py-2.5 text-sm selectable">
+                  <div className="mb-1.5 flex items-center gap-2 text-2xs text-clay">
                     <Bot className="size-3.5" /> Director · working
                   </div>
                   {live.toolCalls.length ? (
@@ -202,28 +316,35 @@ export default function DirectorPage() {
             {live?.error ? <Note tone="bad">{live.error}</Note> : null}
           </div>
         </div>
+        <ProposalsPanel />
         <div className="border-t border-line p-3">
           <div className="flex items-end gap-2">
             <textarea
               ref={inputRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
-                  e.preventDefault()
-                  void send()
-                }
-              }}
-              rows={2}
+              onKeyDown={onComposerKey}
+              rows={3}
               placeholder={conversationId ? 'Reply to the Director' : 'Ask the Director, or delegate work'}
               aria-label="Message to the Director"
-              className="min-h-10 flex-1 resize-none rounded-md border border-line bg-paper px-3 py-2 text-sm placeholder:text-clay focus:border-ochre focus:outline-none"
+              className="max-h-64 min-h-20 flex-1 resize-none overflow-y-auto rounded-md border border-line bg-paper px-3 py-2 text-sm leading-6 placeholder:text-clay focus:border-ochre focus:outline-none"
             />
-            <Button variant="primary" icon={<Send />} busy={sending} onClick={() => void send()} disabledReason={text.trim() ? null : 'Type a message'} title="Send (⌘↵)">
+            <Button variant="primary" icon={<Send />} busy={sending} onClick={() => void send()} disabledReason={sendDisabled} title={composerHint}>
               Send
             </Button>
           </div>
-          <div className="mt-1 text-[11px] text-clay">Scope: {digId ? digs.find((d) => d.id === digId)?.name : 'all Digs'}. Contamination never enters the Director's context unless you open it.</div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 text-2xs text-clay">
+            <span>Scope: {digId ? digs.find((d) => d.id === digId)?.name : 'all accounts'}. Contamination never enters the Director's context unless you open it.</span>
+            {working ? (
+              <span className="text-ink-2" role="status">
+                Working… this cannot be stopped mid-turn.
+              </span>
+            ) : (
+              <span>
+                <kbd>{keys.send}</kbd> sends · <kbd>{keys.newline}</kbd> adds a line
+              </span>
+            )}
+          </div>
         </div>
       </section>
     </div>
@@ -233,7 +354,7 @@ export default function DirectorPage() {
 function ToolCallCard({ c }: { c: ToolCall }) {
   const nav = useNavigate()
   return (
-    <div className={cx('flex items-center gap-2 rounded border px-2 py-1 text-xs', c.ok ? 'border-line bg-paper' : 'border-rust/40 bg-rust/5')}>
+    <div className={cx('flex items-center gap-2 rounded border px-2 py-1 text-xs selectable', c.ok ? 'border-line bg-paper' : 'border-rust/40 bg-rust/5')}>
       {c.ok ? <Check className="size-3 text-moss" /> : <X className="size-3 text-rust" />}
       <span className="mono font-medium">{c.action}</span>
       <span className="min-w-0 flex-1 truncate text-ink-2">{c.summary}</span>
@@ -251,81 +372,6 @@ function ToolCallCard({ c }: { c: ToolCall }) {
         <button type="button" className="text-ochre hover:underline" onClick={() => nav('/activity')}>
           Activity
         </button>
-      ) : null}
-    </div>
-  )
-}
-
-function ProposalsPanel() {
-  const proposals = useProposals((s) => s.proposals)
-  const remove = useProposals((s) => s.remove)
-  const pending = useQuery({ queryKey: qk.pending, queryFn: listPending, enabled: proposals.length > 0 })
-  const { apply } = useAction()
-  const [previewing, setPreviewing] = useState<PendingAction | null>(null)
-  const items = useMemo(() => proposals.map((p) => ({ p, pa: pending.data?.find((x) => x.id === p.pendingId) ?? null })), [proposals, pending.data])
-  if (!proposals.length) return null
-  return (
-    <div className="border-t border-line p-3">
-      <div className="mb-1 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-clay">
-        <MessageSquare className="size-3" /> Proposals ({proposals.length})
-      </div>
-      <ul className="flex flex-col gap-2">
-        {items.map(({ p, pa }) => (
-          <li key={p.pendingId} className="rounded-md border border-ochre/40 bg-ochre/5 p-2 text-xs">
-            <div className="font-medium">{p.summary}</div>
-            <div className="mt-0.5 text-clay">{fmtRelative(new Date(p.createdAt).toISOString())}{pa ? ` · ${pa.reason}` : ''}</div>
-            <div className="mt-1.5 flex gap-1">
-              <Button size="sm" variant="ghost" icon={<Eye />} disabledReason={pa ? null : 'Loading the proposal'} onClick={() => pa && setPreviewing(pa)}>
-                Preview
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                disabledReason={pa ? null : 'Loading the proposal'}
-                onClick={async () => {
-                  if (!pa) return
-                  const out = await apply(pa, { successToast: 'Applied' })
-                  if (out) remove(p.pendingId)
-                }}
-              >
-                Apply
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  remove(p.pendingId)
-                  toast('Proposal dismissed', { body: 'Nothing changed.', kind: 'info' })
-                }}
-              >
-                Dismiss
-              </Button>
-            </div>
-          </li>
-        ))}
-      </ul>
-      {previewing ? (
-        <Dialog open onOpenChange={(o) => !o && setPreviewing(null)} title={previewing.summary} description="The real arguments the Action layer will run with." wide>
-          {typeof (previewing.realArguments as Record<string, unknown>)?.text === 'string' ? <pre className="max-h-80 overflow-auto rounded border border-line bg-sand p-2 mono text-xs whitespace-pre">{String((previewing.realArguments as Record<string, unknown>).text)}</pre> : null}
-          <pre className="mt-2 max-h-40 overflow-auto rounded border border-line bg-sand p-2 text-xs">{safeJson({ ...(previewing.realArguments as object), text: undefined })}</pre>
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setPreviewing(null)}>
-              Close
-            </Button>
-            <Button
-              variant="primary"
-              onClick={async () => {
-                const out = await apply(previewing, { successToast: 'Applied' })
-                if (out) {
-                  remove(previewing.id)
-                  setPreviewing(null)
-                }
-              }}
-            >
-              Apply…
-            </Button>
-          </div>
-        </Dialog>
       ) : null}
     </div>
   )

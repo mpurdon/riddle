@@ -6,4 +6,10 @@ import type { AuthenticationResults } from "./AuthenticationResults";
  * The headers Sift reads. Kept as a struct, not a map, so the deterministic
  * facts vocabulary is checkable at compile time.
  */
-export type MessageHeaders = { messageId: string | null, inReplyTo: string | null, references: Array<string>, listId: string | null, listUnsubscribe: string | null, precedence: string | null, autoSubmitted: string | null, replyTo: Address | null, authentication: AuthenticationResults, };
+export type MessageHeaders = { messageId: string | null, inReplyTo: string | null, references: Array<string>, listId: string | null, listUnsubscribe: string | null, precedence: string | null, autoSubmitted: string | null, replyTo: Address | null, authentication: AuthenticationResults, 
+/**
+ * Headers kept for rules beyond the fixed ones above (`KEPT_HEADERS`),
+ * keyed lowercase. GitHub states what a notification is about in
+ * `X-GitHub-Reason`; without it a rule had to ask a Signal.
+ */
+extra: Record<string, string>, };

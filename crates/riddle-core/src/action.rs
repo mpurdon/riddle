@@ -1,9 +1,44 @@
 //! Action metadata, autonomy and confirmation tiers (§8, §51). The Action
 //! layer enforces these; a dialog only presents them.
 
+use crate::activity::EntityRef;
 use crate::ids::{ActivityId, ConversationId, DigId};
+use chrono::{DateTime, Utc};
+use riddle_errors::{Result, RiddleError};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+
+/// An optional timestamp argument that must be RFC 3339 and after `now`: a
+/// snooze's `until`, a follow-up's `dueAt`. A date already past would snooze
+/// nothing or open a Find already overdue, so it is refused rather than
+/// applied. `Ok(None)` when the key is absent or null.
+pub fn future_timestamp(
+    args: &serde_json::Value,
+    key: &str,
+    now: DateTime<Utc>,
+) -> Result<Option<DateTime<Utc>>> {
+    let Some(v) = args.get(key).filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let at: DateTime<Utc> = v
+        .as_str()
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| RiddleError::invalid(format!("{key} must be an RFC 3339 timestamp")))?;
+    if at <= now {
+        return Err(RiddleError::invalid(format!("{key} must be in the future")));
+    }
+    Ok(Some(at))
+}
+
+/// `future_timestamp` for an argument the Action cannot do without.
+pub fn required_future_timestamp(
+    args: &serde_json::Value,
+    key: &str,
+    now: DateTime<Utc>,
+) -> Result<DateTime<Utc>> {
+    future_timestamp(args, key, now)?
+        .ok_or_else(|| RiddleError::invalid(format!("missing argument '{key}'")))
+}
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS, Default,
@@ -66,7 +101,16 @@ pub struct ActionMeta {
     pub description: String,
     pub mutating: bool,
     pub reversible: bool,
+    /// Calls the provider while it runs (send, permanent delete,
+    /// unsubscribe): the dev build's Hold / Ask / Allow gates the Action.
     pub external_side_effect: bool,
+    /// Changes Riddle, and queues the matching mailbox change in the
+    /// outbox (corrections, archive, Strata). The Action always runs; the
+    /// queued write waits for the dev build's Hold / Ask / Allow. A
+    /// correction was refused outright when it shared the flag above, though
+    /// it never touched the mailbox itself.
+    #[serde(default)]
+    pub projected: bool,
     pub risk: Risk,
     pub confirmation: ConfirmationPolicy,
     /// The lowest autonomy at which a non-user principal may run it unprompted.
@@ -75,6 +119,50 @@ pub struct ActionMeta {
     pub egress: bool,
     /// Read-only Actions are exposed to MCP first (§10).
     pub read_only: bool,
+    /// Only a person (the app or the CLI) may run it: agents never see it
+    /// and are refused before a pending confirmation could store its
+    /// arguments. For Actions whose arguments are secrets.
+    #[serde(default)]
+    pub user_only: bool,
+}
+
+/// What a dev build may write to the connected mailbox (§59). Hold: nothing
+/// leaves; corrections still count in Riddle and their mailbox writes wait
+/// in the outbox. Ask: queued writes wait for one "send these N" from the
+/// user, and an Action that calls the provider directly asks each time.
+/// Allow: writes go as they would in a release build. A dev build starts in
+/// Hold. It replaced a single armed switch, under which a batch of seven
+/// corrections was refused seven times.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ProviderWrites {
+    #[default]
+    Hold,
+    Ask,
+    Allow,
+}
+
+impl ProviderWrites {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProviderWrites::Hold => "hold",
+            ProviderWrites::Ask => "ask",
+            ProviderWrites::Allow => "allow",
+        }
+    }
+}
+
+/// The dev build's mailbox writes and what waits on them, for Developer
+/// and the "N changes waiting" prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MailboxWritesState {
+    pub dev: bool,
+    pub writes: ProviderWrites,
+    /// Queued mailbox writes on accounts that write to their mailbox.
+    pub held: u64,
 }
 
 /// Who is asking. Prompts never replace authorization; the principal does.
@@ -172,4 +260,11 @@ pub struct ActionOutcome {
     pub activity_id: Option<ActivityId>,
     /// True when the invocation was a replay of an idempotent key.
     pub replayed: bool,
+    /// The Activity sentence, for the toast: "Moved 14 messages to Spoil".
+    #[serde(default)]
+    pub summary: String,
+    /// What the Action touched, so the client refreshes by entity kind
+    /// rather than by a table of action names.
+    #[serde(default)]
+    pub affected: Vec<EntityRef>,
 }

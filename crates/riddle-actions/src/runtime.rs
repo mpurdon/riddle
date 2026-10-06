@@ -147,6 +147,8 @@ impl Runtime {
                     result: prior,
                     activity_id: None,
                     replayed: true,
+                    summary: String::new(),
+                    affected: vec![],
                 });
             }
         }
@@ -296,6 +298,8 @@ impl Runtime {
             result: result_value,
             activity_id: activity_id_out,
             replayed: false,
+            summary: activity.summary.clone(),
+            affected: activity.affected.clone(),
         })
     }
 
@@ -317,11 +321,23 @@ impl Runtime {
         .await
     }
 
+    /// What this dev build may write to the mailbox.
+    pub fn set_writes(&self, writes: ProviderWrites) {
+        self.policy.write().writes = writes;
+    }
+    pub fn writes(&self) -> ProviderWrites {
+        self.policy.read().writes
+    }
+    /// Allow (`true`) or Hold (`false`): the two states the old armed switch had.
     pub fn arm(&self, armed: bool) {
-        self.policy.write().armed = armed;
+        self.set_writes(if armed {
+            ProviderWrites::Allow
+        } else {
+            ProviderWrites::Hold
+        });
     }
     pub fn is_armed(&self) -> bool {
-        self.policy.read().armed
+        self.writes() == ProviderWrites::Allow
     }
 
     /// Run an Action's `undo` from recorded restore data on behalf of the undo

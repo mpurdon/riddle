@@ -132,7 +132,7 @@ pub fn disclosure(input: &DisclosureInput) -> String {
         parts.push(format!("For {}, nothing leaves this device", list(&local)));
     }
     let body = if parts.is_empty() {
-        "No Dig is connected, so nothing leaves this device".to_string()
+        "No account is connected, so nothing leaves this device".to_string()
     } else {
         parts.join("; ")
     };
@@ -202,6 +202,6 @@ mod tests {
     #[test]
     fn the_disclosure_without_digs_says_nothing_leaves() {
         let s = disclosure(&DisclosureInput::default());
-        assert!(s.starts_with("No Dig is connected, so nothing leaves this device"));
+        assert!(s.starts_with("No account is connected, so nothing leaves this device"));
     }
 }

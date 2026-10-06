@@ -8,6 +8,7 @@ pub mod logging;
 pub mod paths;
 pub mod presence;
 pub mod state;
+pub mod system;
 
 use riddle_observability::{rinfo, Category};
 use tauri::Manager;
@@ -25,15 +26,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(
             tauri_plugin_window_state::Builder::new()
-                .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::all()
-                        - tauri_plugin_window_state::StateFlags::VISIBLE,
-                )
+                .with_state_flags(presence::window_state_flags())
                 .build(),
         )
         .setup(move |app| {
+            log::set_max_level(logging::initial_level(profile));
+            riddle_observability::install_panic_hook();
             let state = state::AppState::bootstrap(app.handle().clone(), dirs.clone(), profile)?;
             let stamp = state.build.clone();
             events::spawn_bridge(app.handle().clone(), state.app.clone());
@@ -41,13 +45,17 @@ pub fn run() {
                 // Boot the core (settings, domains, AI, judge, jobs); the judge
                 // may resolve its key from SSM, so this runs off the main thread.
                 let core = state.app.clone();
+                let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     match core.boot(true).await {
-                        Ok(_) => rinfo!(
-                            Category::App,
-                            "core booted; {} actions",
-                            core.runtime.list_actions().len()
-                        ),
+                        Ok(ops) => {
+                            rinfo!(
+                                Category::App,
+                                "core booted; {} actions",
+                                core.runtime.list_actions().len()
+                            );
+                            system::start(handle, core.clone(), ops.settings.clone());
+                        }
                         Err(e) => riddle_observability::rerror!(
                             Category::App,
                             "core boot failed: {}: {}",

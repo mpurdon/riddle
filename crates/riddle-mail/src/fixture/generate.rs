@@ -429,6 +429,14 @@ impl<'a> Generator<'a> {
         ));
         m.labels = vec!["INBOX".into(), "UNREAD".into(), "CATEGORY_UPDATES".into()];
         m.cc = vec![Address::new(format!("{reason}@noreply.github.com"), None)];
+        m.headers
+            .extra
+            .insert("x-github-reason".into(), reason.to_string());
+        if let Some(name) = &m.from.name {
+            m.headers
+                .extra
+                .insert("x-github-sender".into(), name.clone());
+        }
     }
 
     fn github_review(&mut self, days: i64, o: &Overrides) -> Message {

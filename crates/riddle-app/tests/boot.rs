@@ -1,22 +1,14 @@
 //! Boot the whole app in memory with the scripted judge and let the job
 //! runner do the work a click would trigger.
 
-use riddle_app::{App, AppConfig};
 use riddle_core::*;
-use riddle_settings::{JudgeProvider, LlmProvider, Settings};
 use serde_json::json;
-use std::time::Duration;
+
+mod common;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn boot_runs_catch_up_through_the_job_runner_and_the_task_centre_reports_it() {
-    let app = App::open(AppConfig::in_memory(BuildStamp::from_env_vars(
-        "0", None, None, None, "test",
-    )))
-    .unwrap();
-    let mut s = Settings::dev_defaults();
-    s.judge.provider = JudgeProvider::Scripted;
-    s.llm.provider = LlmProvider::Null;
-    let ops = app.boot_with(true, Some(s)).await.unwrap();
+    let (app, ops) = common::boot_scripted(true, |_| {}).await;
     app.runtime.arm(true);
     assert!(
         app.runtime.list_actions().len() > 40,
@@ -24,26 +16,15 @@ async fn boot_runs_catch_up_through_the_job_runner_and_the_task_centre_reports_i
         app.runtime.list_actions().len()
     );
 
-    let out = app
-        .runtime
-        .invoke_as_user(
-            "add_fixture_dig",
-            json!({ "name": "Work", "email": "matt@example.com", "seed": 5, "count": 60 }),
-        )
-        .await
-        .unwrap();
-    let dig: Dig = serde_json::from_value(out.result).unwrap();
-    ops.queue
-        .enqueue(riddle_jobs::JobSpec::new(JobKind::CatchUp, "Catch up Work").dig(dig.id.clone()))
-        .unwrap();
-    ops.runner.run_until_idle(Duration::from_secs(60)).await;
+    let dig =
+        common::fixture_dig_synced(&app, &ops, "Work", "matt@example.com", 5, 60, json!({})).await;
 
     let tc = app.task_centre().unwrap();
     assert_eq!(tc.overall, OverallStatus::CaughtUp, "{tc:?}");
     let row = tc.digs.iter().find(|d| d.dig_id == dig.id).unwrap();
     assert_eq!(row.status, DigStatus::Synced, "{:?}", row.status);
     let summary = app
-        .summary(chrono::Utc::now() - chrono::Duration::days(90))
+        .summary(chrono::Utc::now() - chrono::Duration::days(90), None)
         .unwrap();
     assert!(summary.caught_up);
     assert!(summary.finds_open > 0);
@@ -87,28 +68,10 @@ async fn boot_runs_catch_up_through_the_job_runner_and_the_task_centre_reports_i
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_sift_pass_leaves_activity_with_provenance_and_undo_all_returns_messages_to_unresolved() {
-    let app = App::open(AppConfig::in_memory(BuildStamp::from_env_vars(
-        "0", None, None, None, "test",
-    )))
-    .unwrap();
-    let mut s = Settings::dev_defaults();
-    s.judge.provider = JudgeProvider::Scripted;
-    s.llm.provider = LlmProvider::Null;
-    let ops = app.boot_with(true, Some(s)).await.unwrap();
+    let (app, ops) = common::boot_scripted(true, |_| {}).await;
     app.runtime.arm(true);
-    let out = app
-        .runtime
-        .invoke_as_user(
-            "add_fixture_dig",
-            json!({ "name": "Work", "email": "matt@example.com", "seed": 8, "count": 60 }),
-        )
-        .await
-        .unwrap();
-    let dig: Dig = serde_json::from_value(out.result).unwrap();
-    ops.queue
-        .enqueue(riddle_jobs::JobSpec::new(JobKind::CatchUp, "Catch up Work").dig(dig.id.clone()))
-        .unwrap();
-    ops.runner.run_until_idle(Duration::from_secs(60)).await;
+    let dig =
+        common::fixture_dig_synced(&app, &ops, "Work", "matt@example.com", 8, 60, json!({})).await;
 
     let page = app
         .list_activity(
@@ -149,4 +112,18 @@ async fn a_sift_pass_leaves_activity_with_provenance_and_undo_all_returns_messag
                 .unwrap();
         assert_eq!(k.disposition, Disposition::Unresolved);
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn boot_records_the_system_timezone_so_end_of_day_is_the_user_s() {
+    let (app, _ops) = common::boot_scripted(false, |_| {}).await;
+    let tz = riddle_store::repo::user_profile::get(&app.stores.index())
+        .unwrap()
+        .timezone;
+    assert_eq!(tz, iana_time_zone::get_timezone().ok());
+    assert!(
+        tz.as_deref()
+            .is_some_and(|t| t.parse::<chrono_tz::Tz>().is_ok()),
+        "a zone the resolver can read: {tz:?}"
+    );
 }

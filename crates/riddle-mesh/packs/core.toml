@@ -1,0 +1,166 @@
+id = "core"
+name = "Core"
+version = 1
+area = "Essentials"
+summary = "Never hides the people you protect, sets scams apart, surfaces mail from people you write to and real security alerts, and gives everything else a place to land."
+band = "specific"
+
+[detect]
+always = true
+
+[[meshes]]
+band = "safety"
+rank = 0
+text = '''
+Mesh: System guards
+Scope:
+All Digs
+
+GUARDS
+
+NEVER Spoil IF sender IN never_hidden
+NEVER Contamination IF sender IN never_hidden
+NEVER Contamination IF sender IN contacts
+NEVER Spoil IF sender_is_vip
+NEVER Spoil IF sender IN family
+NEVER Spoil IF has_calendar_part
+'''
+
+[[meshes]]
+band = "safety"
+rank = 20
+text = '''
+Mesh: Cold outreach
+Scope:
+All Digs
+
+ROUTES
+
+WHEN cold_outreach
+    IF glyph_substitution → Contamination
+    ELSE IF claims_prior_contact@v1 > .6 → Contamination
+END
+'''
+
+[[meshes]]
+band = "safety"
+rank = 25
+text = '''
+Mesh: Throwaway domains
+Scope:
+All Digs
+
+ROUTES
+
+WHEN suspicious_domain AND NOT known_sender
+    IF asks_for_payment_or_credentials → Contamination
+    ELSE → Spoil + Stratum: Suspicious
+END
+'''
+
+[[meshes]]
+band = "personal"
+rank = 39
+text = '''
+Mesh: Human correspondence
+Scope:
+All Digs
+
+ROUTES
+
+WHEN (known_sender OR same_organisation) AND NOT automated_sender AND NOT from_me
+    IF requires_response@v1 > .70
+        → Find: Respond + Stratum: People
+    ELSE IF asks_question@v1 > .75
+        → Find: Respond + Stratum: People
+    ELSE IF requires_action@v1 > .75
+        → Find: Do + Stratum: People
+    ELSE
+        → Find: Know + Stratum: People
+END
+'''
+
+[[meshes]]
+rank = 20
+text = '''
+Mesh: Security and account alerts
+Scope:
+All Digs
+
+ROUTES
+
+IF security_alert@v1 > .80 AND marketing@v1 < .70
+    → Find: Know + Stratum: Notifications
+
+GUARDS
+
+NEVER Spoil IF security_alert@v1 > .80
+'''
+
+[[meshes]]
+rank = 25
+text = '''
+Mesh: Calendar
+Scope:
+All Digs
+
+ROUTES
+
+IF has_calendar_part
+    → Find: Attend
+ELSE IF meeting_related@v1 > .85 AND requires_response@v1 > .70
+    → Find: Attend
+'''
+
+[[meshes]]
+band = "fallback"
+rank = 4
+fallback = true
+text = '''
+Mesh: Account notices
+Scope:
+All Digs
+
+ROUTES
+
+IF account_notification@v1 > .85 AND routine@v1 > .80
+    → Filed + Stratum: Notifications
+'''
+
+[[meshes]]
+band = "fallback"
+rank = 5
+fallback = true
+text = '''
+Mesh: Updates
+Scope:
+All Digs
+
+ROUTES
+
+IF gmail_category = updates AND list_unsubscribe AND newsletter@v1 > .60
+    → Filed + Stratum: Newsletters
+ELSE IF gmail_category = updates AND (list_unsubscribe OR automated_sender)
+    → Filed + Stratum: Notifications
+ELSE IF gmail_category = updates AND transactional@v1 > .70
+    → Filed + Stratum: Notifications
+'''
+
+[[meshes]]
+band = "fallback"
+rank = 10
+fallback = true
+text = '''
+Mesh: Automated notifications
+Scope:
+All Digs
+
+ROUTES
+
+IF automated_sender AND routine@v1 > .85 AND personally_relevant@v1 < .40
+    → Spoil + Stratum: Notifications
+ELSE IF automated_sender AND social_notification@v1 > .85
+    → Spoil + Stratum: Notifications
+ELSE IF automated_sender AND transactional@v1 > .80
+    → Filed + Stratum: Notifications
+'''

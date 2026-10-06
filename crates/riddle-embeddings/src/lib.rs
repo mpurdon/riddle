@@ -121,7 +121,10 @@ pub fn index_text(m: &Message) -> String {
     }
     s.push('\n');
     match &m.body_text {
-        Some(t) => s.push_str(&t[..t.len().min(8000)]),
+        Some(t) => {
+            // A byte cut must land on a char boundary; mail is rarely ASCII.
+            s.push_str(&t[..riddle_core::floor_char_boundary(t, 8000)])
+        }
         None => s.push_str(&m.snippet),
     }
     s

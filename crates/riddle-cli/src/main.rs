@@ -24,6 +24,12 @@ struct Cli {
     /// Use the production data directory even in a debug build.
     #[arg(long, global = true)]
     prod: bool,
+    /// Boot with the scripted judge and no model: no keychain, no network.
+    /// For rule work on the local store (simulate, create_mesh) and for
+    /// scripts, where a keychain prompt on a freshly built binary would
+    /// hang the command.
+    #[arg(long, global = true)]
+    offline: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -80,6 +86,9 @@ enum Command {
         file: std::path::PathBuf,
         #[arg(long, default_value_t = 90)]
         window_days: u32,
+        /// Simulate as the next version of this existing Mesh, replacing it.
+        #[arg(long)]
+        mesh_id: Option<String>,
     },
     /// Export decision traces as JSON (redacted by default).
     Export {
@@ -102,16 +111,11 @@ enum Command {
     Serve {
         #[arg(long, default_value_t = 1431)]
         port: u16,
-        /// Use the scripted judge and no LLM (no network, no spend).
-        #[arg(long)]
-        offline: bool,
     },
     /// Run one engine pass over every Dig (sync, sift, project, temporal) and print the report.
     Pass {
         #[arg(long, default_value_t = 200)]
         sift_limit: u32,
-        #[arg(long)]
-        offline: bool,
     },
     /// Serve the MCP protocol on stdin/stdout for external agents.
     Mcp {
@@ -150,7 +154,7 @@ fn progress_line(v: serde_json::Value) {
     println!("{}", v);
 }
 
-async fn open_app(prod: bool) -> Result<Arc<App>, RiddleError> {
+async fn open_app(prod: bool, offline: bool) -> Result<Arc<App>, RiddleError> {
     let profile = if prod {
         Profile::Prod
     } else {
@@ -170,6 +174,7 @@ async fn open_app(prod: bool) -> Result<Arc<App>, RiddleError> {
         dev: profile.is_dev(),
         build,
         keychain_service: profile.keychain_service(),
+        offline,
     })
 }
 
@@ -205,10 +210,17 @@ async fn invoke(
                     .clone()
                     .and_then(|d| serde_json::from_value(d).ok())
                     .ok_or(e)?;
-                if progress {
-                    progress_line(
-                        serde_json::json!({ "type": "plan", "action": pending.action, "summary": pending.summary, "realArguments": pending.real_arguments }),
-                    );
+                // `--yes` confirms the pending step too: it used to confirm
+                // only the first call, then stop at "Proceed?" on a two-step
+                // Action, which a script cannot answer.
+                if progress || yes {
+                    if progress {
+                        progress_line(
+                            serde_json::json!({ "type": "plan", "action": pending.action, "summary": pending.summary, "realArguments": pending.real_arguments }),
+                        );
+                    } else {
+                        eprintln!("{}", pending.summary);
+                    }
                     inv.pending_id = Some(pending.id);
                     continue;
                 }
@@ -236,6 +248,7 @@ async fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
         .target(env_logger::Target::Stderr)
         .init();
+    riddle_observability::install_panic_hook();
     let cli = Cli::parse();
     let yes = cli.yes || cli.progress;
     let code = match run(cli, yes).await {
@@ -269,21 +282,11 @@ async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
         );
         return Ok(());
     }
-    let app = open_app(cli.prod).await?;
-    let offline = matches!(
-        cli.command,
-        Command::Serve { offline: true, .. } | Command::Pass { offline: true, .. }
-    );
+    // `--offline` is global, so `riddle serve --offline` reaches here too; the
+    // app applies the scripted judge and no LLM itself at boot.
+    let app = open_app(cli.prod, cli.offline).await?;
     let background = matches!(cli.command, Command::Serve { .. });
-    let overrides = if offline {
-        let mut s = riddle_settings::Settings::dev_defaults();
-        s.judge.provider = riddle_settings::JudgeProvider::Scripted;
-        s.llm.provider = riddle_settings::LlmProvider::Null;
-        Some(s)
-    } else {
-        None
-    };
-    let ops = app.boot_with(background, overrides).await?;
+    let ops = app.boot(background).await?;
     if cli.progress {
         let mut rx = app.events.subscribe();
         tokio::spawn(async move {
@@ -293,9 +296,9 @@ async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
         });
     }
     let out: serde_json::Value = match cli.command {
-        Command::Summary => {
-            serde_json::to_value(app.summary(chrono::Utc::now() - chrono::Duration::hours(24))?)?
-        }
+        Command::Summary => serde_json::to_value(
+            app.summary(chrono::Utc::now() - chrono::Duration::hours(24), None)?,
+        )?,
         Command::Digs => serde_json::to_value(app.list_digs()?)?,
         Command::Actions { sub } => match sub {
             ActionsCmd::List => serde_json::to_value(app.runtime.list_actions())?,
@@ -364,15 +367,17 @@ async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
             )
             .await?
         }
-        Command::Simulate { file, window_days } => {
+        Command::Simulate {
+            file,
+            window_days,
+            mesh_id,
+        } => {
+            // A read, not an Action: it changes nothing and needs no confirmation.
             let text = std::fs::read_to_string(&file)?;
-            invoke(
-                &app.runtime,
+            riddle_app::dispatch::call(
+                &app,
                 "simulate_mesh",
-                &serde_json::json!({ "text": text, "windowDays": window_days }).to_string(),
-                None,
-                true,
-                cli.progress,
+                serde_json::json!({ "text": text, "windowDays": window_days, "meshId": mesh_id }),
             )
             .await?
         }
@@ -401,7 +406,7 @@ async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
                 limit: Some(limit),
             },
         )?)?,
-        Command::Serve { port, .. } => {
+        Command::Serve { port } => {
             let profile = if cli.prod {
                 Profile::Prod
             } else {
@@ -424,7 +429,7 @@ async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
             ops.runner.stop();
             return Ok(());
         }
-        Command::Pass { sift_limit, .. } => {
+        Command::Pass { sift_limit } => {
             let reports = app
                 .full_pass_all(sift_limit, &riddle_sync::engine::CancelFlag::new())
                 .await?;

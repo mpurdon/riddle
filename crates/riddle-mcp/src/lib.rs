@@ -45,7 +45,7 @@ impl McpServer {
             tool("list_signals", "The Signal Registry.", json!({"type": "object", "properties": {}})),
         ];
         for meta in self.app.runtime.list_actions() {
-            if meta.read_only || self.allow_mutations {
+            if !meta.user_only && (meta.read_only || self.allow_mutations) {
                 let mut desc = meta.description.clone();
                 if !meta.read_only {
                     desc.push_str(&format!(" [mutating; risk {:?}; returns a pending confirmation — call confirm_action with its id]", meta.risk));
@@ -65,7 +65,7 @@ impl McpServer {
         let limit = args.get("limit").and_then(|v| v.as_u64()).map(|n| n as u32);
         Ok(match name {
             "summary" => serde_json::to_value(
-                app.summary(chrono::Utc::now() - chrono::Duration::hours(24))?,
+                app.summary(chrono::Utc::now() - chrono::Duration::hours(24), None)?,
             )?,
             "list_digs" => serde_json::to_value(app.list_digs()?)?,
             "list_messages" => {
@@ -132,10 +132,9 @@ impl McpServer {
                     limit,
                 },
             )?)?,
-            "list_meshes" => serde_json::to_value(riddle_store::repo::meshes::list_latest(
-                &app.stores.index(),
-                false,
-            )?)?,
+            "list_meshes" => serde_json::to_value(
+                riddle_mesh::service::MeshService::new(app.stores.index()).list(false)?,
+            )?,
             "list_signals" => {
                 serde_json::to_value(riddle_store::repo::signals::list(&app.stores.index())?)?
             }

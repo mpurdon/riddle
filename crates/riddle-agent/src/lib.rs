@@ -27,6 +27,7 @@
 //! Contamination-classified mail is refused to the Director unless the user
 //! opened it deliberately (§58 control 2).
 
+pub mod allowance;
 pub mod corrections;
 pub mod director;
 pub mod reads;

@@ -49,11 +49,11 @@ export default function StrataPage() {
   if (q.error) return <ErrorCard error={q.error} onRetry={() => q.refetch()} />
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeader title="Strata" subtitle="Overlapping categories. Riddle proposes them as patterns appear; you rename, merge and retire them." actions={<Button size="sm" icon={<Plus />} onClick={() => setCreating(true)}>New Stratum</Button>} />
+      <PageHeader title="Strata" subtitle="Overlapping categories. Riddle proposes them as patterns appear; you rename and merge them." actions={<Button size="sm" icon={<Plus />} onClick={() => setCreating(true)}>New Stratum</Button>} />
       <div className="min-h-0 flex-1 overflow-auto">
         {q.data && !strata.length ? <EmptyState icon={<Layers />} title="No Strata yet." body="Strata emerge from how you work. Once the Sift has seen enough mail it proposes categories such as Purchases, Travel or Engineering. You can also create one now." actions={<Button size="sm" onClick={() => setCreating(true)}>Create a Stratum</Button>} /> : null}
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-sand text-left text-[11px] uppercase tracking-wide text-clay">
+          <thead className="sticky top-0 bg-sand text-left text-2xs uppercase tracking-wide text-clay">
             <tr>
               <th className="px-5 py-1.5 font-semibold">Stratum</th>
               <th className="px-3 py-1.5 font-semibold">Scope</th>
@@ -72,7 +72,7 @@ export default function StrataPage() {
                   </button>
                   <div className="text-xs text-ink-2">{s.description}</div>
                 </td>
-                <td className="px-3 py-1.5 text-xs">{s.scopeGroup ?? 'All Digs'}</td>
+                <td className="px-3 py-1.5 text-xs">{s.scopeGroup ?? 'All accounts'}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{fmtInt(s.messageCount)}</td>
                 <td className="px-3 py-1.5">{s.proposedByRiddle ? <Chip>proposed by Riddle</Chip> : <Chip tone="neutral">yours</Chip>}</td>
                 <td className="px-3 py-1.5 text-xs text-clay">{s.version}</td>
@@ -138,8 +138,8 @@ function NameDialog({ title, initial, strata, onClose, onSubmit, withDescription
           <Field label="Description" className="mt-3">
             <TextArea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What belongs here" />
           </Field>
-          <Field label="Scope" className="mt-3" hint="A Stratum belongs to a Dig Group or to all Digs, so a work category does not leak into Personal.">
-            <Select label="Scope" value={scope} onChange={setScope} options={[{ value: 'all', label: 'All Digs' }, ...(groups ?? []).map((g) => ({ value: g, label: `${g} Digs` }))]} />
+          <Field label="Scope" className="mt-3" hint="A Stratum belongs to a group of accounts or to all of them, so a work category does not leak into Personal.">
+            <Select label="Scope" value={scope} onChange={setScope} options={[{ value: 'all', label: 'All accounts' }, ...(groups ?? []).map((g) => ({ value: g, label: `${g} accounts` }))]} />
           </Field>
         </>
       ) : null}

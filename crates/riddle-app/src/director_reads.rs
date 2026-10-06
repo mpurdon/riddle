@@ -118,4 +118,57 @@ impl DirectorReads for AppReads {
     async fn list_activity(&self, scope: &ReadScope, args: Value) -> Result<Value> {
         dispatch::call(&self.0, "list_activity", Self::with_scope(scope, args)).await
     }
+    async fn simulate_mesh(&self, _scope: &ReadScope, args: Value) -> Result<Value> {
+        dispatch::call(&self.0, "simulate_mesh", args).await
+    }
+    async fn mesh_corrections(&self, scope: &ReadScope, args: Value) -> Result<Value> {
+        let only = args
+            .get("meshId")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let index = self.0.stores.index();
+        let mut corrections = Vec::new();
+        for dig in self.0.list_digs()? {
+            if !scope.dig_ids.is_empty() && !scope.dig_ids.contains(&dig.id) {
+                continue;
+            }
+            let store = self.0.stores.dig(&dig.id)?;
+            corrections.extend(
+                repo::corrections::active(&store, 500)?
+                    .into_iter()
+                    .filter(|c| {
+                        only.is_none() || c.mesh_id.as_ref().map(|m| m.as_str()) == only.as_deref()
+                    }),
+            );
+        }
+        let suggestions = riddle_agent::suggest_mesh_updates(&corrections, |id| {
+            repo::meshes::latest(&index, id)
+                .ok()
+                .flatten()
+                .map(|m| m.name)
+        });
+        corrections.sort_by_key(|c| std::cmp::Reverse(c.created_at));
+        Ok(json!({
+            "suggestions": suggestions.iter().map(|s| json!({
+                "meshId": s.mesh_id,
+                "meshVersion": s.mesh_version,
+                "meshName": s.mesh_name,
+                "count": s.count,
+                "pattern": s.pattern,
+                "text": s.text,
+            })).collect::<Vec<_>>(),
+            // Identifiers and dispositions only; the Director reads a message
+            // with get_message when its content matters.
+            "corrections": corrections.iter().take(50).map(|c| json!({
+                "kind": c.kind,
+                "digId": c.dig_id,
+                "messageId": c.message_id,
+                "from": c.from_disposition,
+                "to": c.to_disposition,
+                "meshId": c.mesh_id,
+                "meshVersion": c.mesh_version,
+                "at": c.created_at,
+            })).collect::<Vec<_>>(),
+        }))
+    }
 }

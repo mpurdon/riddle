@@ -8,7 +8,7 @@ import { useEffect } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { bridge, isTauri, log } from './ipc'
 import { qk } from './api'
-import { useBanners, useDirector, useEventLog, usePipeline, useProposals, toast } from './stores'
+import { useBanners, useDirector, useEventLog, usePipeline, toast } from './stores'
 import type { RiddleEvent } from '@/bindings/RiddleEvent'
 import { num } from './format'
 
@@ -91,6 +91,14 @@ export function handleEvent(qc: QueryClient, e: RiddleEvent): void {
     case 'notify':
       toast(e.title, { body: e.body, kind: 'info', ttlMs: 8000 })
       break
+    case 'gmail_sign_in':
+      // The sign-in screens watch this for their own account (useGmailSignIn); the lists refresh for everyone.
+      if (e.connected) {
+        inv(qk.digs)
+        inv(qk.summary)
+        inv(qk.taskCentre)
+      }
+      break
     case 'update_available':
       useBanners.getState().setUpdateAvailable(e.version)
       inv(qk.updatePreview)
@@ -112,7 +120,7 @@ export function handleEvent(qc: QueryClient, e: RiddleEvent): void {
       inv(qk.usage)
       break
     case 'proposal_created':
-      useProposals.getState().add({ pendingId: e.pending_id, summary: e.summary, createdAt: Date.now() })
+      // The event is a signal; the proposal itself comes from list_pending.
       inv(qk.pending)
       break
     case 'expedition_changed':

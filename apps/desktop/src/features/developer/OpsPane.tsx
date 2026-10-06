@@ -1,11 +1,11 @@
 /**
  * The operations pane (§67): Runtime, Storage with reveal, Logs live tail,
- * IPC in-flight, Diagnostics copy, Probes, and the Arm dev build hold.
+ * IPC in-flight, Diagnostics copy, Probes, and the dev build's mailbox writes.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Copy, FolderOpen, Pause, Play } from 'lucide-react'
-import { devArmed, exportDiagnostics, inFlightCalls, logCategories, probeJudge, probeLlm, probeProvider, qk, readAppLogs } from '@/lib/api'
+import { exportDiagnostics, inFlightCalls, logCategories, probeJudge, probeLlm, probeProvider, qk, readAppLogs } from '@/lib/api'
 import { cx, fmtBytes, fmtClockMs, fmtDuration, safeJson } from '@/lib/format'
 import { isTauri, log } from '@/lib/ipc'
 import { useDevInfo, useDigs, useSettings } from '@/lib/queries'
@@ -13,13 +13,13 @@ import { toast, useUi } from '@/lib/stores'
 import type { ProbeResult } from '@/lib/types'
 import { useAction } from '@/lib/useAction'
 import { Button } from '@/components/ui/Button'
-import { Chip } from '@/components/ui/Chip'
 import { Input } from '@/components/ui/Field'
 import { Note } from '@/components/ui/Note'
 import { Select } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/Switch'
 import { HoldButton } from '@/components/confirm/HoldButton'
 import { KV, Section } from './shared'
+import { MailboxWritesControl } from './MailboxWrites'
 
 function reveal(path: string) {
   if (isTauri) void import('@tauri-apps/plugin-opener').then((m) => m.revealItemInDir(path)).catch((e) => log('warn', 'ui', `reveal failed: ${String((e as Error)?.message ?? e)}`))
@@ -29,7 +29,6 @@ function reveal(path: string) {
 export function OpsPane() {
   const info = useDevInfo()
   const settings = useSettings()
-  const armed = useQuery({ queryKey: qk.devArmed, queryFn: devArmed })
   const { run } = useAction()
   const devOverlay = useUi((s) => s.devOverlay)
   const setDevOverlay = useUi((s) => s.setDevOverlay)
@@ -79,14 +78,13 @@ export function OpsPane() {
             </div>
           ) : null}
         </Section>
-        <Section title="Arming" right={<Chip tone={armed.data ? 'warn' : 'neutral'}>{armed.data ? 'ARMED' : 'observe'}</Chip>}>
-          <p className="text-xs text-ink-2">Dev builds start in Observe. Provider mutations (labels, archive, send) reach the mailbox only once armed. Arming is re-checked in the Action layer.</p>
-          <div className="mt-2 flex items-center gap-3">
-            {armed.data ? (
-              <Button size="sm" onClick={() => run('arm_dev', { armed: false }, { confirmed: true, successToast: 'Disarmed' })}>Disarm</Button>
-            ) : (
-              <HoldButton label="Arm dev build" coaching="Hold for 1.5 seconds. With a Fixture Dig nothing leaves the machine; with Gmail, real labels are written." onComplete={() => run('arm_dev', { armed: true }, { confirmed: true, successToast: 'Armed for provider mutations' })} />
-            )}
+        <Section title="Mailbox writes">
+          <MailboxWritesControl />
+        </Section>
+        <Section title="Sift again">
+          <p className="text-xs text-ink-2">Every message Riddle decided is sifted again with the current rules and cached Signal scores; your own decisions are kept, and the earlier decisions stay in the inspector as history. Signals with no cached score ask the judge.</p>
+          <div className="mt-2">
+            <HoldButton label="Sift everything again" coaching="Hold for 1.5 seconds. Runs across every account; with Gmail changes on and mailbox writes on Allow, labels are rewritten." onComplete={() => run('resift', {}, { confirmed: true, successToast: 'Sifting every account again' })} />
           </div>
         </Section>
         <Section title="Developer overlay">
@@ -161,7 +159,7 @@ function Diagnostics() {
           Copy diagnostics block
         </Button>
       </div>
-      {text ? <pre className="mt-2 max-h-48 overflow-auto rounded border border-line bg-sand p-2 mono text-[11px] selectable">{text}</pre> : null}
+      {text ? <pre className="mt-2 max-h-48 overflow-auto rounded border border-line bg-sand p-2 mono text-2xs selectable">{text}</pre> : null}
     </Section>
   )
 }
@@ -214,7 +212,7 @@ function LogTail() {
         </div>
       }
     >
-      <div className="max-h-[70vh] overflow-auto rounded border border-line bg-sand mono text-[11px] leading-4">
+      <div className="max-h-[70vh] overflow-auto rounded border border-line bg-sand mono text-2xs leading-4">
         {lines.map((l, i) => (
           <div key={i}>
             <button type="button" className={cx('flex w-full gap-2 px-2 py-px text-left hover:bg-sand-2', l.level === 'error' && 'text-rust', l.level === 'warn' && 'text-ochre')} onClick={() => setOpen(open === i ? null : i)} aria-expanded={open === i}>

@@ -1,6 +1,7 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { CommandPalette } from '@/components/CommandPalette'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { HelpSheet } from '@/components/HelpSheet'
 import { Toaster } from '@/components/Toaster'
@@ -26,10 +27,14 @@ export function Shell() {
   const { compose } = useComposerActions()
   const { run } = useAction()
   const lastUndoable = useLastUndoable((s) => s.lastActivityId)
+  // The palette's open state lives here, not in a store: nothing else needs
+  // it, and ⌘K must toggle it from inside the palette's own input.
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   useShortcuts('global', {
     help: () => setHelpOpen(true),
     search: () => window.dispatchEvent(new Event('riddle:focus-search')),
+    palette: () => setPaletteOpen((o) => !o),
     compose: () => compose(),
     task_centre: () => setTaskCentreOpen(true),
     escape: () => {
@@ -45,6 +50,7 @@ export function Shell() {
     go_meshes: () => nav('/meshes'),
     go_director: () => nav('/director'),
     go_settings: () => nav('/settings'),
+    settings: () => nav('/settings'),
     undo: () => {
       if (!lastUndoable) {
         toast('Nothing to undo', { body: 'The last action left nothing undoable, or was already undone.', kind: 'info' })
@@ -80,6 +86,7 @@ export function Shell() {
       <ComposerPanel />
       <ConfirmHost />
       <HelpSheet />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <Toaster />
       <Tour />
     </div>

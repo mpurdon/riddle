@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kole Jain Dossier</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../assets/dossier.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="series">
+    <div class="crumbs"><a href="../index.html" data-hub>Riddle UX study</a><span>›</span><span>Expert dossiers</span><span>›</span><b>7 of 7</b></div>
+    <div class="crumbs" data-nav><a href="sharon-onyinye.html">← Sharon Onyinye</a><span>·</span><a href="../index.html#experts">All seven</a><span>·</span><a href="../proposals.html">Proposals</a></div>
+  </div>
+
+  <header class="hero">
+    <div>
+      <div class="eyebrow">UI/UX designer · front-end developer · YouTube educator</div>
+      <h1>Kole Jain</h1>
+      <p class="lede">A designer from Edmonton who redesigns viewers' dashboards and SaaS apps on camera, and whose explainers on dashboards, colour systems and "weirdly perfect" UI have been watched millions of times. The most directly useful voice in this series for Riddle's dense lists: let the data choose the form, put actions on a spectrum of explicitness, budget for the UI you cannot see, and remember that nobody reads a screen.</p>
+    </div>
+    <dl class="card">
+      <dt>Now</dt><dd>Independent designer and developer; runs the YouTube channel @KoleJain (74K subscribers, 52 videos, 2.9 million views); co-runs the NewForm Discord (14,000+ designers) with Brandon Groce; founded Instagram @uiuxdailytips; makes Stash, a free local-only macOS app</dd>
+      <dt>Career</dt><dd>Designing "since 2017"; freelance web design and client work through 2024; the channel pivots to product UI, dashboards, colour and macOS apps from 2025</dd>
+      <dt>Offers</dt><dd>Free redesigns of submitted sites and SaaS on YouTube; 24 free Figma files, one per video</dd>
+      <dt>Record depth</dt><dd>Deep on the channel, shallow elsewhere: no book, talk, article or press; the site has no about page</dd>
+    </dl>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="On this page">
+      <div class="eyebrow">On this page</div>
+      <a href="#ideas">Major ideas</a>
+      <a href="#work">Contributions</a>
+      <a href="#quotes">In their words</a>
+      <a href="#riddle">Applied to Riddle</a>
+      <a href="#caveats">What we could not confirm</a>
+      <a href="#sources">Sources</a>
+    </nav>
+
+    <main>
+      <section id="ideas">
+        <div class="eyebrow">Major ideas</div>
+        <h2>Twelve ideas, each from a specific video</h2>
+        <p>Every quotation comes from YouTube's automatic captions, checked against the transcript, so punctuation is ours. Kole's method is the same in every video: take a real screen, name what is wrong, rebuild it, and say why.</p>
+        <div class="ideas">
+          <article class="idea">
+            <div class="tag">June 2026</div>
+            <h3>Let the data drive the form</h3>
+            <p>"Designing a dashboard isn't that hard, but orchestrating one is." The first tell of an inexperienced dashboard is a table where nothing is driving the form. Enumerated values become chips because "there's only a set number of departments"; numbers are right-aligned "so the digits align by place value"; long text truncates; inactive rows are shaded. Time-delineated data "probably shouldn't even be in a table": an activity log is a timeline, and a chart rolls up the time dimension so nobody hunts through a timestamp column.</p>
+            <div class="ex"><b>Example.</b> "Dashboard colors shouldn't just be sprinkled in to look nice. It should come from the data itself." The red icon in a chip draws the eye because the action is urgent; the avatar is there because the eye associates who faster than reading a name.</div>
+            <div class="riddle">Dispositions and Signal names are enumerations: chips. Counts and times: right-aligned. Activity is a timeline, not a table.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">June 2026</div>
+            <h3>Progressive disclosure and the spectrum of explicitness</h3>
+            <p>A second kind of hierarchy: "what you show and what you hide". A share feature that is not frequent enough to live beside the table goes in a popover "so we don't have to rip the user to an entirely different page"; inside, the primary action is at the top and the dangerous one appears on hover with a tooltip. Kole names the scale: "the spectrum of explicitness, where a global, always visible share button is quite high, whereas an icon to copy a cell on hover is much lower." Onboarding is the same idea over time.</p>
+            <div class="ex"><b>Example.</b> "You're not hiding functionality, you're sequencing it so that the user is never overwhelmed." A tooltip on the most important action, then a second, then a corner checklist; never "the entire product in a modal with six bullet points".</div>
+            <div class="riddle">File and Find stay visible; Spoil, Escalate and Contamination reveal on hover and focus. First run is a sequence, not a modal.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">June 2026 · March 2026</div>
+            <h3>The UI you cannot see</h3>
+            <p>"UI is as much about what you can see as what you can't see." In a dense table, extra function must come from parts of the UI that are not immediately visible: a copy chip over a cell, a comment indicator, drawers, states. "Here's all the UI that you can see and then this is all of the UI that you can't immediately see but is still there. And it's not a small amount." Tooltips are the thing "missing pretty much unequivocally on all beginner dashboards". Every button needs four states at least; a copy button with states still "doesn't know that we've copied anything" until a chip slides up.</p>
+            <div class="ex"><b>Example.</b> Kole flags this as the concept "AI has a hard time wrapping its figurative head around". On the keyboard: "If you don't see a change, you assume that something went wrong."</div>
+            <div class="riddle">A tooltip on every rail and row icon; default, hover, pressed, disabled and loading on every disposition control; a toast for every Gmail write.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">September 2026</div>
+            <h3>Scannability: edges, differentiation, show don't tell</h3>
+            <p>Built from a receipt: text hard left, prices hard right, and "the only center things are the parts you're not really meant to read at all." In compact UI "everything in here borders on at least two or more edges"; full-width dividers break it. Density is not the problem: "there's too much undifferentiated content", and with avatars and grouping "the density is now working for us". Explaining harder makes a screen "harder to read in order to make it easier to understand, which is a trade-off you almost never want." Cards are a crutch: one column edge does what the card edge did.</p>
+            <div class="ex"><b>Example.</b> "Nobody reads a screen. You land somewhere with a question already in your head and you hunt until you find the answer." Chips all in a default colour are "like having six checkboxes that are blue when they're off."</div>
+            <div class="riddle">Rows as receipts: sender and subject hard left, time and count hard right, no row cards, neutral states grey so Unresolved finds the eye.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">August 2025</div>
+            <h3>Dashboard anatomy: spine, one job, four components</h3>
+            <p>The sidebar is "the spine of your product": a recognisable icon and a short title per link so it can collapse and carry badges; settings and help "down to the bottom"; an active state; "Navigation is all about reducing cognitive load." The main area "reflects what is most important to the user" and its top row is reserved for page actions. "This dashboard feels like someone emptied a drawer onto the screen." Lists are stacked, not bordered, which "also makes it easier to add an empty state". Only four components exist: lists and tables, cards, inputs, tabs.</p>
+            <div class="ex"><b>Example.</b> The container ladder: a popover when the context is simple and non-blocking; a modal when complex but same page, followed by a toast; a new page with a breadcrumb for permanent contexts. "On Gmail, when I delete an email, it disappears instantly."</div>
+            <div class="riddle">Explain a decision in a popover; edit a Mesh in a modal then a toast; open a message on a page. Dispositions are optimistic; Undo restores.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">January 2026 · September 2025</div>
+            <h3>Colour for products: four layers, double the distance in the dark</h3>
+            <p>The landing-page rule of 60-30-10 fails in software. Layer one is the neutral foundation: "four layers of backgrounds, at least one stroke, often two, and then about three text variants"; the sidebar is "a slightly darker anchor" (Mercury adds 2 percent blue); card edges use "roughly 85% white", not a black stroke; "the more important a button is, the darker it is." Layer two is one accent as a ramp (500 primary, 700 hover). Dark mode is not inversion: "dark colors look more similar, so they require more distance… a good rule of thumb is double the distance", and surfaces get lighter as they elevate. Layer three is semantic: destructive is red, "pretty much a design sin" otherwise.</p>
+            <div class="ex"><b>Example.</b> "Icons need no color… Color should be reserved for communicating status." "Getting comfortable with using more gray and less black and white is really what differentiates mediocre designers from professional ones."</div>
+            <div class="riddle">Paper, sand and clay as the four neutral layers; ochre as the one accent ramp; moss and rust semantic only; wider steps in dark mode.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">June 2025 · March 2025</div>
+            <h3>The beginner-mistakes checklist</h3>
+            <p>A recipe app redesigned one mistake at a time. Flow first: six preset options "but no search bar" and "no skip button either… users, they'll feel it instantly"; the most commonly missed elements are "navigation links, hidden states, and dynamic interactions". Effects: lighten and blur shadows or remove them, "less visual noise equals a better design". One small-component radius; "styles for colors, variables for measurements, and components for UI elements"; one icon library with tooltips for obscure icons; drop redundant arrows and strokes; a pressed state so "the next screen is coming".</p>
+            <div class="ex"><b>Example.</b> The cheat codes: nested radii ("take the outer corner radius and subtract the distance between the two corners"), "lose the lines" in favour of spacing or alternating tints, dark-mode depth by lightening each layer 4 to 6 points.</div>
+            <div class="riddle">A pass over every page: skip, search and back present; one radius; one icon set; no redundant strokes; pressed states; charts with axes.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">July 2025 · June 2025</div>
+            <h3>Product thinking: states, flows, a system you can trust</h3>
+            <p>Decorating a room versus designing "the entire house: the flow, the function, the wiring, and how it all connects". Linear is the model: "The states, the flows, and the system make it feel effortless." "Most designers just design the happy path… real apps need to handle all the states users actually experience." Think in sequences: how did the user get here and what do they need next; Notion's new team space prompts for members "with the option to skip". System is trust: a macOS dialog "has saved me so many times because the primary color is the non-destructive action and I trust that it's always that way."</p>
+            <div class="ex"><b>Example.</b> "You don't break the system by accident. You break it with intention." To learn: annotate real screens, and "pick a design you like and don't redesign it. Literally copy it."</div>
+            <div class="riddle">Chain the Director flow as tiny decisions with a skip; keep the primary colour always on the non-destructive action.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">December 2025</div>
+            <h3>An app that belongs on your computer</h3>
+            <p>Designing the macOS app that became Stash: "The best UX an app can have is feeling like it belongs on your computer", so "the app shouldn't be a destination, but a system exactly where you need it." A Spotlight-style ⌘⇧S panel appears, does its job, collapses into a toast, and saves in the background: optimistic UI, "moving the email to trash before it's actually deleted off the server". Apple's utilities share one layout: global actions at the top, navigation in the sidebar, content in the centre, the traffic lights integrated "just like any other element", the top ~50 px kept draggable.</p>
+            <div class="ex"><b>Example.</b> "What is the minimum UI needed to really let that content shine?" Desktop apps still need onboarding: a modal whose "way to close it is to execute the shortcut", plus a cheat sheet, because shortcuts are "easy to forget".</div>
+            <div class="riddle">Keep the drag strip free of actions; close the first-run tip by pressing the key it teaches; a floating ⌘K that gets out of the way.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">June 2024 · March 2026</div>
+            <h3>Dense typography: one font, a small ratio, nothing over 24 px</h3>
+            <p>"One font is entirely acceptable… you can have two and that's it." Weight and colour are interchangeable levers, so hierarchy uses both; body at 100 percent opacity, secondary text "between 40 to 70%"; "you should literally be able to list the hierarchy of all the text elements." The golden ratio grows too fast for interfaces, so use its square root, or its cube root "if you're designing interfaces with many many different font styles like a dashboard UI". For dashboards "you don't normally have text sizes larger than 24 pixels because of the increase in information density"; icons sized to the line height; the 4-point grid "because you can always split things in half".</p>
+            <div class="ex"><b>Example.</b> Line height around 150 percent for paragraphs, 110 to 130 for headings; tighten large headings by 2 to 3 percent; buttons padded at double the height for the width.</div>
+            <div class="riddle">A cube-root-of-phi scale for Riddle's dense views, hierarchy by weight and opacity, and a written hierarchy list for the Find row.</div>
+          </article>
+          <article class="idea">
+            <div class="tag">June 2024 · May 2026</div>
+            <h3>The redesign method: assess, toss, tier-rank, then earn the details</h3>
+            <p>On a finance dashboard, "our first order of business is to do an assessment of the hierarchy and probably end up tossing a few elements": duplicate search bars, a label that restates the page, twelve cards merged or cut. Then a tier list: "the more important information should be higher and farther left." The four-level rubric grades the result: level one "is just a product of someone not making any design decisions whatsoever"; at level three "designers stop being UI designers and start becoming product designers"; level four moves copy "from what it does to how it helps".</p>
+            <div class="ex"><b>Example.</b> "The difference between good and great is almost never one big thing." For clients "the goal isn't to wow them. It's to build confidence in the product." "Don't describe, show."</div>
+            <div class="riddle">Autonomy copy at level four: "Act: Riddle files newsletters so you never see them", not "Act: grants write access".</div>
+          </article>
+          <article class="idea">
+            <div class="tag">February 2026 · August 2026</div>
+            <h3>Vibe-coded UI: AI handles logic, not colour, layout or the invisible parts</h3>
+            <p>Redesigning a real AI-built URL shortener: "Get rid of the emojis"; "never let an AI choose any of your colors. They always go for bright colors that don't really work well together"; the same four KPI cards repeated three times in a small app; "Never let an AI choose your layout either"; a card that "doesn't do anything… a pattern you're going to see a lot with AI". The balance: "AI sets up logic well if you tell it to", and layout is where a human's hour buys the most. Kole's own workflow uses AI for first passes and mock-ups, not for thoughtful UI.</p>
+            <div class="ex"><b>Example.</b> A submitted site with no images anywhere, "a telltale sign that this was vibe coded and leads to a robotic-feeling website".</div>
+            <div class="riddle">The Director never picks colours, emojis or layout. It emits DSL and verb-plus-object copy rendered by Riddle's components; each count appears once.</div>
+          </article>
+        </div>
+      </section>
+
+      <section id="work">
+        <div class="eyebrow">Contributions</div>
+        <h2>A channel in sequence</h2>
+        <ul class="timeline">
+          <li><span class="year">2016</span>YouTube channel created in October; the first design Kole ever made, "and it's awful", dates from about 2018 by their own account.</li>
+          <li><span class="year">2017–19</span>"Creating clean minimal interfaces since 2017"; Dribbble profile from October 2019 with concept apps and sites.</li>
+          <li><span class="year">2024</span>The current run of videos begins in February: load animations, website layouts, portfolios, case studies, pricing and freelancing; <b>Mathematically Perfect Typography</b> (June); <b>Redesigning a Finance Dashboard UI from Scratch</b> (June, 90,000 views); guest on two NewForm streams; founds @uiuxdailytips.</li>
+          <li><span class="year">2025</span>The pivot to product UI: <b>The 8 UI/UX Cheat Codes</b> (March), <b>11 Micro Animations</b> (April), <b>7 UI/UX mistakes that scream you're a beginner</b> (June, 463,000), <b>How to think like a genius UI/UX designer</b> (June, 160,000), <b>Think Like a Product Designer</b> (July), <b>Dashboard UI in 8 minutes</b> (August, 339,000), <b>The 7 Color Mistakes</b> (September), <b>Design macOS Apps exactly like Apple</b> (December), which becomes Stash.</li>
+          <li><span class="year">2026</span><b>Why the 60-30-10 Rule is Ruining Your UI</b> (January), <b>5 SaaS mistakes that scream you vibe code</b> (February, 188,000), <b>Every UI/UX Concept Explained in Under 10 Minutes</b> (March, 480,000), <b>Mobile App UIs in 8 minutes</b> (April, 152,000), <b>The 4 Levels of Landing Page Design</b> (May), <b>The 3 dashboard UI flaws</b> (June, 127,000), <b>The stupid simple way to learn UI/UX</b> (July), a viewer's restaurant SaaS redesign (August), <b>The secret behind weirdly perfect UI designs</b> (20 September, 113,000). Stash for macOS: free, local-only, ⌘⇧S to save, semantic search. 24 free Figma files in the resources library.</li>
+        </ul>
+      </section>
+
+      <section id="quotes">
+        <div class="eyebrow">In their words</div>
+        <h2>Eight lines, seven from captions checked against the transcript</h2>
+        <div class="quotes">
+          <blockquote class="quote"><p>"Designing a dashboard isn't that hard, but orchestrating one is."</p><cite>The 3 dashboard UI flaws, June 2026 (captions)</cite></blockquote>
+          <blockquote class="quote"><p>"You're not hiding functionality, you're sequencing it so that the user is never overwhelmed."</p><cite>The 3 dashboard UI flaws, June 2026 (captions)</cite></blockquote>
+          <blockquote class="quote"><p>"Nobody reads a screen."</p><cite>The secret behind weirdly perfect UI designs, September 2026 (captions)</cite></blockquote>
+          <blockquote class="quote"><p>"Emphasis isn't something that an element has, it's the difference between it and its neighbors."</p><cite>Weirdly perfect UI, September 2026 (captions)</cite></blockquote>
+          <blockquote class="quote"><p>"If your dashboard looks like it requires a PhD to operate, then it's too complex."</p><cite>Dashboard UI in 8 minutes, August 2025 (captions)</cite></blockquote>
+          <blockquote class="quote"><p>"Never let an AI choose any of your colors."</p><cite>5 SaaS mistakes that scream you vibe code, February 2026 (captions)</cite></blockquote>
+          <blockquote class="quote"><p>"You don't break the system by accident. You break it with intention."</p><cite>How to think like a genius UI/UX designer, June 2025 (captions)</cite></blockquote>
+          <blockquote class="quote"><p>"Simple and intuitive websites are good business."</p><cite>Dribbble bio</cite></blockquote>
+        </div>
+      </section>
+
+      <section id="riddle">
+        <div class="eyebrow">Applied to Riddle</div>
+        <h2>Twelve implications for Riddle's flows</h2>
+        <ol class="apply">
+          <li><span class="n">1</span><div><span class="flow">Daily loop</span><b>Let the message data drive the row form.</b> Dispositions and Signal names are enumerated, so chips; counts and times are numbers, so right-aligned; subjects truncate to protect the other columns; rows already Filed or Spoiled are shaded rather than hidden; an initial for the sender because the eye associates who faster than reading a name. Activity is time-delineated: a timeline with a roll-up chart, not a sortable table.<span class="from">From: Let the data drive the form.</span></div></li>
+          <li><span class="n">2</span><div><span class="flow">Visual</span><b>Lay lists out like a receipt.</b> Sender and subject hard left, time and count hard right, each row's bottom edge anchoring the next, no full-width dividers. Fix density with differentiation, not white space: avatars, grouping by day or account, chips for Mesh names. Neutral states grey so Unresolved and Escalate find the eye.<span class="from">From: Scannability.</span></div></li>
+          <li><span class="n">3</span><div><span class="flow">Visual</span><b>Dissolve the cards.</b> One column edge and section headers instead of borders on borders; Finds stacked as a list, which also makes the empty state easier. Bordered surfaces only for popovers and modals.<span class="from">From: Scannability; Dashboard anatomy.</span></div></li>
+          <li><span class="n">4</span><div><span class="flow">Daily loop</span><b>Put row actions on the spectrum of explicitness.</b> File and Find are frequent and global: always visible. Spoil, Escalate and Contamination: on hover with a tooltip, and on keyboard focus. "Explain this decision" is a popover with its primary action at the top; the DSL diff sits under a disclosure.<span class="from">From: Progressive disclosure.</span></div></li>
+          <li><span class="n">5</span><div><span class="flow">Onboarding</span><b>First run is a sequence, not a six-bullet modal.</b> One tooltip on the most important action, then a second, then a corner checklist: connect an account, Observe, approve a Mesh, promote to Suggest. Close the tip by executing the shortcut it teaches, and keep a cheat sheet in Help because shortcuts are easy to forget.<span class="from">From: Progressive disclosure; An app that belongs on your computer.</span></div></li>
+          <li><span class="n">6</span><div><span class="flow">Status</span><b>Budget for the invisible UI before shipping a view.</b> A tooltip on every rail and row icon; default, hover, pressed, disabled and loading on every disposition control; a toast naming verb and count for every Gmail write; warning toasts for sync and judge failures, never silence. The Unresolved reason is part of this layer: on hover, explicit on focus.<span class="from">From: The UI you cannot see.</span></div></li>
+          <li><span class="n">7</span><div><span class="flow">Navigation</span><b>Model the rail on the spine and use the container ladder.</b> Icon plus short title per link so the rail can collapse and carry badges; Settings and Help at the bottom; an active state. Explain a classification in a non-blocking popover; edit a Mesh in a modal followed by a toast; open a message or an account's settings on a page with a breadcrumb. Dispositions are optimistic: the row leaves at once and Undo restores it.<span class="from">From: Dashboard anatomy.</span></div></li>
+          <li><span class="n">8</span><div><span class="flow">Visual</span><b>Build the palette as four neutral layers plus one accent, and give dark mode double the distance.</b> Paper for content, sand as the rail's slightly darker anchor, a lighter tone for popovers, edges at about 85 percent white rather than black strokes. Ochre as a 50-to-950 ramp; moss and rust semantic only; destructive always red. In dark mode widen the steps from about 2 percent to 4 to 6 and lighten surfaces as they elevate.<span class="from">From: Colour for products.</span></div></li>
+          <li><span class="n">9</span><div><span class="flow">Visual</span><b>A dashboard type scale: nothing over 24 px, hierarchy by weight and opacity.</b> One sans family, a cube-root-of-phi scale for dense views, body at 100 percent and secondary text at 40 to 70, icons at line height, buttons padded at double their height. Write the Find row's hierarchy list (subject, sender, reason, time) before styling it.<span class="from">From: Dense typography.</span></div></li>
+          <li><span class="n">10</span><div><span class="flow">Director</span><b>Design the non-happy paths and chain the Director flow.</b> Empty, loading, error and no-results states with a next action on every view. A proposal chains tiny decisions Notion-style: preview the affected messages, pick the rung, offer "apply and also file the 12 current matches" with a skip. Keep the primary colour on the non-destructive action so people can trust it is always that way.<span class="from">From: Product thinking.</span></div></li>
+          <li><span class="n">11</span><div><span class="flow">Critique</span><b>Run the redesign pass, and grade the copy.</b> Assess hierarchy and toss: labels that restate the view, duplicate search fields, any card that does nothing. Tier-rank a status view's widgets. Check the beginner tells. Grade Settings copy on the four-level rubric so the autonomy ladder moves from what it does to how it helps: "Act: Riddle files newsletters so you never see them."<span class="from">From: The redesign method; The beginner-mistakes checklist.</span></div></li>
+          <li><span class="n">12</span><div><span class="flow">Director</span><b>Guard Director-generated UI like vibe-coded UI, and feel native in the shell.</b> The Director never picks colours, emojis or layout; it emits DSL and verb-plus-object copy rendered by Riddle's components with the one icon set, and each count appears once. Keep the top strip draggable and free of actions, integrate the traffic lights, respect the system light and dark setting, make every shortcut produce a visible change, and offer a floating ⌘K that expands and then gets out of the way.<span class="from">From: Vibe-coded UI; An app that belongs on your computer.</span></div></li>
+        </ol>
+      </section>
+
+      <section id="caveats">
+        <div class="eyebrow">Honesty note</div>
+        <h2>What we could not confirm</h2>
+        <div class="note warn">Kole's own pages state no pronouns; the only third-party biography, NewForm's team page, uses "his". This dossier uses "they". Instagram @uiuxdailytips could not be read, so its size is unverified. LinkedIn was blocked; no employer, degree or agency appears on any fetched page; the career arc is reconstructed from asides in videos and the Dribbble bio. No talk, article, podcast or press could be found, and web search was unavailable for this dossier, so anything not reachable by a direct URL may have been missed. Stash's download is behind an email form; no binary, source or App Store listing is exposed. Video quotations are automatic captions, checked against the transcript but not typeset-exact.</div>
+      </section>
+
+      <section id="sources">
+        <div class="eyebrow">Sources</div>
+        <h2>Pages and transcripts fetched for this dossier</h2>
+        <ul class="sources">
+          <li><a href="https://www.kolejain.com/">kolejain.com</a>; <a href="https://www.kolejain.com/resources">the resources library</a> (24 Figma files); <a href="https://www.kolejain.com/stash">Stash for macOS</a>; <a href="https://www.kolejain.com/submit">the redesign submission form</a>.</li>
+          <li><a href="https://www.youtube.com/@kolejain/about">YouTube channel about page</a> (74K subscribers, 52 videos, 2,940,956 views, joined October 2016); <a href="https://dribbble.com/kolejain/about">Dribbble profile</a>; <a href="https://www.newform.community">NewForm community</a>.</li>
+          <li>Transcripts: <a href="https://www.youtube.com/watch?v=Ksx9C2-3yMo">The 3 dashboard UI flaws that give away you've never built one</a> (June 2026); <a href="https://www.youtube.com/watch?v=B7k5rOgmOGY">Everything you need to know to build a Dashboard UI in 8 minutes</a> (August 2025); <a href="https://www.youtube.com/watch?v=neE6wOuBIP8">The secret behind weirdly perfect UI designs</a> (September 2026); <a href="https://www.youtube.com/watch?v=EcbgbKtOELY">Every UI/UX Concept Explained in Under 10 Minutes</a> (March 2026).</li>
+          <li>Transcripts: <a href="https://www.youtube.com/watch?v=AH_ugxmLeUM">7 UI/UX mistakes that scream you're a beginner</a> (June 2025); <a href="https://www.youtube.com/watch?v=c1TvOcKdBVE">The 8 UI/UX Cheat Codes</a> (March 2025); <a href="https://www.youtube.com/watch?v=66oOi9OLMCw">Why the 60-30-10 Rule is Ruining Your UI Designs</a> (January 2026); <a href="https://www.youtube.com/watch?v=EOcY3hPMQkk">The 7 Color Mistakes</a> (September 2025).</li>
+          <li>Transcripts: <a href="https://www.youtube.com/watch?v=ADaQuZS04Rc">Stop Making Pretty UIs. Think Like a Product Designer</a> (July 2025); <a href="https://www.youtube.com/watch?v=HE4rLEQpiXY">How to think like a genius UI/UX designer</a> (June 2025); <a href="https://www.youtube.com/watch?v=9WVt1CelBfg">The stupid simple way to learn UI/UX design</a> (July 2026); <a href="https://www.youtube.com/watch?v=Vy0KKvZJRH8">Design macOS Apps exactly like Apple</a> (December 2025); <a href="https://www.youtube.com/watch?v=7sUUzOCv47U">Mathematically Perfect Typography</a> (June 2024).</li>
+          <li>Transcripts: <a href="https://www.youtube.com/watch?v=Yr2uIcFZDDQ">Redesigning a Finance Dashboard UI from Scratch</a> (June 2024); <a href="https://www.youtube.com/watch?v=eMMiLeo_UGI">The 4 Levels of Landing Page UI/UX Design</a> (May 2026); <a href="https://www.youtube.com/watch?v=PDcQJOPby1k">5 SaaS UI/UX mistakes that scream you vibe code</a> (February 2026); <a href="https://www.youtube.com/watch?v=RCneB_MQ7qs">The one thing vibe coding can't fix about your website</a> (August 2026); <a href="https://www.youtube.com/watch?v=7cTdCu8HMgM">The definitive process to present UIs like a pro</a> (October 2025).</li>
+          <li>Blocked or empty: LinkedIn, Instagram and its mirrors, X, Threads, TikTok, Behance, Figma Community, Medium, Product Hunt, GitHub, Substack; the site's about, blog and newsletter paths.</li>
+        </ul>
+      </section>
+
+      <div class="footer"><span>Riddle UX study · researched 25 September 2026</span><span>Quotes are 15 words or fewer and checked against the transcript or page.</span></div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

@@ -2,6 +2,7 @@
 import type { ClassificationId } from "./ClassificationId";
 import type { DigId } from "./DigId";
 import type { FindId } from "./FindId";
+import type { FindSeries } from "./FindSeries";
 import type { FindSource } from "./FindSource";
 import type { FindStatus } from "./FindStatus";
 import type { FindType } from "./FindType";
@@ -20,4 +21,33 @@ digIds: Array<DigId>,
 /**
  * Cross-Dig deduplication key (normally the RFC Message-ID root of the thread).
  */
-identityKey: string, reason: string, confidence: number | null, classificationId: ClassificationId | null, traceId: TraceId | null, supersededBy: FindId | null, };
+identityKey: string, reason: string, confidence: number | null, classificationId: ClassificationId | null, traceId: TraceId | null, supersededBy: FindId | null, 
+/**
+ * Set when the route that raised it says `+ Replaces`.
+ */
+series?: FindSeries, 
+/**
+ * When Temporal Sift closes it as Expired, whatever its type; set by
+ * a route's `+ Expires:`. Unlike `due_at` it is not a deadline: it
+ * neither raises priority nor escalates.
+ */
+expiresAt?: string, 
+/**
+ * When the user undid a rule's closing of it. An undo is a choice to
+ * keep this Find, so from then on no rule closes it again: not a newer
+ * one of its series, not its `Expires:`, not a passed Attend or Pay
+ * date. Without this, undoing an expiry lasted until the next Temporal
+ * pass, a quarter of an hour.
+ */
+keptOpenAt?: string, 
+/**
+ * Raised by a route that said `+ Notify`: it interrupts at once, in any
+ * notification mode. The flag used to be recorded on the decision and
+ * read by nothing, so "tell me now" rules told no one.
+ */
+notify: boolean, 
+/**
+ * A one-time sign-in code the message carries (`verification_code`),
+ * so the Find can show it with a copy button; it lapses with the Find.
+ */
+code?: string, };

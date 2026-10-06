@@ -399,6 +399,8 @@ impl Action for AddFixtureDig {
             status: DigStatus::NotConnected,
             shadow_started_at: None,
             created_at: now,
+            disabled: false,
+            mailbox: None,
         };
         repo::digs::upsert(&index, &dig)?;
         let store = ctx.services.stores.dig(&dig.id)?;
@@ -427,10 +429,13 @@ impl Action for AddFixtureDig {
                 .rsplit_once('@')
                 .map(|(_, d)| d.to_string())
                 .unwrap_or_default();
-            if !profile
-                .organisation_domains
-                .iter()
-                .any(|d| d.eq_ignore_ascii_case(&domain))
+            // A free mailbox is not an organisation: `gmail.com` there would
+            // put every Gmail sender behind the Never Hidden gate.
+            if !riddle_core::free_mail_domain(&domain)
+                && !profile
+                    .organisation_domains
+                    .iter()
+                    .any(|d| d.eq_ignore_ascii_case(&domain))
             {
                 profile.organisation_domains.push(domain);
             }
@@ -480,7 +485,7 @@ impl Action for RemoveDig {
                 "Remove Dig \"{}\" and its {count} cached messages",
                 dig.name
             ),
-            real_arguments: json!({"digId": dig.id, "name": dig.name, "messages": count}),
+            real_arguments: json!({"digId": dig.id, "name": dig.name, "count": count}),
         })
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
@@ -488,9 +493,6 @@ impl Action for RemoveDig {
         let index = ctx.services.stores.index();
         if let Some(registry) = ctx.services.get::<ProviderRegistry>() {
             registry.remove(&dig.id);
-        }
-        if let Some(triggers) = ctx.services.get::<RefreshTriggers>() {
-            triggers.remove(&dig.id);
         }
         if let Some(creds) = ctx.services.get::<riddle_credentials::Credentials>() {
             if let Err(e) = creds.delete(&riddle_credentials::gmail_refresh_token_key(&dig.id)) {
@@ -547,6 +549,9 @@ impl Action for UpdateDig {
             provider: previous.provider,
             created_at: previous.created_at,
             status: previous.status.clone(),
+            // Switched only by `set_dig_enabled`, so saving other settings
+            // from a stale copy cannot turn an account back on.
+            disabled: previous.disabled,
             ..dig
         };
         repo::digs::upsert(&index, &updated)?;
@@ -558,6 +563,63 @@ impl Action for UpdateDig {
         .with_affected(vec![EntityRef::new(EntityKind::Dig, &updated.id)])
         .with_inputs(json!({"digId": updated.id}))
         .with_undo(json!({"dig": previous}), "Restore previous settings"))
+    }
+    async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
+        self.execute(ctx, restore).await
+    }
+}
+
+/// Switch an account off or on without removing it. Off, Riddle stops
+/// syncing and sifting it and leaves it out of everything that spans
+/// accounts; its store, decisions and credentials stay, so switching it on
+/// again catches up from where it stopped.
+pub struct SetDigEnabled;
+#[async_trait]
+impl Action for SetDigEnabled {
+    fn meta(&self) -> ActionMeta {
+        meta(
+            "set_dig_enabled",
+            "Disable or re-enable an account, keeping its mail",
+        )
+        .mutating()
+        .reversible()
+        .risk(Risk::Low)
+        .autonomy(Autonomy::Trusted)
+        .build()
+    }
+    async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
+        let (mut dig, _store) = dig_and_store(ctx, &args)?;
+        let enabled: bool = arg(&args, "enabled")?;
+        let was_enabled = !dig.disabled;
+        dig.disabled = !enabled;
+        let index = ctx.services.stores.index();
+        repo::digs::upsert(&index, &dig)?;
+        ctx.services.emit(RiddleEvent::SettingsChanged);
+        ctx.services.emit(RiddleEvent::SummaryChanged);
+        rinfo!(
+            Category::Actions,
+            "dig {} {}",
+            dig.id,
+            if enabled { "enabled" } else { "disabled" }
+        );
+        let summary = if enabled {
+            format!("Enabled \"{}\"; it syncs and sifts again", dig.name)
+        } else {
+            format!("Disabled \"{}\"; its mail is kept", dig.name)
+        };
+        Ok(
+            ActionResult::ok(json!({"digId": dig.id, "enabled": enabled}), summary)
+                .with_affected(vec![EntityRef::new(EntityKind::Dig, &dig.id)])
+                .with_inputs(json!({"digId": dig.id, "enabled": enabled}))
+                .with_undo(
+                    json!({"digId": dig.id, "enabled": was_enabled}),
+                    if was_enabled {
+                        "Enable it again"
+                    } else {
+                        "Disable it again"
+                    },
+                ),
+        )
     }
     async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
         self.execute(ctx, restore).await
@@ -635,6 +697,145 @@ impl Action for SaveDigGroup {
     }
 }
 
+/// What refers to a group by name: Meshes scoped to it and Strata scoped to
+/// it. Renaming or deleting the group would leave them scoped to nothing and
+/// quietly stop them applying, so both refuse while this is not empty.
+pub fn group_users(store: &Store, name: &str) -> Result<Vec<String>> {
+    let mut users: Vec<String> = repo::meshes::list_latest(store, false)?
+        .into_iter()
+        .filter(|m| matches!(&m.scope, MeshScope::DigGroup { group } if group == name))
+        .map(|m| format!("Mesh \"{}\"", m.name))
+        .collect();
+    users.extend(
+        repo::strata::list(store, false)?
+            .into_iter()
+            .filter(|s| s.scope_group.as_deref() == Some(name))
+            .map(|s| format!("Stratum \"{}\"", s.name)),
+    );
+    Ok(users)
+}
+
+fn refuse_if_used(store: &Store, name: &str, verb: &str) -> Result<()> {
+    let users = group_users(store, name)?;
+    if users.is_empty() {
+        return Ok(());
+    }
+    Err(RiddleError::invalid(format!(
+        "{} {} scoped to \"{name}\"; change {} scope before you {verb} the group",
+        users.join(", "),
+        if users.len() == 1 { "is" } else { "are" },
+        if users.len() == 1 { "its" } else { "their" },
+    )))
+}
+
+fn find_group(store: &Store, name: &str) -> Result<DigGroup> {
+    repo::digs::list_groups(store)?
+        .into_iter()
+        .find(|g| g.name == name)
+        .ok_or_else(|| RiddleError::not_found(format!("no group \"{name}\"")))
+}
+
+/// Rename a group, keeping its accounts. Account membership is stored on
+/// both sides (the group's list and each Dig's `group`), so both move.
+pub struct RenameDigGroup;
+#[async_trait]
+impl Action for RenameDigGroup {
+    fn meta(&self) -> ActionMeta {
+        meta("rename_dig_group", "Rename a Dig Group")
+            .mutating()
+            .reversible()
+            .risk(Risk::Low)
+            .autonomy(Autonomy::Trusted)
+            .build()
+    }
+    async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
+        let from: String = arg(&args, "from")?;
+        let to: String = arg::<String>(&args, "to")?.trim().to_string();
+        if to.is_empty() {
+            return Err(RiddleError::invalid("a group needs a name"));
+        }
+        let index = ctx.services.stores.index();
+        let group = find_group(&index, &from)?;
+        if to == from {
+            return Ok(ActionResult::ok(json!({"name": to}), "Nothing to rename"));
+        }
+        if repo::digs::list_groups(&index)?
+            .iter()
+            .any(|g| g.name != from && g.name.eq_ignore_ascii_case(&to))
+        {
+            return Err(RiddleError::invalid(format!(
+                "a group called \"{to}\" exists"
+            )));
+        }
+        refuse_if_used(&index, &from, "rename")?;
+        repo::digs::upsert_group(
+            &index,
+            &DigGroup {
+                used_by: vec![],
+                name: to.clone(),
+                digs: group.digs.clone(),
+            },
+        )?;
+        repo::digs::remove_group(&index, &from)?;
+        for mut dig in repo::digs::list(&index)? {
+            if dig.group.as_deref() == Some(from.as_str()) {
+                dig.group = Some(to.clone());
+                repo::digs::upsert(&index, &dig)?;
+            }
+        }
+        ctx.services.emit(RiddleEvent::SettingsChanged);
+        Ok(ActionResult::ok(
+            json!({"name": to}),
+            format!("Renamed Dig Group \"{from}\" to \"{to}\""),
+        )
+        .with_inputs(json!({"from": from, "to": to}))
+        .with_undo(json!({"from": to, "to": from}), "Rename it back"))
+    }
+    async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
+        self.execute(ctx, restore).await
+    }
+}
+
+/// Delete a group. Its accounts stay; they just belong to no group.
+pub struct DeleteDigGroup;
+#[async_trait]
+impl Action for DeleteDigGroup {
+    fn meta(&self) -> ActionMeta {
+        meta("delete_dig_group", "Delete a Dig Group (its accounts stay)")
+            .mutating()
+            .reversible()
+            .risk(Risk::Low)
+            .autonomy(Autonomy::Trusted)
+            .build()
+    }
+    async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
+        let name: String = arg(&args, "name")?;
+        let index = ctx.services.stores.index();
+        let group = find_group(&index, &name)?;
+        refuse_if_used(&index, &name, "delete")?;
+        for mut dig in repo::digs::list(&index)? {
+            if dig.group.as_deref() == Some(name.as_str()) {
+                dig.group = None;
+                repo::digs::upsert(&index, &dig)?;
+            }
+        }
+        repo::digs::remove_group(&index, &name)?;
+        ctx.services.emit(RiddleEvent::SettingsChanged);
+        Ok(ActionResult::ok(
+            json!({"removed": name}),
+            format!("Deleted Dig Group \"{name}\""),
+        )
+        .with_inputs(json!({"group": name, "digs": group.digs.len()}))
+        .with_undo(
+            json!({"group": group}),
+            "Restore the group and its accounts",
+        ))
+    }
+    async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
+        SaveDigGroup.execute(ctx, restore).await
+    }
+}
+
 pub struct InjectFixtureMessage;
 #[async_trait]
 impl Action for InjectFixtureMessage {
@@ -699,7 +900,10 @@ pub fn actions() -> Vec<Arc<dyn Action>> {
         Arc::new(AddFixtureDig),
         Arc::new(RemoveDig),
         Arc::new(UpdateDig),
+        Arc::new(SetDigEnabled),
         Arc::new(SaveDigGroup),
+        Arc::new(RenameDigGroup),
+        Arc::new(DeleteDigGroup),
         Arc::new(InjectFixtureMessage),
     ]
 }
@@ -846,7 +1050,7 @@ mod tests {
         let rt = runtime();
         let dig = add_dig(&rt).await;
         let triggers = rt.services.require::<RefreshTriggers>().unwrap();
-        let notify = triggers.for_dig(&dig.id);
+        let mut refreshes = triggers.subscribe();
         let out = rt
             .invoke_as_user(
                 "inject_fixture_message",
@@ -857,9 +1061,11 @@ mod tests {
         let m: Message = serde_json::from_value(out.result).unwrap();
         assert_eq!(m.subject, "Verify now");
         assert_eq!(m.headers.authentication.spf, AuthVerdict::Fail);
-        tokio::time::timeout(std::time::Duration::from_millis(100), notify.notified())
-            .await
-            .expect("refresh was triggered");
+        assert_eq!(
+            refreshes.try_recv().unwrap(),
+            Some(dig.id.clone()),
+            "the injection asked for this Dig's refresh"
+        );
         let err = rt
             .invoke_as_user(
                 "inject_fixture_message",
@@ -933,5 +1139,133 @@ mod tests {
             .unwrap()
             .get(&b.id)
             .is_none());
+    }
+
+    async fn grouped(rt: &Runtime) -> (Dig, Dig) {
+        let a = add_dig(rt).await;
+        let b = rt
+            .invoke_as_user(
+                "add_fixture_dig",
+                json!({"name": "Home", "email": "matt@home.example", "count": 20}),
+            )
+            .await
+            .unwrap();
+        let b: Dig = serde_json::from_value(b.result).unwrap();
+        rt.invoke_as_user(
+            "save_dig_group",
+            json!({"group": {"name": "Work", "digs": [a.id, b.id]}}),
+        )
+        .await
+        .unwrap();
+        (a, b)
+    }
+
+    fn group_of(rt: &Runtime, dig: &Dig) -> Option<String> {
+        repo::digs::get(&rt.services.stores.index(), &dig.id)
+            .unwrap()
+            .unwrap()
+            .group
+    }
+
+    #[tokio::test]
+    async fn renaming_a_group_moves_its_accounts_and_undo_renames_it_back() {
+        let rt = runtime();
+        let (a, b) = grouped(&rt).await;
+        rt.invoke_as_user("rename_dig_group", json!({"from": "Work", "to": "Clients"}))
+            .await
+            .unwrap();
+        let index = rt.services.stores.index();
+        let groups = repo::digs::list_groups(&index).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "Clients");
+        assert_eq!(groups[0].digs, vec![a.id.clone(), b.id.clone()]);
+        assert_eq!(group_of(&rt, &a).as_deref(), Some("Clients"));
+
+        rt.undo_via(
+            "rename_dig_group",
+            json!({"from": "Clients", "to": "Work"}),
+            Principal::User,
+            None,
+            ActivityId::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(group_of(&rt, &b).as_deref(), Some("Work"));
+    }
+
+    #[tokio::test]
+    async fn a_rename_onto_an_existing_group_is_refused() {
+        let rt = runtime();
+        grouped(&rt).await;
+        rt.invoke_as_user(
+            "save_dig_group",
+            json!({"group": {"name": "Home", "digs": []}}),
+        )
+        .await
+        .unwrap();
+        let err = rt
+            .invoke_as_user("rename_dig_group", json!({"from": "Work", "to": "home"}))
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind, riddle_errors::ErrorKind::Invalid);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_group_keeps_its_accounts_and_undo_restores_membership() {
+        let rt = runtime();
+        let (a, b) = grouped(&rt).await;
+        rt.invoke_as_user("delete_dig_group", json!({"name": "Work"}))
+            .await
+            .unwrap();
+        let index = rt.services.stores.index();
+        assert!(repo::digs::list_groups(&index).unwrap().is_empty());
+        assert_eq!(repo::digs::list(&index).unwrap().len(), 2);
+        assert_eq!(group_of(&rt, &a), None);
+
+        rt.undo_via(
+            "delete_dig_group",
+            json!({"group": {"name": "Work", "digs": [a.id, b.id]}}),
+            Principal::User,
+            None,
+            ActivityId::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(group_of(&rt, &b).as_deref(), Some("Work"));
+    }
+
+    #[tokio::test]
+    async fn a_group_a_stratum_is_scoped_to_can_be_neither_renamed_nor_deleted() {
+        let rt = runtime();
+        grouped(&rt).await;
+        let index = rt.services.stores.index();
+        repo::strata::upsert(
+            &index,
+            &Stratum {
+                id: StratumId::new(),
+                name: "Invoices".into(),
+                version: 1,
+                scope_group: Some("Work".into()),
+                description: String::new(),
+                proposed_by_riddle: false,
+                message_count: 0,
+                created_at: chrono::Utc::now(),
+                deleted_at: None,
+            },
+        )
+        .unwrap();
+        for (action, args) in [
+            ("rename_dig_group", json!({"from": "Work", "to": "Clients"})),
+            ("delete_dig_group", json!({"name": "Work"})),
+        ] {
+            let err = rt.invoke_as_user(action, args).await.unwrap_err();
+            assert_eq!(err.kind, riddle_errors::ErrorKind::Invalid);
+            assert!(
+                err.message.contains("Stratum \"Invoices\""),
+                "{}",
+                err.message
+            );
+        }
+        assert_eq!(repo::digs::list_groups(&index).unwrap()[0].name, "Work");
     }
 }

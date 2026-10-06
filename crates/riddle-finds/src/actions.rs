@@ -1,5 +1,7 @@
 //! Find Actions: resolve, dismiss, snooze, retype. All reversible; dismiss
-//! records a correction that undo retracts.
+//! records a correction that undo retracts. `close_finds` is the ledger's
+//! handle on Finds a rule closed (a newer one in the series replaced them,
+//! or they expired), so that closing is undone from Activity like the rest.
 
 use crate::service::FindService;
 use async_trait::async_trait;
@@ -16,6 +18,7 @@ pub fn all() -> Vec<Arc<dyn Action>> {
         Arc::new(DismissFind),
         Arc::new(SnoozeFind),
         Arc::new(RetypeFind),
+        Arc::new(CloseFinds),
     ]
 }
 
@@ -137,14 +140,7 @@ impl Action for SnoozeFind {
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
         let id = find_id(&args)?;
-        let until: chrono::DateTime<chrono::Utc> = args
-            .get("until")
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.parse().ok())
-            .ok_or_else(|| RiddleError::invalid("until must be an RFC 3339 timestamp"))?;
-        if until <= ctx.services.clock.now() {
-            return Err(RiddleError::invalid("until must be in the future"));
-        }
+        let until = required_future_timestamp(&args, "until", ctx.services.clock.now())?;
         let f = service(ctx).snooze(&id, until)?;
         Ok(ActionResult::ok(
             serde_json::to_value(&f)?,
@@ -186,6 +182,7 @@ impl Action for RetypeFind {
         let prior = svc.get(&id)?;
         let f = svc.retype(&id, ft)?;
         if let Some(src) = f.sources.first() {
+            let (mesh_id, mesh_version) = service(ctx).deciding_mesh(&src.dig_id, &src.message_id);
             let correction = Correction {
                 id: CorrectionId::new(),
                 kind: CorrectionKind::Retype,
@@ -197,8 +194,8 @@ impl Action for RetypeFind {
                 to_disposition: Some(Disposition::Find { find_type: ft }),
                 from_find_type: Some(prior.find_type),
                 to_find_type: Some(ft),
-                mesh_id: None,
-                mesh_version: None,
+                mesh_id,
+                mesh_version,
                 activity_id: Some(ctx.activity_id.clone()),
                 created_at: ctx.services.clock.now(),
                 retracted_at: None,
@@ -241,5 +238,51 @@ impl Action for RetypeFind {
             format!("Retyped {} back to {}", f.title, ft.label()),
         )
         .with_affected(vec![find_ref(&f)]))
+    }
+}
+
+/// Finds closed by a rule rather than a person: superseded by a newer one
+/// of their `+ Replaces` series, or expired. Never invoked by a client; the
+/// engine records it so the Activity row has an Action to undo through.
+/// Undo reopens the Finds that are still in the state the rule left them,
+/// and leaves alone any the user has handled since. An undo is a choice to
+/// keep them, so they are kept open: no rule closes them again.
+pub struct CloseFinds;
+
+#[async_trait]
+impl Action for CloseFinds {
+    fn meta(&self) -> ActionMeta {
+        meta(
+            "close_finds",
+            "Close Finds a newer one replaced or that expired",
+        )
+        .mutating()
+        .reversible()
+        .risk(Risk::Low)
+        .autonomy(Autonomy::Act)
+        .build()
+    }
+    async fn execute(&self, _ctx: &ActionContext, _args: Value) -> Result<ActionResult> {
+        Err(RiddleError::policy_denied(
+            "close_finds is recorded by the engine, not invoked",
+        ))
+    }
+    async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
+        let ids: Vec<FindId> =
+            serde_json::from_value(restore.get("findIds").cloned().unwrap_or(json!([])))?;
+        let svc = service(ctx);
+        let mut reopened = Vec::new();
+        for id in &ids {
+            let f = svc.get(id)?;
+            if matches!(f.status, FindStatus::Superseded | FindStatus::Expired) {
+                reopened.push(find_ref(&svc.keep_open(id)?));
+            }
+        }
+        let n = reopened.len();
+        Ok(ActionResult::ok(
+            json!({ "reopened": n }),
+            format!("Kept {} open", riddle_core::text::plural(n, "Find")),
+        )
+        .with_affected(reopened))
     }
 }

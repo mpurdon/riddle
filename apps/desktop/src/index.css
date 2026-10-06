@@ -5,6 +5,13 @@
  * palette is archaeology-tinged (paper, sand, clay, ochre, moss, rust) and
  * the chrome stays ink-neutral; chroma is reserved for live status. Dark mode
  * follows the system and swaps the variables the tokens point at.
+ *
+ * Two vocabularies sit side by side on purpose. Components use the palette
+ * names (`bg-sand`, `text-ink`), which nothing renames. The semantic aliases
+ * below them (`--layer-*`, `--text-*`, `--accent-*`, `--space-*`, `--fs-*`)
+ * are the design-token pass from the UX study (Phase 3): they say what a
+ * colour is for, so a new surface picks a layer rather than a shade, and a
+ * new size lands on the ladder rather than in `text-[13px]`.
  */
 @theme inline {
   --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
@@ -21,6 +28,19 @@
   --color-rust: var(--rust);
   --color-slate: var(--slate);
   --color-accent: var(--accent);
+
+  /* The type ladder as Tailwind sizes: 11, 12, 14, 16, 20, 24. `text-2xs`
+     is the dense-view small size (chips, hints, section labels), replacing
+     `text-[10px]` and `text-[11px]`. `text-lg` (18) and `text-3xl` (30) are
+     left as Tailwind's defaults and are off the ladder: nothing in a dense
+     view should use them; the Summary headline may. */
+  --text-2xs: var(--fs-1);
+  --text-2xs--line-height: 1rem;
+  --text-xs: var(--fs-2);
+  --text-sm: var(--fs-4);
+  --text-base: var(--fs-5);
+  --text-xl: var(--fs-6);
+  --text-2xl: var(--fs-7);
 }
 
 :root {
@@ -37,16 +57,69 @@
   --rust: #9f1239;
   --slate: #334155;
   --accent: #7c2d12;
+
+  /* Semantic aliases over the palette. They follow the palette into dark
+     mode on their own, since they point at the variables, not the values. */
+
+  /* Four neutral layers, bottom to top: the page, a panel or hover, a
+     control or chip, a border or pressed state. */
+  --layer-0: var(--paper);
+  --layer-1: var(--sand);
+  --layer-2: var(--sand-2);
+  --layer-3: var(--line);
+
+  /* Three text levels: body, secondary, hint. `--text-3` is for hints and
+     timestamps only; it does not reach 4.5:1 on any layer in either mode. */
+  --text-1: var(--ink);
+  --text-2: var(--ink-2);
+  --text-3: var(--clay);
+
+  /* One accent ramp: the interactive colour (focus, primary, links), its
+     deeper form for pressed and emphasis, and a wash for selection. */
+  --accent-1: var(--ochre);
+  --accent-2: var(--accent);
+  --accent-3: color-mix(in srgb, var(--ochre) 12%, transparent);
+
+  /* Spacing ladder. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Type ladder. Body is 13 (`--fs-3`); nothing above 24 in dense views. */
+  --fs-1: 11px;
+  --fs-2: 12px;
+  --fs-3: 13px;
+  --fs-4: 14px;
+  --fs-5: 16px;
+  --fs-6: 20px;
+  --fs-7: 24px;
 }
 
+/*
+ * Dark layers are spread about twice as far apart as the light ones, since
+ * near-black surfaces crush together on a real screen and the four layers
+ * read as one (the UX study's finding). Light steps, in CIELAB L*:
+ * paper→sand 1.7, sand→sand-2 5.5, sand-2→line 6.3. Dark steps with the
+ * values below: 6.2, 10.3, 11.8 (before: 6.2, 6.1, 9.7).
+ *
+ * Contrast (WCAG) of text on each dark layer, paper / sand / sand-2 / line:
+ *   ink   #e7e5e4  15.7 / 13.9 / 10.7 / 7.1
+ *   ink-2 #a8a29e   7.8 /  6.9 /  5.3 / 3.6
+ *   clay  #78716c   4.1 /  3.7 /  2.8 / 1.9   (hints only, never body)
+ * Body text (ink, ink-2) is ≥ 4.5:1 on every layer it sits on; `line` is a
+ * border and a pressed state, and nothing sets body text on it.
+ */
 @media (prefers-color-scheme: dark) {
   :root {
     --ink: #e7e5e4;
     --ink-2: #a8a29e;
     --paper: #0c0a09;
     --sand: #1c1917;
-    --sand-2: #292524;
-    --line: #3f3a36;
+    --sand-2: #332e2b;
+    --line: #4f4844;
     --clay: #78716c;
     --ochre: #d97706;
     --moss: #84cc16;
@@ -64,11 +137,11 @@ html, body, #root {
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  background: var(--paper);
-  color: var(--ink);
+  background: var(--layer-0);
+  color: var(--text-1);
   overflow: hidden;
   user-select: none;
-  font-size: 13px;
+  font-size: var(--fs-3);
 }
 
 input, textarea, [contenteditable], .selectable, pre, code {
@@ -84,14 +157,14 @@ input, textarea, [contenteditable], .selectable, pre, code {
 
 /* Focus rings that read on paper and on dark. */
 :focus-visible {
-  outline: 2px solid var(--ochre);
+  outline: 2px solid var(--accent-1);
   outline-offset: 1px;
 }
 
 /* Keyboard row selection. */
 .row-selected {
-  background: color-mix(in srgb, var(--ochre) 12%, transparent);
-  box-shadow: inset 2px 0 0 var(--ochre);
+  background: var(--accent-3);
+  box-shadow: inset 2px 0 0 var(--accent-1);
 }
 
 /* Thin scrollbars for dense lists. */
@@ -100,19 +173,19 @@ input, textarea, [contenteditable], .selectable, pre, code {
 *::-webkit-scrollbar-track { background: transparent; }
 
 /* Progress bars only move on real events; no animation while nothing happens. */
-.progress-track { background: var(--sand-2); border-radius: 3px; height: 6px; overflow: hidden; }
-.progress-fill { background: var(--ochre); height: 100%; transition: width 300ms ease-out; }
+.progress-track { background: var(--layer-2); border-radius: 3px; height: 6px; overflow: hidden; }
+.progress-fill { background: var(--accent-1); height: 100%; transition: width 300ms ease-out; }
 .progress-indeterminate { background: repeating-linear-gradient(90deg, var(--clay) 0 8px, transparent 8px 16px); height: 100%; opacity: .6; }
 
 kbd {
   font-family: var(--font-mono);
-  font-size: 11px;
-  border: 1px solid var(--line);
+  font-size: var(--fs-1);
+  border: 1px solid var(--layer-3);
   border-bottom-width: 2px;
   border-radius: 4px;
   padding: 0 5px;
-  background: var(--sand);
-  color: var(--ink-2);
+  background: var(--layer-1);
+  color: var(--text-2);
 }
 
 .mono { font-family: var(--font-mono); }
@@ -122,5 +195,9 @@ kbd {
 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 .fade-in { animation: fade-in 120ms ease-out; }
+/* A drawer sliding in from the right edge of its pane (the Why drawer on Finds). */
+@keyframes slide-in { from { transform: translateX(100%); } to { transform: none; } }
+.slide-in { animation: slide-in 160ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .slide-in, .fade-in, .toast-in { animation: none; } }
 
 .hold-progress { transition: width 60ms linear; }

@@ -6,10 +6,10 @@ import type { SimulationReport } from '@/bindings/SimulationReport'
 import { fmtInt, fmtUsd, num } from '@/lib/format'
 import { titleCase } from '@/lib/format'
 
-export function SimulationTable({ r, compact }: { r: SimulationReport; compact?: boolean }) {
+export function SimulationTable({ r, compact, fallback }: { r: SimulationReport; compact?: boolean; fallback?: boolean }) {
   const label = (k: string) => (k === 'unresolved' ? 'Escalate' : titleCase(k))
   return (
-    <div className={compact ? 'text-xs' : 'text-sm'}>
+    <div className={`selectable ${compact ? 'text-xs' : 'text-sm'}`}>
       <div className="mb-2 font-medium">
         {r.meshName} {r.fromVersion !== null ? `v${r.fromVersion} → ` : ''}v{r.toVersion} · last {r.windowDays} days
       </div>
@@ -26,6 +26,19 @@ export function SimulationTable({ r, compact }: { r: SimulationReport; compact?:
         </tbody>
       </table>
       {num(r.newJudgeCallsRequired) > 0 ? <p className="mt-2 text-xs text-ink-2">Simulation is free only when the Signals it needs are cached. A new Signal or version has no cache; the backfill runs under the per-Dig budget.</p> : null}
+      {r.takenFirstBy.length ? (
+        <p className={fallback ? 'mt-2 text-xs text-ink-2' : 'mt-2 rounded border border-ochre/40 bg-ochre/5 px-2 py-1 text-xs'}>
+          <span className="font-medium">Taken first by earlier Meshes: </span>
+          {r.takenFirstBy.map((o) => `${fmtInt(o.count)} by ${o.meshName} (Priority ${o.priority})`).join('; ')}.{' '}
+          {fallback ? 'This Mesh is a fallback, so that is expected.' : 'This Mesh would decide them, but those run first. Give it a lower Priority to run before them, or narrow them.'}
+        </p>
+      ) : null}
+      {r.takesFrom.length ? (
+        <p className="mt-1 text-xs text-ink-2">
+          <span className="font-medium">Takes from later Meshes: </span>
+          {r.takesFrom.map((o) => `${fmtInt(o.count)} from ${o.meshName} (Priority ${o.priority})`).join('; ')}.
+        </p>
+      ) : null}
       {r.sampleChanged.length ? <p className="mt-1 text-xs text-clay">Sample of changed messages: {r.sampleChanged.slice(0, 5).join(', ')}{r.sampleChanged.length > 5 ? '…' : ''}</p> : null}
     </div>
   )

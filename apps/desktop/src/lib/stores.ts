@@ -1,8 +1,8 @@
 /**
  * Client-side stores. Everything durable lives in the Rust core; these hold
  * only what the webview needs between renders: toasts, banners, the Dig
- * filter, the Director's streaming state, pending proposals, the composer
- * and the confirmation queue.
+ * filter, the Director's streaming state, the composer and the confirmation
+ * queue. Pending proposals are a query (`usePending`), not a store.
  */
 import { create } from 'zustand'
 import type { PendingAction } from '@/bindings/PendingAction'
@@ -102,6 +102,10 @@ export interface LiveTurn {
 
 interface DirectorState {
   live: Record<string, LiveTurn>
+  /**
+   * A draft for the composer from "Talk to the Director" or the search box.
+   * The page shows it and focuses it; it is never sent until the person presses Enter.
+   */
   prefill: string | null
   setPrefill: (p: string | null) => void
   begin: (conversationId: string) => void
@@ -140,26 +144,9 @@ export const useDirector = create<DirectorState>((set) => ({
     }),
 }))
 
-// ---------------------------------------------------------------------------
-// Proposals: ProposalCreated events, resolved to PendingActions on demand.
-
-export interface Proposal {
-  pendingId: string
-  summary: string
-  createdAt: number
-}
-
-interface ProposalState {
-  proposals: Proposal[]
-  add: (p: Proposal) => void
-  remove: (pendingId: string) => void
-}
-
-export const useProposals = create<ProposalState>((set) => ({
-  proposals: [],
-  add: (p) => set((s) => (s.proposals.some((x) => x.pendingId === p.pendingId) ? s : { proposals: [...s.proposals, p] })),
-  remove: (pendingId) => set((s) => ({ proposals: s.proposals.filter((x) => x.pendingId !== pendingId) })),
-}))
+// Proposals have no store: `usePending()` (list_pending) is the one source of
+// truth, so a proposal survives a restart and the rail badge, the Director
+// page and the Action layer agree. `proposal_created` only invalidates it.
 
 // ---------------------------------------------------------------------------
 // Composer: one draft open at a time, as a slide-over.

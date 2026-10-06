@@ -39,6 +39,7 @@ fn event_name(e: &RiddleEvent) -> &'static str {
         RiddleEvent::StoreFault { .. } => "store_fault",
         RiddleEvent::StoreFaultCleared => "store_fault_cleared",
         RiddleEvent::Notify { .. } => "notify",
+        RiddleEvent::GmailSignIn { .. } => "gmail_sign_in",
         RiddleEvent::UpdateAvailable { .. } => "update",
         RiddleEvent::PipelineStage { .. } => "pipeline",
         RiddleEvent::DirectorDelta { .. } => "director_delta",

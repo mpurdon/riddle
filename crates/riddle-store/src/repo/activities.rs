@@ -160,3 +160,27 @@ pub fn list_where(
         Ok(Page::from_offset(items, offset, limit, Some(total as u64)))
     })
 }
+
+/// Entries since a time the user undid, optionally for one Dig. Counted in
+/// SQL: the trust card asks often and needs one number.
+pub fn undone_count_since(
+    store: &Store,
+    after: &chrono::DateTime<chrono::Utc>,
+    dig_id: Option<&str>,
+) -> Result<u64> {
+    store.read(|c| {
+        let n: i64 = match dig_id {
+            Some(d) => c.query_row(
+                "SELECT count(*) FROM activities WHERE created_at > ?1 AND json_extract(json, '$.undo.state') = 'undone' AND json_extract(json, '$.digId') = ?2",
+                params![ts(after), d],
+                |r| r.get(0),
+            )?,
+            None => c.query_row(
+                "SELECT count(*) FROM activities WHERE created_at > ?1 AND json_extract(json, '$.undo.state') = 'undone'",
+                [ts(after)],
+                |r| r.get(0),
+            )?,
+        };
+        Ok(n as u64)
+    })
+}

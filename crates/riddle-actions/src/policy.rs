@@ -1,7 +1,7 @@
 //! Authorization and confirmation policy (§51). Every check happens here,
 //! in the Action layer, never only in a dialog.
 
-use riddle_core::{ActionMeta, Autonomy, ConfirmationPolicy, DigId, Principal};
+use riddle_core::{ActionMeta, Autonomy, ConfirmationPolicy, DigId, Principal, ProviderWrites};
 use riddle_errors::{Result, RiddleError};
 use std::collections::HashMap;
 
@@ -11,8 +11,9 @@ pub struct AutonomyPolicy {
     pub default: Autonomy,
     pub per_dig: HashMap<DigId, Autonomy>,
     pub per_action: HashMap<(Option<DigId>, String), Autonomy>,
-    /// Dev builds start in OBSERVE and must be armed before provider mutations (§59).
-    pub armed: bool,
+    /// What a dev build may write to the mailbox (§59); it starts in Hold.
+    /// Release builds ignore it.
+    pub writes: ProviderWrites,
     pub dev: bool,
 }
 
@@ -42,6 +43,10 @@ pub enum Decision {
     Deny(String),
 }
 
+/// Why an Action that calls the provider was refused in Hold.
+pub const HOLD_DENIAL: &str =
+    "this dev build holds mailbox changes; choose Ask or Allow under Developer → Mailbox writes";
+
 pub fn decide(
     meta: &ActionMeta,
     principal: &Principal,
@@ -49,14 +54,37 @@ pub fn decide(
     policy: &AutonomyPolicy,
     confirmed: bool,
 ) -> Decision {
+    // First, so a refused agent never reaches `Confirm`, which would store
+    // the arguments in the pending table.
+    if meta.user_only && !matches!(principal, Principal::User | Principal::Cli) {
+        return Decision::Deny(format!("{} can only be run by you", meta.name));
+    }
     if meta.read_only {
         return Decision::Proceed;
     }
-    // Dev builds: provider mutations need arming, whoever asks.
-    if policy.dev && meta.external_side_effect && !policy.armed {
-        return Decision::Deny(
-            "dev build is not armed for provider mutations; arm it in Developer Mode".into(),
-        );
+    // Dev builds: an Action that calls the provider waits on Hold / Ask /
+    // Allow, whoever asks. Projected Actions run; their queued writes wait
+    // in the outbox instead.
+    if policy.dev && meta.external_side_effect {
+        match policy.writes {
+            ProviderWrites::Hold => return Decision::Deny(HOLD_DENIAL.into()),
+            ProviderWrites::Ask if !confirmed => {
+                let tier = match meta.confirmation {
+                    ConfirmationPolicy::None | ConfirmationPolicy::InPlaceUndo => {
+                        ConfirmationPolicy::Approval
+                    }
+                    other => other,
+                };
+                return Decision::Confirm(
+                    tier,
+                    format!(
+                        "{} changes the mailbox; this dev build asks first",
+                        meta.name
+                    ),
+                );
+            }
+            ProviderWrites::Ask | ProviderWrites::Allow => {}
+        }
     }
     match principal {
         Principal::User | Principal::Cli => {
@@ -168,6 +196,41 @@ mod tests {
     }
 
     #[test]
+    fn a_user_only_action_is_refused_to_every_agent_even_when_confirmed() {
+        let p = AutonomyPolicy {
+            default: Autonomy::Trusted,
+            ..Default::default()
+        };
+        let secret = crate::meta("set_secret", "store a secret")
+            .mutating()
+            .user_only()
+            .build();
+        let agents = [
+            Principal::Director {
+                conversation_id: ConversationId::new(),
+                read_untrusted: false,
+            },
+            Principal::Mcp,
+            Principal::Sift,
+            Principal::System,
+        ];
+        for agent in agents {
+            assert!(matches!(
+                decide(&secret, &agent, None, &p, true),
+                Decision::Deny(_)
+            ));
+        }
+        assert_eq!(
+            decide(&secret, &Principal::User, None, &p, false),
+            Decision::Proceed
+        );
+        assert_eq!(
+            decide(&secret, &Principal::Cli, None, &p, false),
+            Decision::Proceed
+        );
+    }
+
+    #[test]
     fn sift_is_denied_below_act_and_proceeds_at_act() {
         let mut p = AutonomyPolicy {
             default: Autonomy::Suggest,
@@ -209,19 +272,57 @@ mod tests {
     }
 
     #[test]
-    fn an_unarmed_dev_build_denies_provider_mutations_even_for_the_user() {
+    fn a_dev_build_on_hold_denies_provider_calls_even_for_the_user_and_runs_corrections() {
         let p = AutonomyPolicy {
             dev: true,
-            armed: false,
+            writes: ProviderWrites::Hold,
             ..Default::default()
         };
-        let archive = crate::meta("archive_messages", "archive")
+        let send = crate::meta("send_message", "send")
             .mutating()
             .external()
             .build();
         assert!(matches!(
-            decide(&archive, &Principal::User, None, &p, true),
+            decide(&send, &Principal::User, None, &p, true),
             Decision::Deny(_)
         ));
+        let correct = crate::meta("set_disposition", "correct")
+            .mutating()
+            .projected()
+            .build();
+        assert_eq!(
+            decide(&correct, &Principal::User, None, &p, true),
+            Decision::Proceed
+        );
+    }
+
+    #[test]
+    fn a_dev_build_on_ask_asks_before_a_provider_call_and_allow_lets_it_through() {
+        let delete = crate::meta("unsubscribe", "unsubscribe")
+            .mutating()
+            .external()
+            .build();
+        let ask = AutonomyPolicy {
+            dev: true,
+            writes: ProviderWrites::Ask,
+            ..Default::default()
+        };
+        assert!(matches!(
+            decide(&delete, &Principal::User, None, &ask, false),
+            Decision::Confirm(ConfirmationPolicy::Approval, _)
+        ));
+        assert_eq!(
+            decide(&delete, &Principal::User, None, &ask, true),
+            Decision::Proceed
+        );
+        let allow = AutonomyPolicy {
+            dev: true,
+            writes: ProviderWrites::Allow,
+            ..Default::default()
+        };
+        assert_eq!(
+            decide(&delete, &Principal::User, None, &allow, false),
+            Decision::Proceed
+        );
     }
 }

@@ -28,3 +28,20 @@ pub fn get_json<T: serde::de::DeserializeOwned>(store: &Store, key: &str) -> Res
 pub fn set_json<T: serde::Serialize>(store: &Store, key: &str, value: &T) -> Result<()> {
     set(store, key, &serde_json::to_string(value)?)
 }
+
+/// Every key under a prefix with its value, for per-message marks such as
+/// Shadow reviews (`shadow_review:<dig id>:<message id>`). A range on the
+/// key uses the primary-key index; `substr()` or LIKE would scan the table.
+pub fn list_prefix(store: &Store, prefix: &str) -> Result<Vec<(String, String)>> {
+    store.read(|c| {
+        let mut st =
+            c.prepare("SELECT key, value FROM kv WHERE key >= ?1 AND key < ?2 ORDER BY key")?;
+        let rows = st
+            .query_map(
+                rusqlite::params![prefix, format!("{prefix}\u{10FFFF}")],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )?
+            .collect();
+        rows
+    })
+}

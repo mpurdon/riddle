@@ -5,7 +5,7 @@
 //! Activity is a product surface, so a message subject may appear here; it
 //! never appears in a log line.
 
-use riddle_core::{Actor, Disposition, FindType};
+use riddle_core::{plural, Actor, Disposition, FindType};
 
 /// The subject of the sentence.
 pub fn actor_name(actor: Actor) -> &'static str {
@@ -82,16 +82,6 @@ impl<'a> Sentence<'a> {
     }
     pub fn render(&self) -> String {
         sentence(self)
-    }
-}
-
-fn plural(n: usize, noun: &str) -> String {
-    if n == 1 {
-        format!("1 {noun}")
-    } else if noun == "Mesh" {
-        format!("{n} Meshes")
-    } else {
-        format!("{n} {noun}s")
     }
 }
 
@@ -178,6 +168,7 @@ pub fn sentence(s: &Sentence) -> String {
         "pause_job" => format!("paused {}", named(s, "job")),
         "resume_job" => format!("resumed {}", named(s, "job")),
         "arm_dev" => "armed the dev build".to_string(),
+        "set_mailbox_writes" => "changed what the dev build writes to the mailbox".to_string(),
         other => {
             let verb = other.replace('_', " ");
             if s.names.is_empty() && s.count == 0 {

@@ -59,12 +59,12 @@ pub fn cap(text: &str, max: usize) -> (String, bool) {
     if text.len() <= max {
         return (text.to_string(), false);
     }
-    let mut end = max;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    (text[..end].to_string(), true)
+    (text[..floor_char_boundary(text, max)].to_string(), true)
 }
+
+/// The largest char boundary at or below `max` bytes. Every byte cut of
+/// mail text goes through this: a cut inside a multi-byte character panics.
+pub use riddle_core::floor_char_boundary;
 
 fn re(cell: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {
     cell.get_or_init(|| Regex::new(pattern).expect("static regex"))
@@ -100,7 +100,11 @@ pub fn decode_entities(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         let tail = &rest[i..];
-        let Some(semi) = tail[..tail.len().min(12)].find(';') else {
+        // Entities are short, so look for the `;` in the next 12 bytes, cut
+        // on a char boundary: real mail puts accents and emoji right after a
+        // bare `&`, and a byte cut inside one panicked the first Gmail sync.
+        let window = floor_char_boundary(tail, 12);
+        let Some(semi) = tail[..window].find(';') else {
             out.push('&');
             rest = &rest[i + 1..];
             continue;
@@ -292,7 +296,13 @@ pub fn strip_signature(text: &str) -> (String, bool) {
     (text.to_string(), false)
 }
 
-/// Stopword scoring across en/es/fr/de/pt. Short or unclear text is "en".
+/// Stopword scoring across en/es/fr/de/pt. English unless another language
+/// is plain: mail with real English in it is English, including the half
+/// English, half French mail governments in Canada send, and a message is
+/// called something else only on strong evidence. Links and addresses are
+/// not words: a sale email with fifty `….com/…` links and no sentences was
+/// "Portuguese" on the strength of `com`, and Sift held every one of them
+/// for escalation (742 messages on the mailbox that showed it).
 pub fn detect_language(text: &str) -> &'static str {
     const EN: &[&str] = &[
         "the", "and", "you", "that", "for", "with", "this", "have", "are", "not", "your", "from",
@@ -314,10 +324,20 @@ pub fn detect_language(text: &str) -> &'static str {
         "que", "não", "para", "com", "uma", "por", "você", "mais", "como", "obrigado", "isso",
         "são", "está", "também", "seu", "sua", "nós", "muito", "pelo", "ela",
     ];
+    let is_link = |t: &str| {
+        t.contains("://")
+            || t.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("www."))
+            || t.contains('@')
+            || t.split('.').filter(|p| !p.is_empty()).count() >= 2
+                && t.chars().any(|c| c == '.' || c == '/')
+                && !t.ends_with('.')
+    };
     let mut scores = [0usize; 5];
     let mut words = 0usize;
     for w in text
-        .split(|c: char| !c.is_alphabetic())
+        .split_whitespace()
+        .filter(|t| !is_link(t))
+        .flat_map(|t| t.split(|c: char| !c.is_alphabetic()))
         .filter(|w| !w.is_empty())
     {
         let w = w.to_lowercase();
@@ -336,13 +356,15 @@ pub fn detect_language(text: &str) -> &'static str {
         .enumerate()
         .max_by_key(|(_, s)| **s)
         .unwrap_or((0, &0));
-    if *best == 0 || words < 3 {
+    let english = scores[0];
+    if words < 3 || (english >= 3 && english * 10 >= *best * 3) {
         return "en";
     }
-    // Spanish and Portuguese share "que"/"para"/"com"; require a margin over the runner-up.
+    // Strong evidence only: five hits, and twice the runner-up (Spanish and
+    // Portuguese share "que"/"para"; French and Spanish share "que").
     let mut sorted = scores;
     sorted.sort_unstable_by(|a, b| b.cmp(a));
-    if sorted[0] == sorted[1] {
+    if *best < 5 || *best < sorted[1] * 2 {
         return "en";
     }
     ["en", "es", "fr", "de", "pt"][best_i]
@@ -382,7 +404,7 @@ pub fn has_structured_receipt(m: &Message) -> bool {
     kw.is_match(&m.subject)
         || m.body_text
             .as_deref()
-            .is_some_and(|t| kw.is_match(&t[..t.len().min(4000)]))
+            .is_some_and(|t| kw.is_match(&t[..floor_char_boundary(t, 4000)]))
         || kw.is_match(&m.snippet)
 }
 
@@ -400,6 +422,24 @@ pub fn asks_for_payment_or_credentials(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_byte_cut_never_lands_inside_a_character() {
+        let t = "é".repeat(3000);
+        let end = floor_char_boundary(&t, 4001);
+        assert_eq!(end, 4000);
+        assert_eq!(floor_char_boundary("ab", 10), 2);
+    }
+
+    #[test]
+    fn an_ampersand_before_accented_text_does_not_split_a_character() {
+        assert_eq!(decode_entities("Tom & Jérôme fêté"), "Tom & Jérôme fêté");
+        assert_eq!(decode_entities("&ééééééé;"), "&ééééééé;");
+        assert_eq!(
+            decode_entities("R&D 🚀🚀🚀 &amp; more"),
+            "R&D 🚀🚀🚀 & more"
+        );
+    }
+
     use super::*;
 
     #[test]
@@ -480,6 +520,29 @@ mod tests {
             "en"
         );
         assert_eq!(detect_language("42"), "en");
+    }
+
+    #[test]
+    fn links_are_not_words_and_a_sale_email_full_of_them_is_english() {
+        let links = "https://firearmsoutletcanada.com/henry-rifles www.firearmsoutletcanada.com/sale sales@firearmsoutletcanada.com firearmsoutletcanada.com/tm22 ".repeat(15);
+        let sale = format!("SURPLUS SUNDAY Has Arrived! TM22 $499.99 Henry Big Boy $1,249 {links}");
+        assert_eq!(detect_language(&sale), "en");
+    }
+
+    #[test]
+    fn bilingual_government_mail_is_english_and_other_languages_need_plain_evidence() {
+        let both = "Your licence renewal is due. Please renew it before the date shown. \
+                    Votre permis doit être renouvelé. Veuillez le renouveler avant la date indiquée, merci pour votre attention dans les délais.";
+        assert_eq!(detect_language(both), "en");
+        assert_eq!(
+            detect_language("Bonjour, merci pour votre message. Nous sommes dans les temps pour la livraison, avec plus de détails dans cette note."),
+            "fr"
+        );
+        assert_eq!(
+            detect_language("que para una"),
+            "en",
+            "three stray words are not Spanish"
+        );
     }
 
     #[test]

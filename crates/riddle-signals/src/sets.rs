@@ -69,7 +69,6 @@ impl SetId {
                 "acknowledges_cancellation",
             ],
             SetId::HumanCorrespondence => &[
-                "human_authored",
                 "requires_response",
                 "requires_action",
                 "direct_request",
@@ -92,7 +91,6 @@ impl SetId {
             ],
             SetId::Security => &["security_alert", "account_notification"],
             SetId::Baseline => &[
-                "human_authored",
                 "routine",
                 "novel",
                 "marketing",
@@ -219,10 +217,7 @@ fn truncate_to_tokens(s: &str, tokens: u32) -> String {
     if s.len() <= max_chars {
         return s.to_string();
     }
-    let mut end = max_chars;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = riddle_core::floor_char_boundary(s, max_chars);
     format!("{}\n[truncated]", &s[..end])
 }
 

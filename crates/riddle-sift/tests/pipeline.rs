@@ -90,8 +90,28 @@ fn github_review_request() -> Message {
     m
 }
 
+/// A GitHub notification that says why it was sent. Older mail carries the
+/// reason only in the footer, which is what this fixture has.
+fn github_comment() -> Message {
+    let template = github_review_request();
+    let mut m = message(
+        "gh2",
+        "notifications@github.com",
+        "Re: [acme/sync] Add retry to sync worker (PR #482)",
+        "@someone left a comment on: acme/sync#482 Add retry to the sync worker.\n\nYou are receiving this because you commented.\nReply to this email directly, view it on GitHub, or unsubscribe.",
+    );
+    m.headers = MessageHeaders {
+        message_id: Some("<gh2@example>".into()),
+        ..template.headers
+    };
+    m
+}
+
 /// §2: the doc's GitHub example becomes Find: Review through the default
-/// GitHub Mesh, with a fully populated trace.
+/// GitHub Mesh. The review request says so in its header or footer, so the
+/// decision is a fact's and asks the judge nothing; a comment on a thread
+/// asks the judge whether a reply is needed, and that trace is fully
+/// populated.
 #[tokio::test]
 async fn the_github_review_request_becomes_a_review_find_with_a_full_trace() {
     let judge = Arc::new(ScriptedJudge::new());
@@ -114,7 +134,11 @@ async fn the_github_review_request_becomes_a_review_find_with_a_full_trace() {
         "{}",
         outcome.classification.reason
     );
-    assert_eq!(outcome.classification.mechanism, DecisionMechanism::Mesh);
+    assert_eq!(
+        outcome.classification.mechanism,
+        DecisionMechanism::Deterministic,
+        "a header states it; no Signal was asked"
+    );
     assert_eq!(
         outcome.trace.mesh_name.as_deref(),
         Some("GitHub Notifications")
@@ -124,22 +148,20 @@ async fn the_github_review_request_becomes_a_review_find_with_a_full_trace() {
         .matched_rule
         .as_deref()
         .unwrap()
-        .contains("review_requested@v1 > .80"));
+        .contains("github_reason = review_requested"));
+    // The reason is the route in words, read against this message.
+    assert_eq!(
+        outcome.classification.reason,
+        "It appears the sender's domain is github.com and the GitHub notification reason is review_requested, so it is something to review under Engineering."
+    );
     assert!(outcome
         .classification
         .strata
         .contains(&"Engineering".to_string()));
-    assert!(!outcome.trace.signals.is_empty());
-    assert!(outcome.trace.signals.iter().all(|s| !s.cached));
-    assert_eq!(
-        outcome.trace.judge_identity.as_deref(),
-        Some("scripted:scripted-1")
-    );
-    assert!(outcome.trace.cost.judge_questions > 0);
-    assert!(outcome.trace.cost.judge_cost_usd.is_some());
+    // (Signal Selection still asks the judge for the Meshes in scope before
+    // routing; the decision itself used none of the answers.)
     assert!(outcome.trace.build_stamp.starts_with("abc123"));
     assert_eq!(outcome.trace.app_version, "0.1.0-test");
-    assert!(outcome.note.contains("needed a fresh evaluation"));
     let find = outcome.find.clone().expect("a Find proposal");
     assert_eq!(find.find_type, FindType::Review);
     assert_eq!(find.identity_key, "<gh1@example>");
@@ -149,6 +171,30 @@ async fn the_github_review_request_becomes_a_review_find_with_a_full_trace() {
         find.priority
     );
 
+    // A comment on a thread you are in asks the judge, and the trace says so.
+    let commented = sift
+        .run(input(github_comment(), PeopleFacts::default()))
+        .await
+        .unwrap();
+    assert!(!commented.trace.signals.is_empty());
+    assert!(commented.trace.signals.iter().all(|s| !s.cached));
+    assert_eq!(
+        commented.trace.judge_identity.as_deref(),
+        Some("scripted:scripted-1")
+    );
+    assert!(commented.trace.cost.judge_questions > 0);
+    assert!(commented.trace.cost.judge_cost_usd.is_some());
+    assert!(commented.note.contains("needed a fresh evaluation"));
+    assert!(
+        !matches!(
+            commented.classification.disposition,
+            Disposition::Spoil | Disposition::Contamination
+        ),
+        "{:?}: {}",
+        commented.classification.disposition,
+        commented.classification.reason
+    );
+
     // Persist, then the "Why?" answer comes from the stored trace.
     let proposal = sift.persist(&mut outcome).unwrap();
     assert!(proposal.is_some());
@@ -156,9 +202,9 @@ async fn the_github_review_request_becomes_a_review_find_with_a_full_trace() {
     let why = explain(&store, &outcome.classification.message_id).unwrap();
     assert_eq!(why.mesh_name.as_deref(), Some("GitHub Notifications"));
     assert!(why
-        .signals
-        .iter()
-        .any(|s| s.name == "review_requested" && s.score > 0.9));
+        .matched
+        .as_deref()
+        .is_some_and(|m| m.contains("github_reason = review_requested")));
     assert!(repo::facts::get(&store, &outcome.classification.message_id)
         .unwrap()
         .is_some());
@@ -308,16 +354,32 @@ async fn judge_unavailable_means_unresolved_and_nothing_hidden() {
             .strata
             .contains(&"Receipts".to_string()));
     }
-    // An outage mid-run (the judge answers unavailable) behaves the same.
+    // An outage mid-run (the judge answers unavailable) behaves the same for
+    // mail that needs a Signal; mail a fact decides is still decided.
     let judge = Arc::new(ScriptedJudge::new());
     judge.set_unavailable(true);
     let (sift, _, _) = harness(Some(judge));
-    let outcome = sift
+    let mut nl = message(
+        "nl3",
+        "weekly@othernews.example",
+        "Deals this week",
+        "Sale! 50% off. Unsubscribe.",
+    );
+    nl.headers.list_unsubscribe = Some("<mailto:x>".into());
+    let outcome = sift.run(input(nl, PeopleFacts::default())).await.unwrap();
+    assert_eq!(outcome.classification.disposition, Disposition::Unresolved);
+    assert!(outcome.classification.reason.contains("judge unavailable"));
+    let review = sift
         .run(input(github_review_request(), PeopleFacts::default()))
         .await
         .unwrap();
-    assert_eq!(outcome.classification.disposition, Disposition::Unresolved);
-    assert!(outcome.classification.reason.contains("judge unavailable"));
+    assert_eq!(
+        review.classification.disposition,
+        Disposition::Find {
+            find_type: FindType::Review
+        },
+        "a review request is decided by its header, judge or no judge"
+    );
 }
 
 struct FlipRefiner {
@@ -432,7 +494,15 @@ async fn escalation_with_a_scripted_refiner_flips_a_signal_and_the_mesh_decides_
 /// §41: a Find from an unknown sender needs a deterministic supporting fact.
 #[tokio::test]
 async fn a_find_from_an_unknown_sender_needs_deterministic_support() {
-    let (sift, _, _) = harness(Some(Arc::new(ScriptedJudge::new())));
+    let (sift, stores, _) = harness(Some(Arc::new(ScriptedJudge::new())));
+    // The default people rule decides only senders the user knows, so a
+    // rule that would make a stranger's ask a Find is written here.
+    let mut asks = riddle_mesh::parse::parse(
+        "Mesh: Asks\nPriority: 60\nROUTES\nIF requires_response@v1 > .60 → Find: Respond",
+    )
+    .unwrap();
+    asks.status = MeshStatus::Active;
+    riddle_store::repo::meshes::upsert(&stores.index(), &asks).unwrap();
     let mut m = message(
         "st1",
         "stranger@unknown.example",

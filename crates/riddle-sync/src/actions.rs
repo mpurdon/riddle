@@ -25,16 +25,16 @@ impl Action for RefreshNow {
         let dig: Option<DigId> = opt(&args, "digId")?;
         let dig = dig.or_else(|| ctx.dig_id.clone());
         let triggers = ctx.services.require::<RefreshTriggers>()?;
-        let woken = triggers.trigger(dig.as_ref());
-        let mut r = ActionResult::ok(
-            json!({"woken": woken}),
-            if woken == 1 {
-                "Refreshing".to_string()
-            } else {
-                format!("Refreshing {woken} Digs")
-            },
-        )
-        .with_inputs(json!({"digId": dig}));
+        let heard = triggers.trigger(dig.as_ref());
+        let summary = match (heard, &dig) {
+            (true, Some(_)) => "Syncing now".to_string(),
+            (true, None) => "Syncing all accounts now".to_string(),
+            // A CLI without background work has no drain task; say so
+            // rather than reporting a sync that will not happen.
+            (false, _) => "Sync requested, but nothing is listening in this process".to_string(),
+        };
+        let mut r = ActionResult::ok(json!({"digId": dig, "heard": heard}), summary)
+            .with_inputs(json!({"digId": dig}));
         r.undo = riddle_core::UndoInfo::NotUndoable {
             reason: "a refresh only reads".into(),
         };

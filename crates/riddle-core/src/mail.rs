@@ -59,6 +59,11 @@ pub struct AuthenticationResults {
     pub dmarc: AuthVerdict,
 }
 
+/// Provider headers Riddle keeps in `MessageHeaders::extra` so Meshes can
+/// test them with `header <Name>`. Metadata fetches name headers
+/// explicitly, so a header not listed here never arrives.
+pub const KEPT_HEADERS: &[&str] = &["X-GitHub-Reason", "X-GitHub-Sender", "X-GitHub-Severity"];
+
 /// The headers Sift reads. Kept as a struct, not a map, so the deterministic
 /// facts vocabulary is checkable at compile time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
@@ -74,6 +79,12 @@ pub struct MessageHeaders {
     pub auto_submitted: Option<String>,
     pub reply_to: Option<Address>,
     pub authentication: AuthenticationResults,
+    /// Headers kept for rules beyond the fixed ones above (`KEPT_HEADERS`),
+    /// keyed lowercase. GitHub states what a notification is about in
+    /// `X-GitHub-Reason`; without it a rule had to ask a Signal.
+    #[serde(default)]
+    #[ts(type = "Record<string, string>")]
+    pub extra: std::collections::BTreeMap<String, String>,
 }
 
 /// A message as synced from the provider, with bodies fetched lazily.
@@ -123,6 +134,50 @@ pub struct MessageSummary {
     pub disposition: Option<crate::classification::Disposition>,
     pub strata: Vec<String>,
     pub find_id: Option<crate::ids::FindId>,
+    /// True when `disposition` is a Shadow proposal (listed with
+    /// `include_shadow`), not a decision that applied.
+    #[serde(default)]
+    pub shadow: bool,
+    /// The user's review of the Shadow proposal, when they gave one.
+    #[serde(default)]
+    pub shadow_review: Option<ShadowReview>,
+    /// A newer message of the same `+ Replaces` series (a store's next sale)
+    /// made this one moot: it reads as read and sinks below its list.
+    #[serde(default)]
+    #[ts(optional)]
+    pub superseded_by: Option<MessageId>,
+    /// The level the message has: the user's own when they set one,
+    /// otherwise the decision's.
+    #[serde(default)]
+    pub importance: crate::importance::Importance,
+    /// True when `importance` is the user's own setting for this message.
+    #[serde(default)]
+    pub importance_set_by_you: bool,
+}
+
+/// What the user said about a Shadow proposal (`review_shadow`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ShadowReview {
+    Agreed,
+    Disagreed,
+}
+
+impl ShadowReview {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShadowReview::Agreed => "agreed",
+            ShadowReview::Disagreed => "disagreed",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "agreed" => Some(ShadowReview::Agreed),
+            "disagreed" => Some(ShadowReview::Disagreed),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

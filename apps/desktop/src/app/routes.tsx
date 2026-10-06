@@ -5,12 +5,15 @@ import { Shell } from './shell/Shell'
 const SummaryPage = lazy(() => import('@/features/summary/SummaryPage'))
 const FindsPage = lazy(() => import('@/features/finds/FindsPage'))
 const UnresolvedPage = lazy(() => import('@/features/finds/UnresolvedPage'))
+const PriorityPage = lazy(() => import('@/features/priority/PriorityPage'))
 const InboxPage = lazy(() => import('@/features/messages/InboxPage'))
 const MessagePage = lazy(() => import('@/features/messages/MessagePage'))
 const SpoilPage = lazy(() => import('@/features/messages/SpoilPage'))
 const ContaminationPage = lazy(() => import('@/features/messages/ContaminationPage'))
 const StrataPage = lazy(() => import('@/features/strata/StrataPage'))
 const MeshesPage = lazy(() => import('@/features/meshes/MeshesPage'))
+const PacksPage = lazy(() => import('@/features/packs/PacksPage'))
+const RuleCheckPage = lazy(() => import('@/features/packs/RuleCheckPage'))
 const SignalsPage = lazy(() => import('@/features/signals/SignalsPage'))
 const ActivityPage = lazy(() => import('@/features/activity/ActivityPage'))
 const DirectorPage = lazy(() => import('@/features/director/DirectorPage'))
@@ -29,6 +32,7 @@ export const router = createHashRouter([
       { path: 'finds', element: <S><FindsPage /></S> },
       { path: 'finds/:findId', element: <S><FindsPage /></S> },
       { path: 'unresolved', element: <S><UnresolvedPage /></S> },
+      { path: 'priority', element: <S><PriorityPage /></S> },
       { path: 'inbox', element: <S><InboxPage /></S> },
       { path: 'inbox/:digId/:messageId', element: <S><MessagePage /></S> },
       { path: 'spoil', element: <S><SpoilPage /></S> },
@@ -36,6 +40,8 @@ export const router = createHashRouter([
       { path: 'strata', element: <S><StrataPage /></S> },
       { path: 'meshes', element: <S><MeshesPage /></S> },
       { path: 'meshes/:meshId', element: <S><MeshesPage /></S> },
+      { path: 'packs', element: <S><PacksPage /></S> },
+      { path: 'check', element: <S><RuleCheckPage /></S> },
       { path: 'signals', element: <S><SignalsPage /></S> },
       { path: 'signals/:name', element: <S><SignalsPage /></S> },
       { path: 'activity', element: <S><ActivityPage /></S> },

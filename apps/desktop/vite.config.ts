@@ -9,8 +9,10 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
-  server: { port: 1430, strictPort: true, host: '127.0.0.1' },
+  // The shared Mesh grammar corpus lives with the Rust parser; the mock's
+  // test reads it from there (src/lib/mocks/dsl.grammar.test.ts).
+  server: { port: 1430, strictPort: true, host: '127.0.0.1', fs: { allow: ['.', '../../crates/riddle-mesh/tests'] } },
   envPrefix: ['VITE_', 'TAURI_ENV_'],
   build: { target: 'safari16', sourcemap: true },
-  test: { environment: 'jsdom', globals: false, include: ['src/**/*.test.{ts,tsx}'] },
+  test: { environment: 'jsdom', globals: false, include: ['src/**/*.test.{ts,tsx}'], setupFiles: ['src/vitest.setup.ts'], testTimeout: 20_000 },
 })

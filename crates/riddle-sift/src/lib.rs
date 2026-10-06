@@ -20,6 +20,7 @@
 //! structured telemetry (§92).
 
 pub mod actions;
+pub mod expiry;
 pub mod explain;
 pub mod facts;
 pub mod gates;
@@ -75,6 +76,8 @@ pub struct PeopleFacts {
     pub auth_failures: u32,
     pub spam_verdicts: u32,
     pub relationship_strength: f64,
+    pub cadence: Option<riddle_core::Cadence>,
+    pub on_schedule: bool,
 }
 
 impl PeopleFacts {
@@ -93,6 +96,8 @@ impl PeopleFacts {
                 auth_failures: p.auth_failures,
                 spam_verdicts: p.spam_verdicts,
                 relationship_strength: p.relationship_strength,
+                cadence: p.cadence,
+                on_schedule: p.on_schedule,
             },
         }
     }
@@ -180,14 +185,11 @@ impl SiftInput {
 #[derive(Debug, Clone)]
 pub struct SiftOptions {
     pub token_budget: u32,
-    /// Required margin of the weakest winning Signal above its threshold,
-    /// per disposition (§39: thresholds vary by decision).
-    pub margin_spoil: f64,
-    pub margin_find: f64,
-    pub margin_filed: f64,
-    pub margin_contamination: f64,
-    /// Non-English mail escalates before any disposition is accepted (§18).
-    pub escalate_non_english: bool,
+    /// The confidence policy: the margin the weakest winning Signal must
+    /// clear above its threshold, per disposition (§39), and whether
+    /// non-English mail is held for escalation (§18). It is the simulator's
+    /// own type, so a preview never promises what Sift would hold back.
+    pub policy: riddle_mesh::ConfidencePolicy,
     pub objective: String,
 }
 
@@ -195,11 +197,7 @@ impl Default for SiftOptions {
     fn default() -> Self {
         Self {
             token_budget: 2_000,
-            margin_spoil: 0.15,
-            margin_find: 0.05,
-            margin_filed: 0.05,
-            margin_contamination: 0.25,
-            escalate_non_english: true,
+            policy: riddle_mesh::ConfidencePolicy::default(),
             objective: "classify the message and decide whether it deserves attention".into(),
         }
     }
@@ -228,6 +226,9 @@ pub struct SiftOutcome {
     pub note: String,
     /// Per-Set state truncation, for the Raw Jev Inspector.
     pub truncated: Vec<String>,
+    /// Messages of this decision's `+ Replaces` series it made moot; filled
+    /// by `persist`.
+    pub superseded: Vec<MessageId>,
 }
 
 pub struct Sift {

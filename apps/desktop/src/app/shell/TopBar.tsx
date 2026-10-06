@@ -2,6 +2,7 @@ import { HelpCircle, PenSquare } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
 import { useDevInfo } from '@/lib/queries'
+import { keyHint } from '@/lib/shortcuts'
 import { useUi } from '@/lib/stores'
 import { DigSwitcher } from './DigSwitcher'
 import { SearchBox } from './SearchBox'
@@ -34,7 +35,14 @@ export function TopBar() {
         Compose
       </Button>
       <TaskCentrePopover />
-      <Button size="sm" variant="ghost" icon={<HelpCircle />} onClick={() => setHelpOpen(true)} title="Keyboard help (?)" aria-label="Keyboard help">
+      <Button
+        size="sm"
+        variant="ghost"
+        icon={<HelpCircle />}
+        onClick={() => setHelpOpen(true)}
+        title={`Keyboard help (${keyHint('help')}) · Command palette (${keyHint('palette')})`}
+        aria-label="Keyboard help"
+      >
         ?
       </Button>
     </header>
