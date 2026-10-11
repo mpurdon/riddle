@@ -79,3 +79,65 @@ async fn a_failing_sync_shows_on_the_account_and_a_sync_that_gets_through_clears
         other => panic!("expected SyncFailing, got {other:?}"),
     }
 }
+
+/// A refused Gmail sign-in with no OAuth client configured is a missing
+/// setup, not an expired sign-in: "Sign in again" could only fail the same
+/// way. Saving a client clears it so Sync now runs at once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_missing_gmail_client_reads_as_not_set_up_until_one_is_saved() {
+    let (app, ops) = common::boot_scripted(false, |s| s.gmail.client_id = String::new()).await;
+    let fixture =
+        common::fixture_dig_synced(&app, &ops, "Personal", "me@gmail.com", 7, 5, json!({})).await;
+    // The same account as a Gmail one, without its sign-in ever working here.
+    let gmail = Dig {
+        provider: ProviderKind::Gmail,
+        ..app.dig(&fixture.id).unwrap()
+    };
+    repo::digs::upsert(&app.stores.index(), &gmail).unwrap();
+
+    app.record_sync_result(&gmail.id, Some(ErrorKind::ProviderAuth));
+    match app.dig(&gmail.id).unwrap().status {
+        DigStatus::SyncFailing { failure, .. } => assert_eq!(failure, SyncFailure::NotSetUp),
+        other => panic!("expected SyncFailing, got {other:?}"),
+    }
+    let err = app
+        .runtime
+        .invoke_as_user("refresh_now", json!({ "digId": gmail.id }))
+        .await
+        .unwrap_err();
+    assert!(
+        err.message.contains("client id is missing"),
+        "{}",
+        err.message
+    );
+
+    let mut settings = app
+        .services
+        .require::<riddle_settings::SettingsStore>()
+        .unwrap()
+        .settings();
+    settings.gmail.client_id = "1234-abc.apps.googleusercontent.com".into();
+    app.runtime
+        .invoke(ActionInvocation {
+            action: "save_settings".into(),
+            args: json!({ "settings": settings }),
+            principal: Principal::User,
+            dig_id: None,
+            idempotency_key: None,
+            confirmed: true,
+            pending_id: None,
+        })
+        .await
+        .unwrap();
+    // The settings watcher applies the change; wait for it to clear.
+    for _ in 0..50 {
+        if !matches!(
+            app.dig(&gmail.id).unwrap().status,
+            DigStatus::SyncFailing { .. }
+        ) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("saving a client did not clear \"not set up\"");
+}

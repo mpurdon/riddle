@@ -86,3 +86,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 27 | feat: rule packs, importance, sign-in codes, failed payments, Hold/Ask/Allow mailbox writes | 19961 | 3937814 | 1489649746 | 4134 | 56 |
 | 28 | feat: Community and Creators, ahead of Payments and Social | 92 | 18892 | 11793370 | 23 | 0 |
 | 29 | feat: say when an account is not syncing; Labels page with Gmail label names | 6896 | 52147 | 40119484 | 70 | 0 |
+| 30 | fix: say when Gmail sign-in is not set up; signing in is not a mailbox write | 70 | 21372 | 28622247 | 45 | 0 |

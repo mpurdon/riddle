@@ -48,6 +48,25 @@ impl App {
             if let Some(factory) = self.services.get::<riddle_gmail::GmailProviderFactory>() {
                 factory.set_config(gmail_config(next));
             }
+            // A client is set up now: "not set up" is history, so Sync now
+            // runs instead of refusing until the next poll.
+            for dig in self.list_all_digs().unwrap_or_default() {
+                let Ok(store) = self.stores.dig(&dig.id) else {
+                    continue;
+                };
+                let not_set_up = riddle_store::repo::sync_state::get(
+                    &store,
+                    riddle_store::repo::sync_state::SYNC_FAILURE,
+                )
+                .ok()
+                .flatten()
+                .is_some_and(|f| {
+                    riddle_core::SyncFailure::parse(&f) == riddle_core::SyncFailure::NotSetUp
+                });
+                if not_set_up {
+                    self.record_sync_result(&dig.id, None);
+                }
+            }
             applied.push("gmail");
         }
         if ai_config(prev) != ai_config(next) {

@@ -35,6 +35,15 @@ describe('the sync banner', () => {
     expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
   })
 
+  it('points to the setup when the OAuth client is missing', async () => {
+    resetMockState()
+    mockState().digs[0].status = { state: 'sync_failing', failure: 'not_set_up', since: new Date().toISOString(), last_synced_at: null }
+    registerMocks()
+    show()
+    expect((await screen.findByRole('alert')).textContent).toContain('the OAuth client id is missing')
+    expect(screen.getByRole('button', { name: 'Set up sign-in' })).toBeTruthy()
+  })
+
   it('offers a retry when Gmail cannot be reached', async () => {
     resetMockState()
     mockState().digs[0].status = { state: 'sync_failing', failure: 'unreachable', since: new Date().toISOString(), last_synced_at: null }

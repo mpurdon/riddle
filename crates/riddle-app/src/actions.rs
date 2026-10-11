@@ -1647,9 +1647,12 @@ pub struct ConnectGmail;
 #[async_trait]
 impl Action for ConnectGmail {
     fn meta(&self) -> ActionMeta {
+        // Not `.external()`: signing in changes nothing in the mailbox, and
+        // syncing reads it on Hold anyway. Gated with the mailbox writes, an
+        // expired sign-in on a dev build could not be renewed from its own
+        // "Sign in again" banner.
         meta("connect_gmail", "Connect a Gmail account, or sign in again")
             .mutating()
-            .external()
             .risk(Risk::High)
             .autonomy(Autonomy::Trusted)
             .build()

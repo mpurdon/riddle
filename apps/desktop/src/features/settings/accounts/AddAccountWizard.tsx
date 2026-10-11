@@ -16,13 +16,12 @@ import type { PrivacyMode } from '@/bindings/PrivacyMode'
 import type { ProjectionMode } from '@/bindings/ProjectionMode'
 import { cx } from '@/lib/format'
 import { mailboxName } from '@/lib/gmailEffect'
-import { useDevArmed, useDigGroups, useAllDigs, useSettings } from '@/lib/queries'
+import { useDigGroups, useAllDigs, useSettings } from '@/lib/queries'
 import { useAction } from '@/lib/useAction'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
 import { Field, Input } from '@/components/ui/Field'
 import { Select } from '@/components/ui/Select'
-import { HoldButton } from '@/components/confirm/HoldButton'
 import { GmailClientId, GoogleConsoleSteps, ImportGmailClient, SignInProgress, useGmailSignIn } from './GoogleClient'
 import { AUTONOMY_OPTIONS, PRIVACY_OPTIONS, PROJECTION_OPTIONS, gmailEffect } from './model'
 import { OptionCards } from './pieces'
@@ -274,8 +273,6 @@ function SetupStep({ kind, setup, onChange, groups }: { kind: Kind; setup: Setup
  * list (events.ts invalidates it) and the account is in it.
  */
 function SignIn({ setup, onConnected }: { setup: Setup; onConnected: (dig: Dig) => void }) {
-  const { run } = useAction()
-  const { dev, writes } = useDevArmed()
   const { state, start, reset } = useGmailSignIn()
   const digs = useAllDigs()
   const done = useRef(false)
@@ -288,20 +285,6 @@ function SignIn({ setup, onConnected }: { setup: Setup; onConnected: (dig: Dig) 
       onConnected(dig)
     }
   }, [digs.data, state, onConnected])
-
-  // The Action layer refuses every external call, the sign-in included,
-  // while a dev build holds mailbox writes; the wording matches the Developer page.
-  if (dev && writes === 'hold') {
-    return (
-      <div className="flex flex-col gap-3">
-        <p className="text-ink-2">This is a development build. It starts on Hold and will not talk to a real mailbox, so a test run can never touch Gmail by accident. Choose Ask to be asked before each change (the sign-in included), or Allow. A release build never asks.</p>
-        <div className="flex items-center gap-2">
-          <Button onClick={() => void run('set_mailbox_writes', { writes: 'ask' }, { successToast: 'Mailbox writes: Ask' })}>Ask before each change</Button>
-          <HoldButton label="Hold to allow" coaching="Allow lets this development build write to a real mailbox as it goes: the sign-in now, and labels in Gmail only at Act. Hold for 1.5 seconds." onComplete={() => run('set_mailbox_writes', { writes: 'allow' }, { confirmed: true, successToast: 'Mailbox writes: Allow' })} />
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="flex flex-col items-start gap-3">

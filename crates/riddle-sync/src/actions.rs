@@ -38,6 +38,11 @@ impl Action for RefreshNow {
                         "this account's sign-in has expired; sign in again under Settings → Accounts, then sync",
                     ))
                 }
+                Some(SyncFailure::NotSetUp) => {
+                    return Err(RiddleError::provider_auth(
+                        "Gmail sign-in is not set up: the OAuth client id is missing; add it under Settings → Accounts → Google sign-in",
+                    ))
+                }
                 Some(SyncFailure::AdminBlocked) => {
                     return Err(RiddleError::new(
                         riddle_errors::ErrorKind::ProviderAdminBlocked,

@@ -87,7 +87,7 @@ export const ACTIONS: Record<string, Meta> = {
   clear_secret: m('Remove a key from the OS keychain', { risk: 'medium', userOnly: true }),
   import_gmail_client: m('Import the Gmail OAuth client file from Google', { risk: 'medium', userOnly: true }),
   add_fixture_dig: m('Add a Fixture Dig'),
-  connect_gmail: m('Connect a Gmail account, or sign in again', { externalSideEffect: true, risk: 'high' }),
+  connect_gmail: m('Connect a Gmail account, or sign in again', { risk: 'high' }),
   dismiss_pending: m('Decline a pending proposal', { userOnly: true }),
   review_shadow: m('Agree or disagree with a Shadow proposal', { reversible: true, projected: true }),
   remove_dig: m('Remove a Dig and its store', { risk: 'critical', confirmation: 'type_count' }),

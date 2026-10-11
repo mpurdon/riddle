@@ -515,6 +515,28 @@ impl App {
     }
 
     /// Recompute and store a Dig's status; emit the change (§5).
+    /// Why a sync failed, from its error and the setup: a refused Gmail
+    /// sign-in with no OAuth client configured is a missing setup, not an
+    /// expired sign-in.
+    fn sync_failure_of(&self, dig_id: &DigId, kind: riddle_errors::ErrorKind) -> SyncFailure {
+        let failure = SyncFailure::from_kind(kind);
+        if failure != SyncFailure::SignIn {
+            return failure;
+        }
+        let gmail = self
+            .dig(dig_id)
+            .is_ok_and(|d| d.provider == ProviderKind::Gmail);
+        let no_client = self
+            .services
+            .get::<riddle_settings::SettingsStore>()
+            .is_some_and(|s| s.settings().gmail.client_id.trim().is_empty());
+        if gmail && no_client {
+            SyncFailure::NotSetUp
+        } else {
+            failure
+        }
+    }
+
     /// Record how a sync went, so the account can say it is not syncing.
     /// Every failure counts, not only an expired sign-in; the first one
     /// sets when it started, a sync that gets through clears it. A failure
@@ -531,7 +553,7 @@ impl App {
                     repo::sync_state::set(
                         &store,
                         SYNC_FAILURE,
-                        SyncFailure::from_kind(kind).as_str(),
+                        self.sync_failure_of(dig_id, kind).as_str(),
                     )?;
                     Ok(true)
                 }

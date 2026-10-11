@@ -46,6 +46,10 @@ pub enum ProjectionMode {
 pub enum SyncFailure {
     /// The provider refuses the account's sign-in: sign in again.
     SignIn,
+    /// Sign-in cannot work at all: the app has no OAuth client to sign in
+    /// with. A wiped client id read as an expired sign-in, and "Sign in
+    /// again" could only fail the same way.
+    NotSetUp,
     /// A Workspace administrator blocks Riddle.
     AdminBlocked,
     /// The provider asked Riddle to slow down.
@@ -71,6 +75,7 @@ impl SyncFailure {
     pub fn as_str(self) -> &'static str {
         match self {
             SyncFailure::SignIn => "sign_in",
+            SyncFailure::NotSetUp => "not_set_up",
             SyncFailure::AdminBlocked => "admin_blocked",
             SyncFailure::RateLimited => "rate_limited",
             SyncFailure::Unreachable => "unreachable",
@@ -81,6 +86,7 @@ impl SyncFailure {
     pub fn parse(s: &str) -> Self {
         match s {
             "sign_in" => SyncFailure::SignIn,
+            "not_set_up" => SyncFailure::NotSetUp,
             "admin_blocked" => SyncFailure::AdminBlocked,
             "rate_limited" => SyncFailure::RateLimited,
             "unreachable" => SyncFailure::Unreachable,
@@ -102,6 +108,7 @@ impl SyncFailure {
     pub fn sentence(self) -> &'static str {
         match self {
             SyncFailure::SignIn => "the sign-in has expired; sign in again to resume syncing",
+            SyncFailure::NotSetUp => "Gmail sign-in is not set up: the OAuth client id is missing; add it under Settings → Accounts → Google sign-in",
             SyncFailure::AdminBlocked => {
                 "a Workspace administrator blocks Riddle from this account"
             }

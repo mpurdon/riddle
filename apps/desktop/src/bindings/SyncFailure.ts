@@ -3,4 +3,4 @@
 /**
  * Why an account is not syncing.
  */
-export type SyncFailure = "sign_in" | "admin_blocked" | "rate_limited" | "unreachable" | "other";
+export type SyncFailure = "sign_in" | "not_set_up" | "admin_blocked" | "rate_limited" | "unreachable" | "other";

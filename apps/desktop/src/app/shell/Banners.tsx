@@ -57,15 +57,15 @@ export function Banners() {
       {failing.map((d) =>
         d.status.state === 'sync_failing' ? (
           <div key={d.id} role="alert" className="flex items-center justify-between gap-3 border-b border-rust/40 bg-rust/10 px-4 py-1.5 text-sm">
-            <span>
+            <span className="min-w-0 flex-1">
               <span className="font-semibold text-rust">{d.name} is not syncing:</span> {syncFailureLine(d.status.failure)}; {lastSyncedPhrase(d.status.last_synced_at)}.
             </span>
-            {d.status.failure === 'sign_in' || d.status.failure === 'admin_blocked' ? (
-              <Button size="sm" variant="primary" onClick={() => nav('/settings#digs')}>
-                {d.status.failure === 'sign_in' ? 'Sign in again' : 'Open the account'}
+            {d.status.failure === 'sign_in' || d.status.failure === 'admin_blocked' || d.status.failure === 'not_set_up' ? (
+              <Button size="sm" variant="primary" className="shrink-0" onClick={() => nav('/settings#digs')}>
+                {d.status.failure === 'sign_in' ? 'Sign in again' : d.status.failure === 'not_set_up' ? 'Set up sign-in' : 'Open the account'}
               </Button>
             ) : (
-              <Button size="sm" onClick={() => void run('refresh_now', { digId: d.id }, { digId: d.id })}>
+              <Button size="sm" className="shrink-0" onClick={() => void run('refresh_now', { digId: d.id }, { digId: d.id })}>
                 Retry now
               </Button>
             )}

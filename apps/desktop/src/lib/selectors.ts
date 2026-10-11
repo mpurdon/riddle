@@ -31,6 +31,8 @@ export function syncFailureLine(f: SyncFailure): string {
   switch (f) {
     case 'sign_in':
       return 'the sign-in has expired; sign in again to resume syncing'
+    case 'not_set_up':
+      return 'Gmail sign-in is not set up: the OAuth client id is missing; add it under Settings → Accounts → Google sign-in'
     case 'admin_blocked':
       return 'a Workspace administrator blocks Riddle from this account'
     case 'rate_limited':
@@ -61,7 +63,7 @@ export function digStatusChip(s: DigStatus): Chip {
     case 'degraded':
       return { label: 'Degraded', tone: 'bad', title: `${s.reason}. Nothing is hidden while degraded.` }
     case 'sync_failing':
-      return { label: s.failure === 'sign_in' ? 'Sign-in expired' : 'Not syncing', tone: 'bad', title: `Not syncing: ${syncFailureLine(s.failure)}; ${lastSyncedPhrase(s.last_synced_at)}.` }
+      return { label: s.failure === 'sign_in' ? 'Sign-in expired' : s.failure === 'not_set_up' ? 'Sign-in not set up' : 'Not syncing', tone: 'bad', title: `Not syncing: ${syncFailureLine(s.failure)}; ${lastSyncedPhrase(s.last_synced_at)}.` }
     case 'shadow':
       return { label: `Shadow day ${s.day}`, tone: 'neutral', title: `Shadow Period day ${s.day} of ${s.of}: Riddle proposes, the inbox is untouched` }
     case 'not_connected':
