@@ -235,6 +235,14 @@ pub async fn get_user_profile(state: State<'_, AppState>) -> Result<UserProfile>
 }
 
 #[tauri::command]
+pub async fn list_labels(
+    state: State<'_, AppState>,
+    dig_id: Option<DigId>,
+) -> Result<Vec<LabelSummary>> {
+    state.app.list_labels(dig_id.as_ref())
+}
+
+#[tauri::command]
 pub async fn read_trace(
     state: State<'_, AppState>,
     dig_id: DigId,

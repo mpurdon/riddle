@@ -1,0 +1,45 @@
+/**
+ * An account that is not syncing says so in a banner that stays until it
+ * syncs again, with the one thing to do: sign in again, or retry.
+ */
+import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
+import { mockState, registerMocks, resetMockState } from '@/lib/mocks'
+import { TooltipProvider } from '@/components/ui/Tooltip'
+import { Banners } from './Banners'
+
+afterEach(() => cleanup())
+
+function show() {
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <TooltipProvider>
+        <MemoryRouter>
+          <Banners />
+        </MemoryRouter>
+      </TooltipProvider>
+    </QueryClientProvider>,
+  )
+}
+
+describe('the sync banner', () => {
+  it('asks to sign in again when the sign-in has expired', async () => {
+    resetMockState()
+    const d = mockState().digs[0]
+    d.status = { state: 'sync_failing', failure: 'sign_in', since: new Date().toISOString(), last_synced_at: '2026-09-27T17:24:01Z' }
+    registerMocks()
+    show()
+    expect((await screen.findByRole('alert')).textContent).toContain(`${d.name} is not syncing: the sign-in has expired`)
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
+  })
+
+  it('offers a retry when Gmail cannot be reached', async () => {
+    resetMockState()
+    mockState().digs[0].status = { state: 'sync_failing', failure: 'unreachable', since: new Date().toISOString(), last_synced_at: null }
+    registerMocks()
+    show()
+    expect(await screen.findByRole('button', { name: 'Retry now' })).toBeTruthy()
+  })
+})

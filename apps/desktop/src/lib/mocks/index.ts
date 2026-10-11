@@ -80,6 +80,27 @@ export function registerMocks(): void {
   })
   mock('signal_versions', (a) => state.signals.filter((s) => s.name === a.name).sort((x, y) => y.version - x.version))
   mock('signal_evaluations', (a) => state.traces.get(`tr_${str(a, 'messageId')}`)?.signals ?? [])
+  mock('list_labels', (a) => {
+    // The fixture's labels are their own names; counts come from the mail.
+    const out: { digId: string; id: string; name: string; kind: string; messages: number; unread: number }[] = []
+    for (const d of state.digs.filter((x) => !a.digId || x.id === a.digId)) {
+      const counts = new Map<string, [number, number]>()
+      for (const m of state.messages.filter((x) => x.digId === d.id)) {
+        for (const l of m.labels) {
+          const c = counts.get(l) ?? [0, 0]
+          c[0]++
+          if (m.labels.includes('UNREAD')) c[1]++
+          counts.set(l, c)
+        }
+      }
+      for (const [id, [messages, unread]] of counts) {
+        if (id === 'UNREAD' || id === 'CHAT') continue
+        const kind = id.startsWith('CATEGORY_') ? 'category' : id.startsWith('Riddle/') ? 'riddle' : /^[A-Z_]+$/.test(id) ? 'system' : 'user'
+        out.push({ digId: d.id, id, name: id, kind, messages, unread })
+      }
+    }
+    return out.sort((x, y) => x.name.localeCompare(y.name))
+  })
   mock('list_strata', () => state.strata.filter((s) => !s.deletedAt).sort((x, y) => Number(y.messageCount) - Number(x.messageCount)))
   mock('list_conversations', () => state.conversations.map((c) => ({ ...c, turns: [] })))
   mock('get_conversation', (a) => {

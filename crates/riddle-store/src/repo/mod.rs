@@ -20,6 +20,7 @@ pub mod messages;
 pub mod outbox;
 pub mod pending;
 pub mod people;
+pub mod provider_labels;
 pub mod shadow_reviews;
 pub mod signals;
 pub mod strata;

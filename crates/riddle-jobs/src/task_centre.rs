@@ -31,9 +31,12 @@ pub fn overall_status(
     store_fault: Option<&str>,
 ) -> OverallStatus {
     if store_fault.is_some()
-        || digs
-            .iter()
-            .any(|d| matches!(d.status, DigStatus::Degraded { .. }))
+        || digs.iter().any(|d| {
+            matches!(
+                d.status,
+                DigStatus::Degraded { .. } | DigStatus::SyncFailing { .. }
+            )
+        })
     {
         return OverallStatus::Degraded;
     }
@@ -131,6 +134,19 @@ mod tests {
         );
         assert_eq!(
             overall_status(&[row(DigStatus::Synced)], &[], Some("fault")),
+            OverallStatus::Degraded
+        );
+        // An account that is not syncing is never "Caught up".
+        assert_eq!(
+            overall_status(
+                &[row(DigStatus::SyncFailing {
+                    failure: riddle_core::SyncFailure::SignIn,
+                    since: chrono::Utc::now(),
+                    last_synced_at: None,
+                })],
+                &[],
+                None
+            ),
             OverallStatus::Degraded
         );
     }

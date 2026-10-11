@@ -1,6 +1,7 @@
 /**
  * Shared TanStack Query hooks for the reads most pages need.
  */
+import { labelName } from '@/features/messages/labels'
 import { useQuery } from '@tanstack/react-query'
 import type { Dig } from '@/bindings/Dig'
 import * as api from './api'
@@ -35,6 +36,21 @@ export function useDigContext() {
   const digs = useDigs()
   const name = (id: string | null | undefined) => (id ? digs.data?.find((d) => d.id === id)?.name ?? id : 'All accounts')
   return { digId, digs: digs.data ?? [], digName: name }
+}
+
+/** The labels of the selected account (or all), refreshed by every sync. */
+export function useLabels() {
+  const digId = useUi((s) => s.digId)
+  return useQuery({ queryKey: [...qk.labels, digId], queryFn: () => api.listLabels(digId), staleTime: 60_000 })
+}
+
+/** A label id as its name: the account's own label list first, then Gmail's built-in names. */
+export function useLabelName(): (id: string, digId?: string) => string {
+  const labels = useLabels().data
+  return (id, digId) => {
+    const own = labels?.find((l) => l.id === id && (!digId || l.digId === digId))
+    return own && own.name !== id ? labelName(own.name) : labelName(id)
+  }
 }
 
 /** The trust card's evidence for the selected account (or all). Every Action that moves it invalidates the key; the interval is a backstop. */

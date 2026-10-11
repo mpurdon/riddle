@@ -8,6 +8,10 @@ pub const HISTORY_CURSOR: &str = "history_cursor";
 pub const INITIAL_SYNC_DONE: &str = "initial_sync_done";
 pub const LAST_SYNC_AT: &str = "last_sync_at";
 pub const OLDEST_SYNCED: &str = "oldest_synced";
+/// When syncing started failing, and why (`SyncFailure::as_str`); both are
+/// cleared by the next sync that gets through.
+pub const SYNC_FAILING_SINCE: &str = "sync_failing_since";
+pub const SYNC_FAILURE: &str = "sync_failure";
 
 pub fn get(store: &Store, key: &str) -> Result<Option<String>> {
     store.read(|c| {

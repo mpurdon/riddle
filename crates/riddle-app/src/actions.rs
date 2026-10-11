@@ -1740,6 +1740,23 @@ impl Action for ConnectGmail {
                             "connected"
                         }
                     );
+                    // Signed in again: the expired sign-in is history, so Sync
+                    // now and the banner stop saying so before the next sync.
+                    if let Ok(store) = services.stores.dig(&id) {
+                        for key in [
+                            repo::sync_state::SYNC_FAILING_SINCE,
+                            repo::sync_state::SYNC_FAILURE,
+                        ] {
+                            if let Err(e) = repo::sync_state::clear(&store, key) {
+                                rwarn!(
+                                    Category::Sync,
+                                    "sync failure of {} not cleared: {}",
+                                    id,
+                                    e.kind.as_str()
+                                );
+                            }
+                        }
+                    }
                     services.emit(RiddleEvent::Notify {
                         title: "Gmail connected".into(),
                         body: if reconnect {

@@ -3,10 +3,11 @@
 
 use async_trait::async_trait;
 use riddle_actions::{meta, Action, ActionContext, ActionResult};
-use riddle_core::{ActionMeta, Autonomy, DigId, Risk};
-use riddle_errors::Result;
+use riddle_core::{ActionMeta, Autonomy, DigId, Risk, SyncFailure};
+use riddle_errors::{Result, RiddleError};
 use riddle_mail::actions::util::opt;
 use riddle_mail::RefreshTriggers;
+use riddle_store::repo;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -24,6 +25,28 @@ impl Action for RefreshNow {
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
         let dig: Option<DigId> = opt(&args, "digId")?;
         let dig = dig.or_else(|| ctx.dig_id.clone());
+        // An account the provider will not let in cannot sync however often
+        // it is asked; say so rather than "Syncing now". It used to answer
+        // "Syncing now" through two weeks of an expired sign-in.
+        if let Some(d) = &dig {
+            let store = ctx.services.stores.dig(d)?;
+            let failure = repo::sync_state::get(&store, repo::sync_state::SYNC_FAILURE)?
+                .map(|f| SyncFailure::parse(&f));
+            match failure {
+                Some(SyncFailure::SignIn) => {
+                    return Err(RiddleError::provider_auth(
+                        "this account's sign-in has expired; sign in again under Settings → Accounts, then sync",
+                    ))
+                }
+                Some(SyncFailure::AdminBlocked) => {
+                    return Err(RiddleError::new(
+                        riddle_errors::ErrorKind::ProviderAdminBlocked,
+                        "a Workspace administrator blocks Riddle from this account",
+                    ))
+                }
+                _ => {}
+            }
+        }
         let triggers = ctx.services.require::<RefreshTriggers>()?;
         let heard = triggers.trigger(dig.as_ref());
         let summary = match (heard, &dig) {

@@ -45,6 +45,7 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         reads::get_expedition,
         reads::list_drafts,
         reads::get_user_profile,
+        reads::list_labels,
         reads::read_trace,
         reads::recent_traces,
         reads::usage_summary,

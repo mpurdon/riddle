@@ -6,6 +6,7 @@
  * with its id, which is how every confirmation tier completes.
  */
 import { call } from './ipc'
+import type { LabelSummary } from '@/bindings/LabelSummary'
 import type { MailboxWritesState } from '@/bindings/MailboxWritesState'
 import type { ActionInvocation } from '@/bindings/ActionInvocation'
 import type { ActionMeta } from '@/bindings/ActionMeta'
@@ -189,6 +190,8 @@ export const traceStats = (args: { digId?: string | null; sinceDays?: number } =
 
 export const devInfo = () => call<DevInfo>('dev_info')
 export const devArmed = () => call<boolean>('dev_armed')
+/** Each account's labels, named, with message and unread counts. */
+export const listLabels = (digId?: string | null) => call<LabelSummary[]>('list_labels', { digId: digId ?? null })
 /** The dev build's Hold / Ask / Allow and how many mailbox changes wait. */
 export const mailboxWrites = () => call<MailboxWritesState>('mailbox_writes')
 export const probeJudge = () => call<ProbeResult>('probe_judge')
@@ -250,6 +253,7 @@ export const qk = {
   devInfo: ['dev_info'] as const,
   devArmed: ['dev_armed'] as const,
   mailboxWrites: ['mailbox_writes'] as const,
+  labels: ['labels'] as const,
   logs: ['logs'] as const,
   logCategories: ['log_categories'] as const,
   inFlight: ['in_flight'] as const,

@@ -155,6 +155,26 @@ impl AppDigStatus {
                 });
             }
         }
+        // Before the rest: an account that is not syncing is not "Caught
+        // up", whatever it held when it last synced.
+        if let Some(since) = repo::sync_state::get(&store, repo::sync_state::SYNC_FAILING_SINCE)? {
+            let failure = SyncFailure::parse(
+                &repo::sync_state::get(&store, repo::sync_state::SYNC_FAILURE)?.unwrap_or_default(),
+            );
+            let since = chrono::DateTime::parse_from_rfc3339(&since)
+                .map(|t| t.with_timezone(&chrono::Utc))
+                .unwrap_or_else(|_| self.0.services.clock.now());
+            if self.0.services.clock.now() - since >= failure.shows_after() {
+                let last_synced_at = repo::sync_state::get(&store, repo::sync_state::LAST_SYNC_AT)?
+                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(&t).ok())
+                    .map(|t| t.with_timezone(&chrono::Utc));
+                return Ok(DigStatus::SyncFailing {
+                    failure,
+                    since,
+                    last_synced_at,
+                });
+            }
+        }
         if total == 0 && !initial_done && !self.signed_in(dig) {
             return Ok(DigStatus::NotConnected);
         }
@@ -248,7 +268,14 @@ impl JobHandler for PassHandler {
                     if ctx.cancel.is_cancelled() {
                         cancel.cancel();
                     }
-                    match self.app.sync_pass(&dig, &cancel, &mut progress_fn).await {
+                    // A failing sync is said on the account, not only in the
+                    // log: twenty thousand syncs over two weeks failed on an
+                    // expired sign-in while the job reported "completed" and
+                    // the account "Caught up", so Sync now looked like it worked.
+                    let result = self.app.sync_pass(&dig, &cancel, &mut progress_fn).await;
+                    self.app
+                        .record_sync_result(&dig.id, result.as_ref().err().map(|e| e.kind));
+                    match result {
                         Ok(_) => {}
                         Err(e)
                             if e.kind.is_transient()
@@ -488,6 +515,54 @@ impl App {
     }
 
     /// Recompute and store a Dig's status; emit the change (§5).
+    /// Record how a sync went, so the account can say it is not syncing.
+    /// Every failure counts, not only an expired sign-in; the first one
+    /// sets when it started, a sync that gets through clears it. A failure
+    /// to record is logged and swallowed (bookkeeping never fails the work).
+    pub fn record_sync_result(&self, dig_id: &DigId, error: Option<riddle_errors::ErrorKind>) {
+        let result = self.stores.dig(dig_id).and_then(|store| {
+            use repo::sync_state::{SYNC_FAILING_SINCE, SYNC_FAILURE};
+            match error {
+                Some(kind) => {
+                    if repo::sync_state::get(&store, SYNC_FAILING_SINCE)?.is_none() {
+                        let now = self.services.clock.now().to_rfc3339();
+                        repo::sync_state::set(&store, SYNC_FAILING_SINCE, &now)?;
+                    }
+                    repo::sync_state::set(
+                        &store,
+                        SYNC_FAILURE,
+                        SyncFailure::from_kind(kind).as_str(),
+                    )?;
+                    Ok(true)
+                }
+                None => {
+                    let was = repo::sync_state::get(&store, SYNC_FAILING_SINCE)?.is_some();
+                    if was {
+                        repo::sync_state::clear(&store, SYNC_FAILING_SINCE)?;
+                        repo::sync_state::clear(&store, SYNC_FAILURE)?;
+                    }
+                    // Signing in again clears the record before this sync; the
+                    // account's shown status still has to catch up.
+                    let shown = self
+                        .dig(dig_id)
+                        .is_ok_and(|d| matches!(d.status, DigStatus::SyncFailing { .. }));
+                    Ok(was || shown)
+                }
+            }
+        });
+        match result {
+            // Each failing attempt re-reads the status, so a network outage
+            // shows once it has lasted, not only on its first attempt.
+            Ok(true) => self.refresh_dig_status(dig_id),
+            Ok(false) => {}
+            Err(e) => rwarn!(
+                Category::Sync,
+                "sync result of {dig_id} not recorded: {}",
+                e.kind.as_str()
+            ),
+        }
+    }
+
     pub fn refresh_dig_status(&self, dig_id: &DigId) {
         let Some(src) = self.services.get::<AppDigStatus>() else {
             return;
@@ -497,6 +572,17 @@ impl App {
         };
         if let Ok(status) = src.status_of(&dig) {
             if status != dig.status {
+                // Starting to fail is worth an interruption once; the banner
+                // carries it after that.
+                if let DigStatus::SyncFailing { failure, .. } = &status {
+                    if !matches!(dig.status, DigStatus::SyncFailing { .. }) {
+                        self.events.emit(RiddleEvent::Notify {
+                            title: format!("{} is not syncing", dig.name),
+                            body: failure.sentence().to_string(),
+                            find_id: None,
+                        });
+                    }
+                }
                 dig.status = status.clone();
                 let _ = repo::digs::upsert(&self.stores.index(), &dig);
                 self.events.emit(RiddleEvent::DigStatusChanged {

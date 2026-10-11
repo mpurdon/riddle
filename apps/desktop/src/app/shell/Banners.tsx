@@ -5,6 +5,8 @@
  * a reviewer resolved three Finds before noticing none of it was theirs.
  */
 import { Link, useNavigate } from 'react-router-dom'
+import { lastSyncedPhrase, syncFailureLine } from '@/lib/selectors'
+import { useAction } from '@/lib/useAction'
 import { Button } from '@/components/ui/Button'
 import { useDigs } from '@/lib/queries'
 import { useBanners } from '@/lib/stores'
@@ -17,10 +19,14 @@ export function Banners() {
   const digs = useDigs().data ?? []
   const sampleOnly = digs.length > 0 && digs.every((d) => d.provider === 'fixture')
   const nav = useNavigate()
+  // An account that is not syncing says so until it syncs again: a real
+  // account failed every sync for two weeks behind "Caught up".
+  const failing = digs.filter((d) => d.status.state === 'sync_failing')
+  const { run } = useAction()
   // A dev build on Ask: the batch of mailbox changes waits for one "Send".
   const writes = useMailboxWrites().data
   const asking = writes?.writes === 'ask' && Number(writes.held) > 0
-  if (!storeFault && !update && !sampleOnly && !asking) return null
+  if (!storeFault && !update && !sampleOnly && !asking && !failing.length) return null
   return (
     <div className="shrink-0">
       {storeFault ? (
@@ -48,6 +54,24 @@ export function Banners() {
           </div>
         </div>
       ) : null}
+      {failing.map((d) =>
+        d.status.state === 'sync_failing' ? (
+          <div key={d.id} role="alert" className="flex items-center justify-between gap-3 border-b border-rust/40 bg-rust/10 px-4 py-1.5 text-sm">
+            <span>
+              <span className="font-semibold text-rust">{d.name} is not syncing:</span> {syncFailureLine(d.status.failure)}; {lastSyncedPhrase(d.status.last_synced_at)}.
+            </span>
+            {d.status.failure === 'sign_in' || d.status.failure === 'admin_blocked' ? (
+              <Button size="sm" variant="primary" onClick={() => nav('/settings#digs')}>
+                {d.status.failure === 'sign_in' ? 'Sign in again' : 'Open the account'}
+              </Button>
+            ) : (
+              <Button size="sm" onClick={() => void run('refresh_now', { digId: d.id }, { digId: d.id })}>
+                Retry now
+              </Button>
+            )}
+          </div>
+        ) : null,
+      )}
       {asking && writes ? (
         <div role="status" className="flex items-center justify-between gap-3 border-b border-ochre/40 bg-ochre/10 px-4 py-1 text-sm">
           <span className="text-ink-2">This dev build asks before it writes to the mailbox.</span>

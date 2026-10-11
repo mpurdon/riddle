@@ -82,7 +82,7 @@ export function TaskCentrePopover() {
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate font-medium">{d.name}</span>
                     <div className="flex shrink-0 items-center gap-1.5">
-                      {d.status.state === 'not_connected' ? (
+                      {d.status.state === 'not_connected' || (d.status.state === 'sync_failing' && d.status.failure === 'sign_in') ? (
                         <Link to="/settings#digs" onClick={() => setOpen(false)}>
                           <Chip tone={c.tone}>{c.label} · Sign in again</Chip>
                         </Link>

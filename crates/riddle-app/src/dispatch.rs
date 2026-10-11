@@ -106,6 +106,7 @@ pub const COMMANDS: &[&str] = &[
     "list_pending",
     "dev_armed",
     "mailbox_writes",
+    "list_labels",
     "list_conversations",
     "get_conversation",
     "director_send",
@@ -310,6 +311,14 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
         "list_pending" => serde_json::to_value(repo::pending::list_pending(&index)?)?,
         "dev_armed" => json!(app.runtime.is_armed()),
         "mailbox_writes" => serde_json::to_value(app.mailbox_writes()?)?,
+        "list_labels" => {
+            let dig: Option<DigId> = args
+                .get("digId")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()?;
+            serde_json::to_value(app.list_labels(dig.as_ref())?)?
+        }
         "list_conversations" => serde_json::to_value(repo::conversations::list(&index, 100)?)?,
         "get_conversation" => serde_json::to_value(
             repo::conversations::get(&index, &arg(&args, "conversationId")?)?

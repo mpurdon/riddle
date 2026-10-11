@@ -25,7 +25,7 @@ import type { Disposition } from '@/bindings/Disposition'
 import type { MessageSummary } from '@/bindings/MessageSummary'
 import { num } from '@/lib/format'
 import { toRiddleError } from '@/lib/ipc'
-import { useDigContext, useStrata } from '@/lib/queries'
+import { useDigContext, useLabelName, useLabels, useStrata } from '@/lib/queries'
 import { errorAffordance } from '@/lib/selectors'
 import { keyHint, type ShortcutScope } from '@/lib/shortcuts'
 import type { DispositionFilter, MessageFilter } from '@/lib/types'
@@ -70,11 +70,17 @@ export default function InboxPage() {
   const [params, setParams] = useSearchParams()
   const { digId, digName } = useDigContext()
   const strata = useStrata()
+  // Gmail's built-in labels, then the account's own by name (Labels page).
+  const accountLabels = useLabels().data ?? []
+  const nameOf = useLabelName()
+  const ownLabels = [...new Map(accountLabels.filter((l) => l.kind === 'user' || l.kind === 'riddle').map((l) => [l.id, { value: l.id, label: l.name }])).values()]
+  const labelOptions = [...LABEL_OPTIONS, ...ownLabels]
   const { run } = useAction()
   const query = params.get('q') ?? ''
   const disposition = (params.get('disposition') as DispositionFilter | 'all' | 'unsifted' | null) ?? 'all'
   const stratum = params.get('stratum') ?? ''
   const label = params.get('label') ?? ''
+  if (label && !labelOptions.some((o) => o.value === label)) labelOptions.push({ value: label, label: nameOf(label) })
   const from = params.get('from') ?? ''
   const since = params.get('since') ?? ''
   const until = params.get('until') ?? ''
@@ -187,7 +193,7 @@ export default function InboxPage() {
         </div>
         <Select label="Disposition" size="sm" value={disposition} onChange={(v) => set('disposition', v === 'all' ? '' : v)} options={DISPOSITIONS} />
         <Select label="Stratum" size="sm" value={stratum || 'any'} onChange={(v) => set('stratum', v === 'any' ? '' : v)} options={[{ value: 'any', label: 'Any Stratum' }, ...(strata.data ?? []).map((s) => ({ value: s.name, label: s.name }))]} />
-        <Select label="Label" size="sm" value={label || 'any'} onChange={(v) => set('label', v === 'any' ? '' : v)} options={label && !LABEL_OPTIONS.some((o) => o.value === label) ? [...LABEL_OPTIONS, { value: label, label: labelName(label) }] : LABEL_OPTIONS} />
+        <Select label="Label" size="sm" value={label || 'any'} onChange={(v) => set('label', v === 'any' ? '' : v)} options={labelOptions} />
         <Input defaultValue={from} key={`from-${from}`} placeholder="Sender" aria-label="Filter by sender" className="h-6 w-36 text-xs" onKeyDown={(e) => e.key === 'Enter' && set('from', e.currentTarget.value)} />
         <Input type="date" value={since} aria-label="Since" className="h-6 w-36 text-xs" onChange={(e) => set('since', e.target.value)} />
         <Input type="date" value={until} aria-label="Until" className="h-6 w-36 text-xs" onChange={(e) => set('until', e.target.value)} />

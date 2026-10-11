@@ -11,6 +11,7 @@ const MessagePage = lazy(() => import('@/features/messages/MessagePage'))
 const SpoilPage = lazy(() => import('@/features/messages/SpoilPage'))
 const ContaminationPage = lazy(() => import('@/features/messages/ContaminationPage'))
 const StrataPage = lazy(() => import('@/features/strata/StrataPage'))
+const LabelsPage = lazy(() => import('@/features/labels/LabelsPage'))
 const MeshesPage = lazy(() => import('@/features/meshes/MeshesPage'))
 const PacksPage = lazy(() => import('@/features/packs/PacksPage'))
 const RuleCheckPage = lazy(() => import('@/features/packs/RuleCheckPage'))
@@ -38,6 +39,7 @@ export const router = createHashRouter([
       { path: 'spoil', element: <S><SpoilPage /></S> },
       { path: 'contamination', element: <S><ContaminationPage /></S> },
       { path: 'strata', element: <S><StrataPage /></S> },
+      { path: 'labels', element: <S><LabelsPage /></S> },
       { path: 'meshes', element: <S><MeshesPage /></S> },
       { path: 'meshes/:meshId', element: <S><MeshesPage /></S> },
       { path: 'packs', element: <S><PacksPage /></S> },

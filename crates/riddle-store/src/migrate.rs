@@ -43,6 +43,11 @@ const DIG: &[Migration] = &[
         name: "importance",
         sql: include_str!("../migrations/dig/0006_importance.sql"),
     },
+    Migration {
+        version: 7,
+        name: "provider_labels",
+        sql: include_str!("../migrations/dig/0007_provider_labels.sql"),
+    },
 ];
 const INDEX: &[Migration] = &[
     Migration {

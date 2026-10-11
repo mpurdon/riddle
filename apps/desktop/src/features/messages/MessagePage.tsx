@@ -19,7 +19,7 @@ import { buildThreadTree } from '@/lib/threadTree'
 import { AttachmentChips } from '@/components/AttachmentChips'
 import { ThreadRow, senderOf } from '@/components/ThreadRow'
 import { cx, fmtAddresses, fmtDateTime, fmtTime } from '@/lib/format'
-import { useDigContext } from '@/lib/queries'
+import { useDigContext, useLabelName } from '@/lib/queries'
 import { dispositionLabel, findTypeLabel, FIND_TYPES, followUpArgs, IMPORTANCES, importanceLabel, sameDisposition } from '@/lib/selectors'
 import { keyHint } from '@/lib/shortcuts'
 import { useAction, useLastUndoable } from '@/lib/useAction'
@@ -34,7 +34,6 @@ import { AuthChip, CopyCode, DevOverlay, DispositionChip, ExplanationCard, Follo
 import { useComposerActions } from './composer'
 import { ActionHelpButton } from '@/components/ActionHelp'
 import { FollowUpOverlay, SnoozeOverlay } from '@/components/OverlayList'
-import { labelName } from './labels'
 import { messagePath, queuePosition, readQueue } from './queue'
 
 /** Threads longer than this get Expand all / Collapse all / Jump to latest. */
@@ -271,6 +270,7 @@ export default function MessagePage() {
 }
 
 function ThreadMessage({ m, open, current, onToggle }: { m: Message; open: boolean; current: boolean; onToggle: () => void }) {
+  const nameOf = useLabelName()
   return (
     <article id={`msg-${m.id}`} className={cx('rounded-md border', current ? 'border-ochre/50' : 'border-line')}>
       <button type="button" className="flex w-full items-center gap-3 px-3 py-2 text-left" onClick={onToggle} aria-expanded={open} title={open ? 'Collapse this message' : 'Expand this message'}>
@@ -309,7 +309,7 @@ function ThreadMessage({ m, open, current, onToggle }: { m: Message; open: boole
               </>
             ) : null}
             <dt className="text-clay">Labels</dt>
-            <dd>{m.labels.map(labelName).join(', ') || '—'}</dd>
+            <dd>{m.labels.map((l) => nameOf(l, m.digId)).join(', ') || '—'}</dd>
           </dl>
           <MessageBody html={m.bodyHtml} text={m.bodyText} />
           <AttachmentChips attachments={m.attachments} showType className="mt-3" />

@@ -10,7 +10,7 @@
  * used rather than from the help sheet alone.
  */
 import { NavLink } from 'react-router-dom'
-import { Activity, AlertTriangle, Archive, ClipboardCheck, Compass, FlaskConical, Funnel, Inbox, Layers, Lightbulb, ListChecks, MessageSquare, Package, Radio, Settings, Star, Sunrise, Wrench } from 'lucide-react'
+import { Activity, AlertTriangle, Archive, ClipboardCheck, Compass, FlaskConical, Funnel, Inbox, Layers, Lightbulb, ListChecks, MessageSquare, Package, Radio, Settings, Star, Sunrise, Tag, Wrench } from 'lucide-react'
 import { cx, num } from '@/lib/format'
 import { useSettings, useSummary, useDevInfo, usePending } from '@/lib/queries'
 import { keyHint } from '@/lib/shortcuts'
@@ -60,6 +60,7 @@ export function Rail() {
         { to: '/packs', label: 'Packs', icon: <Package />, gloss: 'Ready-made rules for kinds of mail: GitHub, money, shopping. Install one and answer its questions.' },
         { to: '/check', label: 'Rule check', icon: <ClipboardCheck />, gloss: 'Grade a few decisions each rule made, and correct the wrong ones on the spot.' },
         { to: '/strata', label: 'Strata', icon: <Layers />, gloss: 'Topics such as Finance or Travel. A message can carry several.' },
+        { to: '/labels', label: 'Labels', icon: <Tag />, gloss: "Each account's labels in Gmail, with counts. Open one to read that mail." },
         ...(developerMode ? [{ to: '/signals', label: 'Signals', icon: <Radio />, gloss: 'What the judge can tell about a message, versioned and calibrated. Developer Mode only.' }] : []),
       ],
     },

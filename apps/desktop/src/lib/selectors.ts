@@ -3,6 +3,7 @@
  * tested as functions: status chips, the summary's honesty about
  * catching up, Attention Zero evidence, Undo All's skipped list.
  */
+import type { SyncFailure } from '@/bindings/SyncFailure'
 import type { Importance } from '@/bindings/Importance'
 import type { DigStatus } from '@/bindings/DigStatus'
 import type { TaskCentre } from '@/bindings/TaskCentre'
@@ -25,6 +26,27 @@ export interface Chip {
   title: string
 }
 
+/** Why an account is not syncing, in one line (`SyncFailure::sentence`). */
+export function syncFailureLine(f: SyncFailure): string {
+  switch (f) {
+    case 'sign_in':
+      return 'the sign-in has expired; sign in again to resume syncing'
+    case 'admin_blocked':
+      return 'a Workspace administrator blocks Riddle from this account'
+    case 'rate_limited':
+      return 'Gmail is limiting requests; Riddle keeps retrying'
+    case 'unreachable':
+      return 'Gmail cannot be reached; Riddle keeps retrying'
+    case 'other':
+      return 'syncing fails; see Developer → Logs'
+  }
+}
+
+/** "last synced 27 Sep", or that it never has. */
+export function lastSyncedPhrase(at: string | null | undefined): string {
+  return at ? `last synced ${fmtRelative(at)}` : 'not synced yet'
+}
+
 export function digStatusChip(s: DigStatus): Chip {
   switch (s.state) {
     case 'synced':
@@ -38,6 +60,8 @@ export function digStatusChip(s: DigStatus): Chip {
       return { label: `${fmtInt(s.pending)} waiting for Gmail`, tone: 'busy', title: `${fmtInt(s.pending)} changes waiting to be written to Gmail` }
     case 'degraded':
       return { label: 'Degraded', tone: 'bad', title: `${s.reason}. Nothing is hidden while degraded.` }
+    case 'sync_failing':
+      return { label: s.failure === 'sign_in' ? 'Sign-in expired' : 'Not syncing', tone: 'bad', title: `Not syncing: ${syncFailureLine(s.failure)}; ${lastSyncedPhrase(s.last_synced_at)}.` }
     case 'shadow':
       return { label: `Shadow day ${s.day}`, tone: 'neutral', title: `Shadow Period day ${s.day} of ${s.of}: Riddle proposes, the inbox is untouched` }
     case 'not_connected':
@@ -87,6 +111,8 @@ export function digPipeline(s: DigStatus, job?: Job | null): DigPipeline {
       return { stages: running ? stage(0) : stage(3), detail: running ? stepOf('Checking for new mail') : `Up to date · Shadow day ${s.day} of ${s.of}`, busy: running }
     case 'degraded':
       return { stages: stage(0).map((st) => ({ ...st, state: 'off' })), detail: `Degraded: ${s.reason}`, busy: false }
+    case 'sync_failing':
+      return { stages: stage(0).map((st) => ({ ...st, state: 'off' })), detail: `Not syncing: ${syncFailureLine(s.failure)}; ${lastSyncedPhrase(s.last_synced_at)}`, busy: false }
     case 'not_connected':
       return { stages: stage(0).map((st) => ({ ...st, state: 'off' })), detail: 'Not signed in', busy: false }
   }
@@ -119,7 +145,7 @@ export function taskCentreIndicator(tc: TaskCentre | undefined): TaskCentreIndic
     return { label: 'Nothing connected', tone: 'neutral', detail: 'Connect an account to start', running, queued, paused }
   }
   if (tc.overall === 'degraded' || tc.storeFault) {
-    const reasons = tc.digs.filter((d) => d.status.state === 'degraded').map((d) => (d.status.state === 'degraded' ? d.status.reason : ''))
+    const reasons = tc.digs.flatMap((d) => (d.status.state === 'sync_failing' ? [`${d.name} is not syncing: ${syncFailureLine(d.status.failure)}`] : d.status.state === 'degraded' ? [d.status.reason] : []))
     const detail = tc.storeFault ? `Store fault: ${tc.storeFault}` : reasons[0] ? `${reasons[0]}. Nothing hidden.` : 'Nothing hidden.'
     return { label: 'Degraded', tone: 'bad', detail, running, queued, paused }
   }

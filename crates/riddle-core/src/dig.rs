@@ -39,6 +39,79 @@ pub enum ProjectionMode {
     None,
 }
 
+/// Why an account is not syncing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SyncFailure {
+    /// The provider refuses the account's sign-in: sign in again.
+    SignIn,
+    /// A Workspace administrator blocks Riddle.
+    AdminBlocked,
+    /// The provider asked Riddle to slow down.
+    RateLimited,
+    /// The provider could not be reached or answered with an error.
+    Unreachable,
+    /// Anything else.
+    Other,
+}
+
+impl SyncFailure {
+    pub fn from_kind(kind: riddle_errors::ErrorKind) -> Self {
+        use riddle_errors::ErrorKind as K;
+        match kind {
+            K::ProviderAuth => SyncFailure::SignIn,
+            K::ProviderAdminBlocked => SyncFailure::AdminBlocked,
+            K::ProviderRateLimited => SyncFailure::RateLimited,
+            K::Provider => SyncFailure::Unreachable,
+            _ => SyncFailure::Other,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SyncFailure::SignIn => "sign_in",
+            SyncFailure::AdminBlocked => "admin_blocked",
+            SyncFailure::RateLimited => "rate_limited",
+            SyncFailure::Unreachable => "unreachable",
+            SyncFailure::Other => "other",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "sign_in" => SyncFailure::SignIn,
+            "admin_blocked" => SyncFailure::AdminBlocked,
+            "rate_limited" => SyncFailure::RateLimited,
+            "unreachable" => SyncFailure::Unreachable,
+            _ => SyncFailure::Other,
+        }
+    }
+
+    /// How long it must last before the account says so: a dropped
+    /// connection or a rate limit usually clears on the next attempt; a
+    /// refused sign-in never does.
+    pub fn shows_after(self) -> chrono::Duration {
+        match self {
+            SyncFailure::RateLimited | SyncFailure::Unreachable => chrono::Duration::minutes(15),
+            _ => chrono::Duration::zero(),
+        }
+    }
+
+    /// One line for the banner, the notification and the Task Centre.
+    pub fn sentence(self) -> &'static str {
+        match self {
+            SyncFailure::SignIn => "the sign-in has expired; sign in again to resume syncing",
+            SyncFailure::AdminBlocked => {
+                "a Workspace administrator blocks Riddle from this account"
+            }
+            SyncFailure::RateLimited => "Gmail is limiting requests; Riddle keeps retrying",
+            SyncFailure::Unreachable => "Gmail cannot be reached; Riddle keeps retrying",
+            SyncFailure::Other => "syncing fails; see Developer → Logs",
+        }
+    }
+}
+
 /// Per-Dig runtime status shown in the Task Centre (§5).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -57,6 +130,16 @@ pub enum DigStatus {
     },
     Degraded {
         reason: String,
+    },
+    /// Syncing has been failing: since when, why, and when the account last
+    /// synced. A failed sync used to be logged and the job marked completed,
+    /// so a real account showed "Caught up" through two weeks of expired
+    /// sign-in. Sign-in and admin blocks show at once; a network or rate
+    /// limit only after it has lasted (`SyncFailure::shows_after`).
+    SyncFailing {
+        failure: SyncFailure,
+        since: chrono::DateTime<chrono::Utc>,
+        last_synced_at: Option<chrono::DateTime<chrono::Utc>>,
     },
     /// The Shadow Period is running; proposals are recorded, nothing is hidden.
     Shadow {

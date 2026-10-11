@@ -208,6 +208,37 @@ pub struct Draft {
     pub updated_at: DateTime<Utc>,
 }
 
+/// What kind of label: Gmail's own (Inbox, Starred), a category tab, one
+/// the user made, or one Riddle made (`Riddle/…`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum LabelKind {
+    System,
+    Category,
+    User,
+    Riddle,
+}
+
+/// One label of one account, with its name and how much stored mail it
+/// carries, for the Labels page and the Inbox filter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LabelSummary {
+    pub dig_id: DigId,
+    /// The provider's id (`Label_28`, `INBOX`): what messages carry.
+    pub id: String,
+    /// The provider's name (`Receipts/2026`, `INBOX`); the id when the
+    /// account's label list has not been fetched yet.
+    pub name: String,
+    pub kind: LabelKind,
+    #[ts(type = "number")]
+    pub messages: u64,
+    #[ts(type = "number")]
+    pub unread: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]

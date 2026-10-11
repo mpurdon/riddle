@@ -449,6 +449,68 @@ impl App {
         repo::traces::get(&store, id)?.ok_or_else(|| RiddleError::not_found(format!("trace {id}")))
     }
 
+    /// Every label of the enabled accounts (or one), named from the
+    /// account's label list and counted over stored mail. Gmail's own labels
+    /// with no mail, and the Unread and Chat bookkeeping labels, are left
+    /// out; an account's own labels stay listed when empty.
+    pub fn list_labels(&self, dig_id: Option<&DigId>) -> Result<Vec<LabelSummary>> {
+        let digs = match dig_id {
+            Some(d) => vec![self.dig(d)?],
+            None => self.list_digs()?,
+        };
+        let mut out = Vec::new();
+        for d in digs {
+            let store = self.stores.dig(&d.id)?;
+            let mut counts = repo::provider_labels::counts(&store)?;
+            let mut seen = std::collections::HashSet::new();
+            let mut push =
+                |id: String, name: String, system: bool, managed: bool, n: (u64, u64)| {
+                    let kind = if id.starts_with("CATEGORY_") {
+                        LabelKind::Category
+                    } else if managed || name.starts_with("Riddle/") {
+                        LabelKind::Riddle
+                    } else if system || id.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
+                        LabelKind::System
+                    } else {
+                        LabelKind::User
+                    };
+                    if matches!(id.as_str(), "UNREAD" | "CHAT")
+                        || (kind != LabelKind::User && kind != LabelKind::Riddle && n.0 == 0)
+                    {
+                        return;
+                    }
+                    out.push(LabelSummary {
+                        dig_id: d.id.clone(),
+                        id,
+                        name,
+                        kind,
+                        messages: n.0,
+                        unread: n.1,
+                    });
+                };
+            for l in repo::provider_labels::all(&store)? {
+                let n = counts.remove(&l.id).unwrap_or_default();
+                seen.insert(l.id.clone());
+                push(l.id, l.name, l.system, l.managed_by_riddle, n);
+            }
+            // Labels on stored mail the list has not named yet (no sync since
+            // this build): shown by id until the next sync names them.
+            for (id, n) in counts {
+                if !seen.contains(&id) {
+                    push(id.clone(), id, false, false, n);
+                }
+            }
+        }
+        out.sort_by(|a, b| {
+            (a.dig_id.as_str(), a.kind as u8, a.name.to_lowercase()).cmp(&(
+                b.dig_id.as_str(),
+                b.kind as u8,
+                b.name.to_lowercase(),
+            ))
+        });
+        Ok(out)
+    }
+
     /// The dev build's mailbox writes and how many queued changes wait.
     pub fn mailbox_writes(&self) -> Result<MailboxWritesState> {
         let policy = self.runtime.policy.read().clone();

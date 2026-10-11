@@ -226,6 +226,24 @@ impl SyncEngine {
         )
     }
 
+    /// The account's label names, kept for the app to show. One provider call
+    /// a sync; bookkeeping, so a failure is logged and the sync goes on.
+    async fn refresh_labels(&self, store: &Store) {
+        let result = async {
+            let labels = self.provider.list_labels().await?;
+            repo::provider_labels::replace_all(store, &labels)
+        }
+        .await;
+        if let Err(e) = result {
+            rwarn!(
+                Category::Sync,
+                "label list for {} not refreshed: {}",
+                self.dig.id,
+                e.kind.as_str()
+            );
+        }
+    }
+
     /// Initial if not done, else incremental; a resync when the cursor expired.
     pub async fn sync_once(
         &self,
@@ -234,6 +252,7 @@ impl SyncEngine {
         on_external: ExternalFn<'_>,
     ) -> Result<SyncReport> {
         let store = self.store()?;
+        self.refresh_labels(&store).await;
         if repo::sync_state::get(&store, RESYNC_REQUIRED)?.is_some() {
             return self.full_resync(progress, cancel).await;
         }

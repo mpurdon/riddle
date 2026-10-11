@@ -21,7 +21,7 @@ import { fmtRelative, plural } from '@/lib/format'
 import { mailboxName } from '@/lib/gmailEffect'
 import { toRiddleError } from '@/lib/ipc'
 import { useDevArmed, useMeshes } from '@/lib/queries'
-import { digStatusChip } from '@/lib/selectors'
+import { digStatusChip, lastSyncedPhrase, syncFailureLine } from '@/lib/selectors'
 import type { PendingAction } from '@/bindings/PendingAction'
 import { expectedCount } from '@/lib/confirm'
 import type { ProbeResult, Settings } from '@/lib/types'
@@ -48,7 +48,7 @@ export function AccountDetail({ dig, settings, groups }: { dig: Dig; settings: S
     setCheck(null)
   }, [dig.id])
   const chip = digStatusChip(dig.status)
-  const needsSignIn = dig.status.state === 'not_connected' || dig.status.state === 'degraded'
+  const needsSignIn = dig.status.state === 'not_connected' || dig.status.state === 'degraded' || (dig.status.state === 'sync_failing' && dig.status.failure === 'sign_in')
   // The backend's answer for this account; the dev/armed flags are the fallback for a Dig read without it.
   const effect = gmailEffect(level, dig.projection, { mailbox: dig.mailbox, dev, armed, provider: dig.provider })
   const capped = cappedRules(useMeshes().data ?? [], dig)
@@ -99,6 +99,14 @@ export function AccountDetail({ dig, settings, groups }: { dig: Dig; settings: S
           <AlertTriangle className="mt-px size-3.5 shrink-0 text-ochre" />
           <span className="flex-1">
             <span className="font-medium">Not signed in.</span> Google no longer accepts this account's sign-in, so its mail is not being synced. Sign in again to resume; the account keeps its history, its Strata and its settings.
+          </span>
+        </div>
+      ) : null}
+      {dig.status.state === 'sync_failing' ? (
+        <div role="alert" className="mb-3 flex items-start gap-2 rounded-md border border-rust/30 bg-rust/5 px-3 py-2 text-xs text-rust">
+          <AlertTriangle className="mt-px size-3.5 shrink-0" />
+          <span className="flex-1">
+            <span className="font-medium">Not syncing:</span> {syncFailureLine(dig.status.failure)}; {lastSyncedPhrase(dig.status.last_synced_at)}. Mail since then is not in Riddle.
           </span>
         </div>
       ) : null}
