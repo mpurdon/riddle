@@ -72,6 +72,14 @@ describe('the impact headline', () => {
     rescore: u64(0),
     estimatedCostUsd: 0,
     sampleChanged: [],
+    editChanged: u64(14),
+    editTransitions: [
+      { from: 'find', to: 'filed', count: u64(8) },
+      { from: 'spoil', to: 'find', count: u64(4) },
+      { from: 'filed', to: 'find', count: u64(2) },
+    ],
+    sampleEditChanged: [],
+    drift: u64(0),
     windowDays: 90,
     ...over,
   })
@@ -81,11 +89,16 @@ describe('the impact headline', () => {
   })
 
   it('says so plainly when nothing would change', () => {
-    expect(impactLine(report({ changed: u64(0), transitions: [] }))).toBe('Would change nothing in the last 90 days (412 messages).')
+    expect(impactLine(report({ changed: u64(0), transitions: [], editChanged: u64(0), editTransitions: [] }))).toBe('Would change nothing in the last 90 days (412 messages).')
   })
 
   it('calls Unresolved Escalate, as the Meshes page does', () => {
-    expect(impactLine(report({ changed: u64(1), transitions: [{ from: 'find', to: 'unresolved', count: u64(1) }] }))).toBe('Would change 1 message in the last 90 days: 1 to Escalate.')
+    expect(impactLine(report({ editChanged: u64(1), editTransitions: [{ from: 'find', to: 'unresolved', count: u64(1) }] }))).toBe('Would change 1 message in the last 90 days: 1 to Escalate.')
+  })
+
+  it("counts the edit's own changes, and names the mail re-decided anyway apart", () => {
+    const r = report({ changed: u64(20), editChanged: u64(4), editTransitions: [{ from: 'find', to: 'spoil', count: u64(4) }], drift: u64(16) })
+    expect(impactLine(r)).toBe("Would change 4 messages in the last 90 days: 4 to Spoil. Applying to history also re-decides 16 that today's rules already decide differently.")
   })
 })
 

@@ -270,17 +270,53 @@ async fn reading_mail_marks_the_task_untrusted_and_a_following_egress_action_bec
     let events = h.sink.take();
     assert_eq!(
         event_names(&events),
-        vec!["tool_call", "tool_call", "proposal", "delta", "done"]
+        // The proposal is in Activity under the Director's name before its card is announced.
+        vec![
+            "tool_call",
+            "activity",
+            "tool_call",
+            "proposal",
+            "delta",
+            "done"
+        ]
     );
+    match &events[1] {
+        RiddleEvent::ActivityAppended { activity } => {
+            assert_eq!(activity.actor, Actor::Director);
+            assert!(
+                activity.summary.starts_with("Proposed:"),
+                "{}",
+                activity.summary
+            );
+            assert_eq!(activity.conversation_id.as_ref(), Some(&id));
+        }
+        other => panic!("{other:?}"),
+    }
     match &events[0] {
         RiddleEvent::DirectorToolCall { call, .. } => {
             assert_eq!(call.action, "get_message");
             assert!(call.untrusted);
             assert_eq!(call.args["messageId"], "d1:42");
+            // The record keeps what was asked and which mail came back, never the mail.
+            assert_eq!(call.input["messageId"], "d1:42");
+            let out = call.output.as_ref().unwrap().to_string();
+            assert!(
+                out.contains("d1:42") && !out.contains("Invoice") && !out.contains("attacker"),
+                "{out}"
+            );
         }
         other => panic!("{other:?}"),
     }
-    let (pending_id, summary) = match &events[2] {
+    match &events[2] {
+        RiddleEvent::DirectorToolCall { call, .. } => {
+            // An Action's arguments in full on the record, redacted on the wire's `args`.
+            assert_eq!(call.input["to"], "attacker@evil.example");
+            assert_ne!(call.args["to"], "attacker@evil.example");
+            assert!(call.output.as_ref().unwrap()["proposal"]["pendingId"].is_string());
+        }
+        other => panic!("{other:?}"),
+    }
+    let (pending_id, summary) = match &events[3] {
         RiddleEvent::ProposalCreated {
             pending_id,
             summary,
@@ -307,10 +343,10 @@ async fn reading_mail_marks_the_task_untrusted_and_a_following_egress_action_bec
     );
     assert_eq!(pending.confirmation, ConfirmationPolicy::Approval);
     assert!(pending.reason.contains("untrusted"));
-    // Nothing was forwarded: no Activity for it.
-    assert!(!events
-        .iter()
-        .any(|e| matches!(e, RiddleEvent::ActivityAppended { .. })));
+    // Nothing was forwarded: the only Activity is the proposal itself.
+    assert!(!events.iter().any(
+        |e| matches!(e, RiddleEvent::ActivityAppended { activity } if activity.action != "propose")
+    ));
 
     // The model saw the mail delimited as untrusted, and the recipient text was redacted in the record.
     let reqs = h.llm.requests();
@@ -734,4 +770,62 @@ async fn continue_for_n_allows_that_many_calls_once_and_keep_going_lasts_the_con
         conv.allowance.unwrap().keep_going,
         "until a new conversation"
     );
+}
+
+/// A Mesh preview the Director runs is in Activity under its name and
+/// conversation, with the numbers it saw, and the tool call keeps the text
+/// it previewed: the Payments drafts' previews had been visible only to the
+/// model, and their text only as "[redacted 737 chars]".
+#[tokio::test]
+async fn a_director_preview_is_in_activity_with_its_numbers_and_the_text_it_previewed() {
+    let draft = json!({"meshId": "mesh_payments", "text": "Mesh: Payments\nROUTES\nIF invoice@v1 > .8 → Find: Pay"});
+    let h = harness(
+        vec![
+            ScriptedLlm::tool_call("simulate_mesh", draft),
+            ScriptedLlm::text("Two messages would change."),
+        ],
+        ScriptedReads::new().on(
+            "simulate_mesh",
+            json!({"meshId": "mesh_payments", "meshName": "Payments", "fromVersion": 6, "toVersion": 7, "historicalMessages": 3993, "changed": 18, "editChanged": 2, "drift": 16, "transitions": [{"from": "find", "to": "spoil", "count": 2}]}),
+        ),
+        vec![dig("d1", "Personal", PrivacyMode::CloudReasoning)],
+    );
+    let id = h
+        .director
+        .send_and_wait(SendRequest {
+            message: "Would this fix it?".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let acts = repo::activities::list(
+        &h.stores.index(),
+        &repo::activities::ActivityFilter {
+            conversation_id: Some(id.as_str().to_string()),
+            ..Default::default()
+        },
+        &PageRequest::default(),
+    )
+    .unwrap()
+    .items;
+    assert_eq!(acts.len(), 1, "{acts:#?}");
+    assert_eq!(acts[0].actor, Actor::Director);
+    assert_eq!(
+        acts[0].summary,
+        "Previewed Payments v6 → v7: the edit changes 2 of 3993 recent messages; 16 more would be re-decided anyway"
+    );
+    let conv = repo::conversations::get(&h.stores.index(), &id)
+        .unwrap()
+        .unwrap();
+    let call = conv
+        .turns
+        .iter()
+        .flat_map(|t| t.tool_calls.iter())
+        .find(|c| c.action == "simulate_mesh")
+        .unwrap();
+    assert!(call.input["text"]
+        .as_str()
+        .unwrap()
+        .contains("invoice@v1 > .8"));
+    assert_eq!(call.output.as_ref().unwrap()["editChanged"], 2);
 }

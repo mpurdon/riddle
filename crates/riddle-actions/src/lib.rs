@@ -131,6 +131,13 @@ pub trait Action: Send + Sync {
         })
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult>;
+    /// What a proposal of this Action is about (`update_mesh`: the Mesh), so
+    /// a newer proposal from the same conversation replaces an older pending
+    /// one instead of standing beside it. The Director proposed Payments
+    /// v6 → v7 twice and both cards waited, both titled v6 → v7.
+    fn proposal_subject(&self, _args: &Value) -> Option<String> {
+        None
+    }
     /// Reverse a previous execution from its restoration data.
     async fn undo(&self, _ctx: &ActionContext, _restore: Value) -> Result<ActionResult> {
         Err(riddle_errors::RiddleError::invalid(format!(

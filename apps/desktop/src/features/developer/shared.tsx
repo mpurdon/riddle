@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
 import { Copy } from 'lucide-react'
-import { useState } from 'react'
 import type { DecisionTrace } from '@/bindings/DecisionTrace'
 import { qk, recentTraces } from '@/lib/api'
 import { cx, fmtClockMs, fmtScore, safeJson } from '@/lib/format'
@@ -8,7 +7,7 @@ import { useDigContext } from '@/lib/queries'
 import { dispositionLabel } from '@/lib/selectors'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
-import { toast } from '@/lib/stores'
+import { useCopy } from '@/components/Bits'
 
 export function useRecentTraces(limit = 80) {
   const { digId } = useDigContext()
@@ -99,8 +98,8 @@ export function Distribution({ d, threshold }: { d: Record<string, number>; thre
 }
 
 export function JsonBlock({ value, label }: { value: unknown; label: string }) {
-  const [copied, setCopied] = useState(false)
   const text = safeJson(value)
+  const [copied, copy] = useCopy(text)
   return (
     <div className="relative">
       <Button
@@ -108,15 +107,7 @@ export function JsonBlock({ value, label }: { value: unknown; label: string }) {
         variant="ghost"
         icon={<Copy />}
         className="absolute right-1 top-1"
-        onClick={async () => {
-          try {
-            await navigator.clipboard.writeText(text)
-            setCopied(true)
-            setTimeout(() => setCopied(false), 1500)
-          } catch {
-            toast('Copy failed', { body: 'Clipboard access was refused.', kind: 'warn' })
-          }
-        }}
+        onClick={() => void copy()}
         aria-label={`Copy ${label}`}
       >
         {copied ? 'Copied' : 'Copy'}

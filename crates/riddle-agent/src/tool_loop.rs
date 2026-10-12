@@ -25,8 +25,8 @@ use crate::tools::{classify, redact_args, ReadTool, ToolKind};
 use riddle_actions::Runtime;
 use riddle_ai::{ContentBlock, Llm, LlmMessage, LlmRequest, StopReason, ToolSpec};
 use riddle_core::{
-    ActionInvocation, ConversationId, DigId, EventSink, ExpeditionId, MessageId, PendingAction,
-    Principal, PrivacyMode, ThreadId, ToolCall, UsageTask,
+    ActionInvocation, Activity, ConversationId, DigId, EventSink, ExpeditionId, MessageId,
+    PendingAction, Principal, PrivacyMode, SimulationReport, ThreadId, ToolCall, UsageTask,
 };
 use riddle_errors::{ErrorKind, Result, RiddleError};
 use riddle_observability::{rdebug, rinfo, rwarn, Category};
@@ -460,6 +460,8 @@ impl ToolLoop {
             id: id.to_string(),
             action: name.to_string(),
             args: redacted,
+            input: args.clone(),
+            output: None,
             ok: false,
             summary: String::new(),
             activity_id: None,
@@ -492,7 +494,15 @@ impl ToolLoop {
                     if call.untrusted {
                         st.read_untrusted = true;
                     }
-                    ContentBlock::tool_result(id, truncate(&value.to_string()), call.untrusted)
+                    call.output = Some(if call.untrusted {
+                        mail_receipt(&value)
+                    } else {
+                        compact(&value)
+                    });
+                    if tool == ReadTool::SimulateMesh {
+                        self.record_preview(principal, &value);
+                    }
+                    ContentBlock::tool_result(id, fitted(value), call.untrusted)
                 }
                 Err(e) => {
                     call.summary = format!("{} failed: {}", tool.name(), e.kind.as_str());
@@ -525,7 +535,8 @@ impl ToolLoop {
                         call.ok = true;
                         call.activity_id = outcome.activity_id.clone();
                         call.summary = format!("{action} ok");
-                        ContentBlock::tool_result(id, truncate(&outcome.result.to_string()), false)
+                        call.output = Some(compact(&outcome.result));
+                        ContentBlock::tool_result(id, fitted(outcome.result.clone()), false)
                     }
                     Err(e) if e.kind == ErrorKind::NeedsConfirmation => {
                         let pending: Option<PendingAction> = e
@@ -548,11 +559,9 @@ impl ToolLoop {
                         st.proposals.push((pid.clone(), summary.clone()));
                         call.ok = true;
                         call.summary = format!("proposed: {summary}");
-                        ContentBlock::tool_result(
-                            id,
-                            json!({"proposal": {"pendingId": pid, "summary": summary, "reason": reason, "status": "awaiting the user's approval"}, "note": "The action did not run. The user sees a proposal card with the real arguments. Do not retry."}).to_string(),
-                            false,
-                        )
+                        let result = json!({"proposal": {"pendingId": pid, "summary": summary, "reason": reason, "status": "awaiting the user's approval"}, "note": "The action did not run. The user sees a proposal card with the real arguments. Do not retry."});
+                        call.output = Some(result.clone());
+                        ContentBlock::tool_result(id, result.to_string(), false)
                     }
                     Err(e) => {
                         call.summary = format!("{action} failed: {}", e.kind.as_str());
@@ -571,6 +580,37 @@ impl ToolLoop {
             call.latency_ms
         );
         (block, call)
+    }
+
+    /// A Mesh preview the Director ran, in Activity under its name and
+    /// conversation: the numbers it based a proposal on had been visible
+    /// only to the model. Bookkeeping: a failure is logged.
+    fn record_preview(&self, principal: &LoopPrincipal, report: &Value) {
+        let Ok(r) = serde_json::from_value::<SimulationReport>(report.clone()) else {
+            return rwarn!(
+                Category::Director,
+                "a preview result was not a simulation report"
+            );
+        };
+        let versions = r
+            .from_version
+            .map_or(String::new(), |a| format!(" v{a} → v{}", r.to_version));
+        // The edit's own changes first; mail today's rules re-decide anyway apart.
+        let anyway = if r.drift > 0 {
+            format!("; {} more would be re-decided anyway", r.drift)
+        } else {
+            String::new()
+        };
+        let p = principal.principal(false);
+        self.runtime.record_activity(Activity::note(
+            p.actor(),
+            "simulate_mesh",
+            format!("Previewed {}{versions}: the edit changes {} of {} recent messages{anyway}", r.mesh_name, r.edit_changed, r.historical_messages),
+            json!({ "meshId": r.mesh_id, "editChanged": r.edit_changed, "drift": r.drift, "changed": r.changed, "historicalMessages": r.historical_messages, "editTransitions": r.edit_transitions }),
+            "a preview changes nothing",
+            p.conversation_id().cloned(),
+            self.runtime.services.clock.now(),
+        ));
     }
 
     async fn read(&self, tool: ReadTool, scope: &ReadScope, args: &Value) -> Result<Value> {
@@ -603,7 +643,7 @@ impl ToolLoop {
             ReadTool::Search => self.reads.search(scope, args.clone()).await,
             ReadTool::ListFinds => self.reads.list_finds(scope, args.clone()).await,
             ReadTool::ListMeshes => self.reads.list_meshes(scope, args.clone()).await,
-            ReadTool::ListSignals => self.reads.list_signals(scope).await,
+            ReadTool::ListSignals => self.reads.list_signals(scope, args.clone()).await,
             ReadTool::ExplainDecision => {
                 self.reads
                     .explain(
@@ -657,20 +697,36 @@ fn error_json(e: &RiddleError) -> String {
     json!({"error": e.kind.as_str(), "message": e.message}).to_string()
 }
 
-fn truncate(s: &str) -> String {
-    if s.chars().count() <= MAX_RESULT_CHARS {
-        return s.to_string();
+/// A result as the model receives it: whole when it fits, otherwise made to
+/// fit in ways that stay valid and say what was left out (`fit`).
+fn fitted(v: Value) -> String {
+    crate::fit::fit(v, MAX_RESULT_CHARS).to_string()
+}
+
+/// The size of a compact result kept on a tool call.
+const OUTPUT_CHARS: usize = 4_000;
+
+/// A result as kept on the tool call, fitted the way the model's copy is.
+fn compact(v: &Value) -> Value {
+    crate::fit::fit(v.clone(), OUTPUT_CHARS)
+}
+
+/// What a read that carried mail returned, without the mail: how many rows,
+/// the total, and each row's ids.
+fn mail_receipt(v: &Value) -> Value {
+    const IDS: &[&str] = &["id", "digId", "messageId", "threadId", "findId"];
+    match crate::fit::rows(v) {
+        Some(rows) => json!({
+            "count": rows.len(),
+            "total": v.get("total"),
+            "rows": rows.iter().map(|r| crate::fit::pick(r, IDS)).collect::<Vec<_>>(),
+        }),
+        None => crate::fit::pick(v, IDS),
     }
-    let cut: String = s.chars().take(MAX_RESULT_CHARS).collect();
-    format!("{cut}\n[truncated: the result was longer than {MAX_RESULT_CHARS} characters; narrow the query]")
 }
 
 fn item_count(v: &Value) -> Option<usize> {
-    match v {
-        Value::Array(a) => Some(a.len()),
-        Value::Object(o) => o.get("items").and_then(|i| i.as_array()).map(|a| a.len()),
-        _ => None,
-    }
+    crate::fit::rows(v).map(Vec::len)
 }
 
 /// Withhold Contamination-classified entries from any list the Director can
@@ -727,10 +783,9 @@ mod tests {
     }
 
     #[test]
-    fn long_results_are_truncated_with_a_note() {
-        let long = "x".repeat(MAX_RESULT_CHARS + 10);
-        let t = truncate(&long);
-        assert!(t.contains("[truncated"));
-        assert!(t.len() < long.len() + 200);
+    fn a_long_result_reaches_the_model_as_valid_json_within_the_limit() {
+        let t = fitted(Value::String("x".repeat(MAX_RESULT_CHARS + 10)));
+        assert!(t.len() <= MAX_RESULT_CHARS);
+        assert!(serde_json::from_str::<Value>(&t).is_ok());
     }
 }

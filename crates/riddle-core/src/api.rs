@@ -280,6 +280,11 @@ pub enum RiddleEvent {
         pending_id: String,
         summary: String,
     },
+    /// A proposal left the pending list without the user's hand on it
+    /// (a newer one from the same conversation replaced it).
+    ProposalResolved {
+        pending_id: String,
+    },
     ExpeditionChanged {
         expedition_id: crate::ids::ExpeditionId,
     },

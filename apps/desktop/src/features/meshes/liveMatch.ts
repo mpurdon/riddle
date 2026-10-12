@@ -13,7 +13,8 @@ import { fmtInt, num, plural } from '@/lib/format'
 
 export function liveMatchSentence(r: SimulationReport): string {
   const total = num(r.historicalMessages)
-  const changed = num(r.changed)
+  // What the edit changes, not what today's rules would re-decide anyway.
+  const changed = num(r.editChanged)
   const judge = num(r.newJudgeCallsRequired)
   const window = `the last ${r.windowDays} days`
   if (total === 0) return `Over ${window} there were no messages in this scope to check.`

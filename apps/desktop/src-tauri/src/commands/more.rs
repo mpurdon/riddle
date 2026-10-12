@@ -65,8 +65,9 @@ pub async fn director_send(
     message: String,
     dig_ids: Option<Vec<String>>,
     allow_contamination: Option<bool>,
+    title: Option<String>,
 ) -> Result<Value> {
-    route(&state, "director_send", json!({ "conversationId": conversation_id, "message": message, "digIds": dig_ids.unwrap_or_default(), "allowContamination": allow_contamination.unwrap_or(false) })).await
+    route(&state, "director_send", json!({ "conversationId": conversation_id, "message": message, "digIds": dig_ids.unwrap_or_default(), "allowContamination": allow_contamination.unwrap_or(false), "title": title })).await
 }
 
 #[tauri::command]

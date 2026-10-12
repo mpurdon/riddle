@@ -2,6 +2,7 @@
 import type { ActivityId } from "./ActivityId";
 import type { ActivityResult } from "./ActivityResult";
 import type { Actor } from "./Actor";
+import type { ConversationId } from "./ConversationId";
 import type { DigId } from "./DigId";
 import type { EntityRef } from "./EntityRef";
 import type { Provenance } from "./Provenance";
@@ -24,4 +25,9 @@ inputs: unknown, affected: Array<EntityRef>, result: ActivityResult, provenance:
 /**
  * The Activity this one undid, when it is an undo.
  */
-undoes: ActivityId | null, createdAt: string, };
+undoes: ActivityId | null, 
+/**
+ * The Director conversation behind it: one the Director acted or
+ * proposed in, or that proposed what the user applied.
+ */
+conversationId?: ConversationId, createdAt: string, };

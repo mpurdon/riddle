@@ -395,6 +395,14 @@ The Director asks before any external side effect and shows the Action layer's r
 
 Once the Director has read untrusted content in a task, egress Actions (send, reply, forward, create or update a Mesh, add to Never Hidden) require approval, and the UI states why they are disabled (58).
 
+What the Director did can be read back in full (12 Oct 2026). A Payments fix it proposed had dropped a route and two guards, and finding out why took its redacted tool calls, a pending list that forgot declined proposals, and an Activity ledger with no Director in it. Now:
+- Each tool call in the conversation record keeps `input`, the arguments exactly as sent (a Mesh's text, a search's words), and `output`, a compact result: ids and counts for a read that carries mail, the result cut at 4,000 characters otherwise. The redacted `args` are still what events, logs and Activity carry.
+- Every proposal is kept with what became of it (`proposals`, `ProposalRecord`: applied with its Activity, failed, declined with the reason, replaced, expired). A Director proposal replaces its conversation's pending proposal about the same thing (`Action::proposal_subject`: the Mesh, the Signal).
+- Activity names the conversation behind a row (`conversation_id`): the Director's proposals and Mesh previews are rows under its name, and a change the user applies from a proposal says "Proposed by the Director".
+- `director_audit` returns one conversation's turns, proposals and Activity together, through dispatch (the dev bridge) and `riddle-mcp`, which also reads a copied `riddle://director/<id>` link.
+- The Director reads Meshes as an index or one at a time (`list_meshes` with `meshId`): the whole list overran the tool loop's 30,000-character limit, and the Mesh it was editing was in the part cut off.
+- A Mesh preview counts what the edit changes against today's rules re-run (`editChanged`, `editTransitions`) apart from `drift`, mail today's rules already decide differently from how it was stored; `changed` is still what applying to history re-decides.
+
 ## Expedition
 
 Durable delegated work spanning multiple searches, judgments, and Actions.

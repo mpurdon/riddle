@@ -4,6 +4,7 @@
 
 use crate::{dispatch, App};
 use async_trait::async_trait;
+use riddle_agent::fit::pick;
 use riddle_agent::reads::{DirectorReads, ReadScope};
 use riddle_core::{DigId, DispositionKind, MessageId, ThreadId};
 use riddle_errors::{Result, RiddleError};
@@ -98,14 +99,95 @@ impl DirectorReads for AppReads {
         let page = dispatch::call(&self.0, "search", Self::with_scope(scope, args)).await?;
         Ok(self.scrub_page(scope, page))
     }
+    /// Finds without the bookkeeping the Director never reads (ids of the
+    /// classification and trace, the identity key) and without empty fields:
+    /// a page of 50 open Finds was 68,000 characters and the tool loop kept
+    /// the first 30,000.
     async fn list_finds(&self, scope: &ReadScope, args: Value) -> Result<Value> {
-        dispatch::call(&self.0, "list_finds", Self::with_scope(scope, args)).await
+        let mut page = dispatch::call(&self.0, "list_finds", Self::with_scope(scope, args)).await?;
+        for f in rows_mut(&mut page) {
+            if let Some(o) = f.as_object_mut() {
+                for k in ["classificationId", "traceId", "identityKey"] {
+                    o.remove(k);
+                }
+                o.retain(|_, v| !v.is_null());
+            }
+        }
+        Ok(page)
     }
+    /// An index of the Meshes, or one Mesh in full. Every Mesh with its
+    /// text and routes was 97,000 characters on a real profile, cut at the
+    /// tool loop's 30,000: the Director never saw the Payments Mesh it was
+    /// changing, rebuilt it from the one route `explain_decision` showed,
+    /// and proposed a version that dropped a route and two guards
+    /// (12 Oct 2026).
     async fn list_meshes(&self, _scope: &ReadScope, args: Value) -> Result<Value> {
-        dispatch::call(&self.0, "list_meshes", args).await
+        if let Some(want) = args
+            .get("meshId")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            // One Mesh, by id or by name, from the Mesh service (its sentences included).
+            let index = self.0.stores.index();
+            let svc = riddle_mesh::service::MeshService::new(index.clone());
+            let id = match svc.latest(&riddle_core::MeshId::from(want)) {
+                Ok(m) => return Ok(serde_json::to_value(m)?),
+                Err(_) => repo::meshes::find_by_name(&index, want)?.map(|m| m.id),
+            };
+            let id = id.ok_or_else(|| {
+                RiddleError::not_found(format!(
+                    "no Mesh {want:?}; list_meshes without meshId names them"
+                ))
+            })?;
+            return Ok(serde_json::to_value(svc.latest(&id)?)?);
+        }
+        let all = dispatch::call(&self.0, "list_meshes", args).await?;
+        let list = match all {
+            Value::Array(a) => a,
+            _ => vec![],
+        };
+        let keep = [
+            "id",
+            "name",
+            "version",
+            "status",
+            "priority",
+            "scope",
+            "pack",
+            "fallback",
+            "changeNote",
+        ];
+        Ok(Value::Array(list.iter().map(|m| pick(m, &keep)).collect()))
     }
-    async fn list_signals(&self, _scope: &ReadScope) -> Result<Value> {
-        dispatch::call(&self.0, "list_signals", json!({})).await
+    /// An index of the Signals, or one Signal's versions in full: the whole
+    /// registry grows toward the tool loop's limit as Signals are added,
+    /// the same way the Mesh list outgrew it.
+    async fn list_signals(&self, _scope: &ReadScope, args: Value) -> Result<Value> {
+        let index = self.0.stores.index();
+        if let Some(name) = args
+            .get("name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            let versions = repo::signals::versions(&index, &name.to_lowercase())?;
+            return if versions.is_empty() {
+                Err(RiddleError::not_found(format!(
+                    "no Signal {name:?}; list_signals without name names them"
+                )))
+            } else {
+                Ok(serde_json::to_value(versions)?)
+            };
+        }
+        let all = serde_json::to_value(repo::signals::list(&index)?)?;
+        Ok(Value::Array(
+            all.as_array()
+                .map(|l| {
+                    l.iter()
+                        .map(|s| pick(s, &["name", "version", "status", "primitive", "definition"]))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        ))
     }
     async fn explain(
         &self,
@@ -115,8 +197,27 @@ impl DirectorReads for AppReads {
     ) -> Result<Value> {
         serde_json::to_value(self.0.explain(dig_id, message_id)?).map_err(Into::into)
     }
+    /// Activity as the Director reads it: a bulk row's affected messages as
+    /// a count and the first few, its undo as a state and reason. One such
+    /// row carried 22,000 characters of message ids and restore data, and a
+    /// page of 50 was 99,000, of which the tool loop kept the first 30,000.
     async fn list_activity(&self, scope: &ReadScope, args: Value) -> Result<Value> {
-        dispatch::call(&self.0, "list_activity", Self::with_scope(scope, args)).await
+        let mut page =
+            dispatch::call(&self.0, "list_activity", Self::with_scope(scope, args)).await?;
+        for a in rows_mut(&mut page) {
+            let Some(o) = a.as_object_mut() else { continue };
+            if let Some(Value::Array(affected)) = o.remove("affected") {
+                let first: Vec<Value> = affected.iter().take(5).cloned().collect();
+                o.insert(
+                    "affected".into(),
+                    json!({ "count": affected.len(), "first": first }),
+                );
+            }
+            if let Some(undo) = o.remove("undo") {
+                o.insert("undo".into(), pick(&undo, &["state", "reason"]));
+            }
+        }
+        Ok(page)
     }
     async fn simulate_mesh(&self, _scope: &ReadScope, args: Value) -> Result<Value> {
         dispatch::call(&self.0, "simulate_mesh", args).await
@@ -171,4 +272,14 @@ impl DirectorReads for AppReads {
             })).collect::<Vec<_>>(),
         }))
     }
+}
+
+/// The rows of a page (`items`) or a bare list.
+fn rows_mut(v: &mut Value) -> impl Iterator<Item = &mut Value> {
+    let rows = match v {
+        Value::Array(a) => Some(a),
+        Value::Object(o) => o.get_mut("items").and_then(|i| i.as_array_mut()),
+        _ => None,
+    };
+    rows.into_iter().flatten()
 }

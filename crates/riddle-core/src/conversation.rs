@@ -22,9 +22,23 @@ pub enum TurnRole {
 pub struct ToolCall {
     pub id: String,
     pub action: String,
-    /// Redacted arguments: identifiers and counts.
+    /// Redacted arguments: identifiers and counts. What events, logs and
+    /// Activity carry.
     #[ts(type = "unknown")]
     pub args: serde_json::Value,
+    /// The arguments exactly as the Director sent them: a Mesh's text, a
+    /// search's words. Kept in the conversation record, which is local and
+    /// already holds the user's words in full; the redacted `args` had hidden
+    /// the Payments text the Director simulated, so nobody could check its
+    /// proposal against what it had tried (12 Oct 2026).
+    #[serde(default)]
+    #[ts(type = "unknown")]
+    pub input: serde_json::Value,
+    /// What the tool returned, compact: ids and counts for a read that
+    /// carries mail, the result itself (cut at 4,000 characters) otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "unknown", optional)]
+    pub output: Option<serde_json::Value>,
     pub ok: bool,
     pub summary: String,
     pub activity_id: Option<ActivityId>,
@@ -103,4 +117,19 @@ pub struct ToolAllowance {
     pub next_turn_tool_calls: Option<u32>,
     /// The next turn only: this cost limit in place of the usual one.
     pub next_turn_cost_usd: Option<f64>,
+}
+
+/// One Director conversation's whole story: its turns with every tool call
+/// in full, the proposals it made and what became of each, and the Activity
+/// linked to it (its proposals and previews, and what the user applied from
+/// them). The Payments drafts of 12 Oct 2026 had to be pieced together from
+/// redacted tool calls, a pending list that forgot declined proposals, and
+/// an Activity ledger with no Director in it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DirectorAudit {
+    pub conversation: Conversation,
+    pub proposals: Vec<crate::ProposalRecord>,
+    pub activity: Vec<crate::Activity>,
 }

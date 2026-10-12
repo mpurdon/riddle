@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Bot, Check, Plus, RefreshCw, Send, ShieldAlert, X } from 'lucide-react'
+import { AlertTriangle, Bot, Check, Link2, Plus, RefreshCw, Send, ShieldAlert, X } from 'lucide-react'
 import type { ToolCall } from '@/bindings/ToolCall'
 import type { Turn } from '@/bindings/Turn'
 import { directorRetry, directorSend, getConversation, listConversations, qk } from '@/lib/api'
@@ -32,7 +32,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Note } from '@/components/ui/Note'
 import { Tip } from '@/components/ui/Tooltip'
 import { ErrorCard } from '@/components/ErrorCard'
-import { PageHeader } from '@/components/Bits'
+import { PageHeader, useCopy } from '@/components/Bits'
 import { ProposalsPanel } from './ProposalsPanel'
 import { Resizable } from '@/components/Resizable'
 
@@ -125,10 +125,13 @@ export default function DirectorPage() {
   const conv = useQuery({ queryKey: conversationId ? qk.conversation(conversationId) : ['conversation', 'none'], queryFn: () => getConversation(conversationId!), enabled: !!conversationId })
   const live = useDirector((s) => (conversationId ? s.live[conversationId] : undefined))
   const prefill = useDirector((s) => s.prefill)
+  const prefillTitle = useDirector((s) => s.prefillTitle)
   const setPrefill = useDirector((s) => s.setPrefill)
   const begin = useDirector((s) => s.begin)
   const clear = useDirector((s) => s.clear)
   const [text, setText] = useState('')
+  // What a prefilled draft is about, kept until it starts a conversation.
+  const [newTitle, setNewTitle] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -138,10 +141,11 @@ export default function DirectorPage() {
     // A prefill is a draft, never a send: show it, focus it, wait for ⌘↵.
     if (prefill) {
       setText(prefill)
+      setNewTitle(prefillTitle)
       setPrefill(null)
       inputRef.current?.focus()
     }
-  }, [prefill, setPrefill])
+  }, [prefill, prefillTitle, setPrefill])
   useEffect(() => {
     if (live?.done && conversationId) {
       void qc.invalidateQueries({ queryKey: qk.conversation(conversationId) }).then(() => clear(conversationId))
@@ -157,7 +161,8 @@ export default function DirectorPage() {
     if (!m || sending || working) return
     setSending(true)
     try {
-      const out = await directorSend({ conversationId: conversationId ?? null, message: m, digIds: digId ? [digId] : digs.map((d) => d.id) })
+      const out = await directorSend({ conversationId: conversationId ?? null, message: m, digIds: digId ? [digId] : digs.map((d) => d.id), title: conversationId ? null : newTitle })
+      setNewTitle(null)
       begin(out.conversationId)
       if (message === undefined) setText('')
       if (out.conversationId !== conversationId) nav(`/director/${out.conversationId}`)
@@ -249,6 +254,7 @@ export default function DirectorPage() {
               }
             />
           ) : null}
+          {conv.data ? <ConversationHeading id={conv.data.id} title={conv.data.title} /> : null}
           {conv.error ? <ErrorCard error={conv.error} onRetry={() => conv.refetch()} /> : null}
           {readUntrusted ? (
             <Note tone="warn" className="mb-4">
@@ -373,6 +379,31 @@ function ToolCallCard({ c }: { c: ToolCall }) {
           Activity
         </button>
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * The conversation's name and a link to it. There was no way to point
+ * someone (or another Claude session) at one conversation: the list showed
+ * ten rows titled the same and the id was nowhere on screen. The link is
+ * `riddle://director/<id>`, with the title so it reads on its own; the id
+ * is what the dev bridge's `get_conversation` takes.
+ */
+export function conversationLink(id: string, title: string): string {
+  return `riddle://director/${id} (Director: ${title})`
+}
+
+function ConversationHeading({ id, title }: { id: string; title: string }) {
+  const [copied, copy] = useCopy(conversationLink(id, title))
+  return (
+    <div className="mb-3 flex items-center gap-3">
+      <h2 className="min-w-0 flex-1 truncate text-sm font-semibold" title={title}>
+        {title}
+      </h2>
+      <Button size="sm" variant="ghost" icon={copied ? <Check /> : <Link2 />} onClick={() => void copy()} title="Copy a link to this conversation, to paste in a note or another chat">
+        {copied ? 'Copied' : 'Copy link'}
+      </Button>
     </div>
   )
 }

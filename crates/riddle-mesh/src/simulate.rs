@@ -58,6 +58,10 @@ pub struct SimulationInput<'a> {
     /// applies the same one, so a route that would be held for escalation
     /// is predicted as Unresolved, not as what it routed to.
     pub policy: ConfidencePolicy,
+    /// Also re-run today's rules to tell the edit's own changes from drift
+    /// (`edit_changed`, `drift`). A preview wants it; applying to history,
+    /// which re-decides every change either way, does not pay for it.
+    pub measure_edit: bool,
 }
 
 impl<'a> SimulationInput<'a> {
@@ -71,6 +75,7 @@ impl<'a> SimulationInput<'a> {
             max_messages_per_dig: 50_000,
             price_per_mtok: Some(0.042),
             policy: ConfidencePolicy::default(),
+            measure_edit: true,
         }
     }
 }
@@ -91,6 +96,43 @@ pub struct ChangedMessage {
     pub user_decided: bool,
 }
 
+/// Where a decision lands once the confidence policy has had its say: a
+/// route that would be held for escalation is Unresolved.
+fn outcome(
+    decision: &crate::eval::MeshDecision,
+    policy: &ConfidencePolicy,
+    language: &str,
+) -> DispositionKind {
+    let routed = match decision.output.as_ref() {
+        Some(o) if o.escalate && o.disposition.is_none() => DispositionKind::Unresolved,
+        Some(o) => o
+            .disposition
+            .as_ref()
+            .map(Disposition::kind)
+            .unwrap_or(DispositionKind::Unresolved),
+        None => DispositionKind::Unresolved,
+    };
+    if policy.stands(routed, decision.margin, language) {
+        routed
+    } else {
+        DispositionKind::Unresolved
+    }
+}
+
+fn sorted_transitions(t: HashMap<(DispositionKind, DispositionKind), u64>) -> Vec<Transition> {
+    let mut out: Vec<Transition> = t
+        .into_iter()
+        .map(|((from, to), count)| Transition { from, to, count })
+        .collect();
+    out.sort_by(|a, b| {
+        b.count
+            .cmp(&a.count)
+            .then(a.from.as_str().cmp(b.from.as_str()))
+            .then(a.to.as_str().cmp(b.to.as_str()))
+    });
+    out
+}
+
 pub fn simulate(input: SimulationInput<'_>) -> Result<SimulationReport> {
     Ok(simulate_detailed(input)?.0)
 }
@@ -106,9 +148,12 @@ pub fn simulate_detailed(
     let from_version = repo::meshes::latest(&index, &candidate.id)?
         .map(|m| m.version)
         .filter(|v| *v != candidate.version || candidate.status != MeshStatus::Draft);
-    let mut running: Vec<Mesh> = repo::meshes::list_running(&index)?
-        .into_iter()
+    // Today's rules, unchanged: the baseline the edit is measured against.
+    let today: Vec<Mesh> = repo::meshes::list_running(&index)?;
+    let mut running: Vec<Mesh> = today
+        .iter()
         .filter(|m| m.id != candidate.id)
+        .cloned()
         .collect();
     let mut cand = candidate.clone();
     cand.status = MeshStatus::Active;
@@ -137,6 +182,9 @@ pub fn simulate_detailed(
         refs.into_iter().map(|(s, v)| format!("{s}@v{v}")).collect()
     };
     let mut transitions: HashMap<(DispositionKind, DispositionKind), u64> = HashMap::new();
+    let mut edit_transitions: HashMap<(DispositionKind, DispositionKind), u64> = HashMap::new();
+    let (mut edit_changed, mut drift) = (0u64, 0u64);
+    let mut sample_edit_changed = Vec::new();
     let mut sample_changed = Vec::new();
     let mut all_changed = Vec::new();
     for dig in input
@@ -152,6 +200,11 @@ pub fn simulate_detailed(
             .collect();
         let (alone, others): (Vec<Mesh>, Vec<Mesh>) =
             in_scope.iter().cloned().partition(|m| m.id == candidate.id);
+        let today_in_scope: Vec<Mesh> = today
+            .iter()
+            .filter(|m| m.scope.applies_to(&dig.id, dig.group.as_deref()))
+            .cloned()
+            .collect();
         // One past the ceiling tells an over-full window from a full one.
         let ids = repo::messages::ids_since(&store, &since, input.max_messages_per_dig + 1)?;
         if ids.len() > input.max_messages_per_dig as usize {
@@ -237,23 +290,32 @@ pub fn simulate_detailed(
                 }
                 _ => {}
             }
-            let routed = match decision.output.as_ref() {
-                Some(o) if o.escalate && o.disposition.is_none() => DispositionKind::Unresolved,
-                Some(o) => o
-                    .disposition
-                    .as_ref()
-                    .map(Disposition::kind)
-                    .unwrap_or(DispositionKind::Unresolved),
-                None => DispositionKind::Unresolved,
-            };
-            let to = if input
-                .policy
-                .stands(routed, decision.margin, &facts.language)
-            {
-                routed
-            } else {
-                DispositionKind::Unresolved
-            };
+            let to = outcome(&decision, &input.policy, &facts.language);
+            // The same message under today's rules, unchanged.
+            if input.measure_edit {
+                let base = evaluate_with(
+                    &today_in_scope,
+                    &facts,
+                    &evaluations,
+                    &FactsLists(&facts, &named),
+                    Some(&input.policy),
+                );
+                let base_to = if base.unresolved_signal_refs.is_empty() {
+                    outcome(&base, &input.policy, &facts.language)
+                } else {
+                    current
+                };
+                if base_to != current {
+                    drift += 1;
+                }
+                if to != base_to {
+                    edit_changed += 1;
+                    *edit_transitions.entry((base_to, to)).or_insert(0) += 1;
+                    if sample_edit_changed.len() < 20 {
+                        sample_edit_changed.push(id.clone());
+                    }
+                }
+            }
             // Same disposition, but recorded differently: it must be decided
             // again, or the store keeps the old Find type, Strata or series.
             let effect = if to == current && to != DispositionKind::Unresolved {
@@ -297,16 +359,8 @@ pub fn simulate_detailed(
             });
         }
     }
-    let mut transitions: Vec<Transition> = transitions
-        .into_iter()
-        .map(|((from, to), count)| Transition { from, to, count })
-        .collect();
-    transitions.sort_by(|a, b| {
-        b.count
-            .cmp(&a.count)
-            .then(a.from.as_str().cmp(b.from.as_str()))
-            .then(a.to.as_str().cmp(b.to.as_str()))
-    });
+    let transitions = sorted_transitions(transitions);
+    let edit_transitions = sorted_transitions(edit_transitions);
     Ok((
         SimulationReport {
             mesh_id: Some(candidate.id.clone()),
@@ -322,6 +376,10 @@ pub fn simulate_detailed(
                 .price_per_mtok
                 .map(|p| needs_judge as f64 * 2_000.0 * p / 1_000_000.0),
             sample_changed,
+            edit_changed,
+            edit_transitions,
+            sample_edit_changed,
+            drift,
             window_days: input.window_days,
             joins_series,
             recorded_changes: recorded,
@@ -883,5 +941,63 @@ mod tests {
         };
         let report = simulate(SimulationInput::new(&stores, vec![dig], &candidate)).unwrap();
         assert_eq!(report.historical_messages, 0);
+    }
+
+    /// A preview separates what the edit does from what today's rules would
+    /// re-decide anyway: on a real mailbox 16 of a preview's 20 "changes"
+    /// came with the Mesh text untouched, and the Director reported the
+    /// total as its edit's effect.
+    #[test]
+    fn a_preview_counts_the_edit_s_own_changes_apart_from_drift() {
+        let stores = Stores::in_memory().unwrap();
+        let dig = dig("d", None);
+        let store = stores.dig(&dig.id).unwrap();
+        let mut today =
+            parse("Mesh: Newsletters v1\nScope:\nAll Digs\nROUTES\nIF newsletter@v1 > .5 → Spoil")
+                .unwrap();
+        today.id = MeshId("mesh_news".into());
+        today.status = MeshStatus::Active;
+        repo::meshes::upsert(&stores.index(), &today).unwrap();
+        // m1: stored Filed, but today's rules already say Spoil (drift, not the edit's doing).
+        // m2: stored Spoil, today Spoil, the stricter edit's margin is too thin to stand: Unresolved (the edit's doing).
+        // m3: Spoil under every version.
+        for (pid, score, stored) in [
+            ("m1", 0.98, Disposition::Filed),
+            ("m2", 0.8, Disposition::Spoil),
+            ("m3", 0.99, Disposition::Spoil),
+        ] {
+            let m = message(&dig.id, pid, "news@list.example");
+            repo::messages::upsert(&store, &m).unwrap();
+            repo::facts::put(
+                &store,
+                &m.id,
+                &Facts {
+                    mailing_list: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            repo::signals::put_evaluation(&store, &eval(&m.id, "newsletter", score)).unwrap();
+            classify(&store, &m.id, &dig.id, stored);
+        }
+        let mut candidate =
+            parse("Mesh: Newsletters v2\nScope:\nAll Digs\nROUTES\nIF newsletter@v1 > .7 → Spoil")
+                .unwrap();
+        candidate.id = MeshId("mesh_news".into());
+        let report = simulate(SimulationInput::new(&stores, vec![dig], &candidate)).unwrap();
+        assert_eq!(report.changed, 2, "applying re-decides both");
+        assert_eq!((report.edit_changed, report.drift), (1, 1));
+        assert_eq!(
+            report.edit_transitions,
+            vec![Transition {
+                from: DispositionKind::Spoil,
+                to: DispositionKind::Unresolved,
+                count: 1
+            }]
+        );
+        assert_eq!(
+            report.sample_edit_changed,
+            vec![MessageId::for_provider(&DigId("d1".into()), "m2")]
+        );
     }
 }

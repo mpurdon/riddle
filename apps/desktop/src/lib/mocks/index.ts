@@ -111,7 +111,7 @@ export function registerMocks(): void {
     if (!c) throw { kind: 'not_found', message: 'conversation not found', detail: null }
     return c
   })
-  mock('director_send', (a) => directorSend(state, { conversationId: opt(a, 'conversationId') as string | null, message: str(a, 'message'), digIds: opt(a, 'digIds') as string[] | null }))
+  mock('director_send', (a) => directorSend(state, { conversationId: opt(a, 'conversationId') as string | null, message: str(a, 'message'), digIds: opt(a, 'digIds') as string[] | null, title: opt(a, 'title') as string | null }))
   mock('director_retry', (a) => directorRetry(state, { conversationId: str(a, 'conversationId') }))
   mock('list_expeditions', () => state.expeditions)
   mock('get_expedition', (a) => {

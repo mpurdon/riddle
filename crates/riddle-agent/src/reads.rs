@@ -52,7 +52,7 @@ pub trait DirectorReads: Send + Sync {
     /// `{ includeDeleted? }` -> `Mesh[]`.
     async fn list_meshes(&self, scope: &ReadScope, args: Value) -> Result<Value>;
     /// -> `Signal[]`.
-    async fn list_signals(&self, scope: &ReadScope) -> Result<Value>;
+    async fn list_signals(&self, scope: &ReadScope, args: Value) -> Result<Value>;
     /// -> `Explanation`.
     async fn explain(
         &self,
@@ -167,7 +167,7 @@ impl DirectorReads for ScriptedReads {
     async fn list_meshes(&self, _scope: &ReadScope, args: Value) -> Result<Value> {
         self.next("list_meshes", args)
     }
-    async fn list_signals(&self, _scope: &ReadScope) -> Result<Value> {
+    async fn list_signals(&self, _scope: &ReadScope, _args: Value) -> Result<Value> {
         self.next("list_signals", Value::Null)
     }
     async fn explain(

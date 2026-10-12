@@ -68,6 +68,10 @@ pub struct SendRequest {
     pub dig_ids: Vec<DigId>,
     /// Set by the UI only when the user has opened a Contamination message.
     pub allow_contamination: bool,
+    /// A new conversation's title when the caller knows what it is about
+    /// ("Talk to the Director about this" names the sender and subject);
+    /// otherwise the first line of the message.
+    pub title: Option<String>,
 }
 
 pub struct Director {
@@ -189,7 +193,12 @@ impl Director {
                 .ok_or_else(|| RiddleError::not_found("no such conversation"))?,
             None => Conversation {
                 id: ConversationId::new(),
-                title: title_of(&message),
+                title: title_of(
+                    req.title
+                        .as_deref()
+                        .filter(|t| !t.trim().is_empty())
+                        .unwrap_or(&message),
+                ),
                 turns: vec![],
                 read_untrusted: false,
                 dig_ids: req.dig_ids.clone(),
@@ -534,8 +543,12 @@ fn scope_digs<'a>(all: &'a [Dig], requested: &[DigId]) -> Result<(Vec<&'a Dig>, 
     Ok((chosen, vec![]))
 }
 
-fn title_of(message: &str) -> String {
-    let first = message.lines().next().unwrap_or("").trim();
+/// A conversation's title: the first line of what names it, cut at sixty
+/// characters. "Talk to the Director about this" sends the sender and
+/// subject as the title; every such conversation used to be titled by its
+/// opening words, the same for each ("Let's talk about this message…").
+pub fn title_of(text: &str) -> String {
+    let first = text.lines().next().unwrap_or("").trim();
     let mut t: String = first.chars().take(60).collect();
     if first.chars().count() > 60 {
         t.push('…');
@@ -660,4 +673,23 @@ fn history(conv: &Conversation, limit: usize) -> Vec<LlmMessage> {
         out.push(LlmMessage::user("(continue)"));
     }
     out
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::title_of;
+
+    #[test]
+    fn a_title_is_the_first_line_cut_at_sixty() {
+        assert_eq!(
+            title_of("The Stack · Runtime: Big Iron"),
+            "The Stack · Runtime: Big Iron"
+        );
+        assert_eq!(
+            title_of("What needs me today?\nmore"),
+            "What needs me today?"
+        );
+        assert_eq!(title_of(&"a".repeat(70)).chars().count(), 61);
+        assert_eq!(title_of("  "), "Conversation");
+    }
 }

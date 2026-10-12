@@ -6,8 +6,8 @@ use rusqlite::{params, OptionalExtension};
 pub fn append(store: &Store, a: &Activity) -> Result<()> {
     store.write(|c| {
         c.execute(
-            "INSERT INTO activities (id, actor, action, dig_id, json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![a.id.as_str(), a.actor.as_str(), a.action, a.dig_id.as_ref().map(|d| d.as_str()), to_json(a)?, ts(&a.created_at)],
+            "INSERT INTO activities (id, actor, action, dig_id, json, created_at, conversation_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![a.id.as_str(), a.actor.as_str(), a.action, a.dig_id.as_ref().map(|d| d.as_str()), to_json(a)?, ts(&a.created_at), a.conversation_id.as_ref().map(|c| c.as_str())],
         )?;
         Ok(())
     })
@@ -41,6 +41,8 @@ pub struct ActivityFilter {
     pub action: Option<String>,
     pub since: Option<chrono::DateTime<chrono::Utc>>,
     pub until: Option<chrono::DateTime<chrono::Utc>>,
+    /// One Director conversation's Activity.
+    pub conversation_id: Option<String>,
 }
 
 pub fn list(store: &Store, filter: &ActivityFilter, page: &PageRequest) -> Result<Page<Activity>> {
@@ -60,6 +62,10 @@ pub fn list(store: &Store, filter: &ActivityFilter, page: &PageRequest) -> Resul
         if let Some(a) = &filter.action {
             sql.push_str(" AND action = ?");
             args.push(Box::new(a.clone()));
+        }
+        if let Some(c) = &filter.conversation_id {
+            sql.push_str(" AND conversation_id = ?");
+            args.push(Box::new(c.clone()));
         }
         if let Some(s) = &filter.since {
             sql.push_str(" AND created_at >= ?");

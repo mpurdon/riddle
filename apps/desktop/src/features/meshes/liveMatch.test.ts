@@ -20,6 +20,10 @@ const report = (o: Partial<Record<'historicalMessages' | 'changed' | 'unchanged'
     rescore: u64(0),
   estimatedCostUsd: null,
   sampleChanged: [],
+  editChanged: u64(o.changed ?? 0),
+  editTransitions: [],
+  sampleEditChanged: [],
+  drift: u64(0),
   windowDays: o.windowDays ?? 30,
 })
 

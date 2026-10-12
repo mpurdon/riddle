@@ -79,6 +79,14 @@ impl Action for CreateMesh {
             .autonomy(Autonomy::Suggest)
             .build()
     }
+    /// A new Mesh is known by its name, as the parser reads it (a `v2`
+    /// suffix is a version, not part of the name).
+    fn proposal_subject(&self, args: &Value) -> Option<String> {
+        let text = args.get("text").and_then(|v| v.as_str())?;
+        crate::parse::parse(text)
+            .ok()
+            .map(|m| m.name.to_lowercase())
+    }
     async fn preview(&self, _ctx: &ActionContext, args: &Value) -> Result<Preview> {
         let text = arg_str(args, "text")?;
         let (m, _) = crate::parse::parse_full(text)?;
@@ -137,6 +145,11 @@ impl Action for UpdateMesh {
         .autonomy(Autonomy::Suggest)
         .build()
     }
+    fn proposal_subject(&self, args: &Value) -> Option<String> {
+        args.get("meshId")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }
     async fn preview(&self, ctx: &ActionContext, args: &Value) -> Result<Preview> {
         let id = MeshId(arg_str(args, "meshId")?.to_string());
         let text = arg_str(args, "text")?;
@@ -179,19 +192,8 @@ impl Action for UpdateMesh {
                 mesh_name: m.name.clone(),
                 from_version: Some(prior.version),
                 to_version: m.version,
-                historical_messages: 0,
-                unchanged: 0,
-                changed: 0,
-                transitions: vec![],
-                new_judge_calls_required: 0,
-                estimated_cost_usd: None,
-                sample_changed: vec![],
                 window_days: window,
-                joins_series: 0,
-                recorded_changes: 0,
-                taken_first_by: vec![],
-                takes_from: vec![],
-                rescore: 0,
+                ..Default::default()
             }
         });
         Ok(ActionResult::ok(json!({ "mesh": m, "simulation": simulation, "report": simulation }), format!("Changed Mesh {} to v{} ({:?}); {} of {} messages would change", m.name, m.version, m.status, simulation.changed, simulation.historical_messages))
@@ -250,6 +252,11 @@ impl Action for SetMeshStatus {
         .risk(Risk::Medium)
         .autonomy(Autonomy::Trusted)
         .build()
+    }
+    fn proposal_subject(&self, args: &Value) -> Option<String> {
+        args.get("meshId")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
         let id = MeshId(arg_str(&args, "meshId")?.to_string());

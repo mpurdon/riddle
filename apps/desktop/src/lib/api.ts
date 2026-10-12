@@ -169,8 +169,8 @@ export const listStrata = () => call<Stratum[]>('list_strata')
 
 export const listConversations = () => call<Conversation[]>('list_conversations')
 export const getConversation = (conversationId: string) => call<Conversation>('get_conversation', { conversationId })
-export const directorSend = (args: { conversationId?: string | null; message: string; digIds?: string[] | null }) =>
-  call<DirectorSendResult>('director_send', { conversationId: args.conversationId ?? null, message: args.message, digIds: args.digIds ?? null })
+export const directorSend = (args: { conversationId?: string | null; message: string; digIds?: string[] | null; title?: string | null }) =>
+  call<DirectorSendResult>('director_send', { conversationId: args.conversationId ?? null, message: args.message, digIds: args.digIds ?? null, title: args.title ?? null })
 
 export const directorRetry = (conversationId: string) => call<DirectorSendResult>('director_retry', { conversationId })
 

@@ -1917,9 +1917,9 @@ export function buildConversations(): Conversation[] {
           content:
             'Seven Finds are open and two messages are Unresolved. Before your first meeting I would handle two:\n\n1. **Adam is waiting on the Jeep brakes** — he needs an answer by tomorrow noon to order parts.\n2. **Review on PR #412** — Jamie says it blocks the merge, and Priya wants the deploy before the Friday change freeze.\n\nThe Ledgerly invoice is due Friday; the Datadog renewal has eight days. Riddle is still catching up on Work (1,240 messages to sift), so this may change.',
           toolCalls: [
-            { id: 'tc_1', action: 'list_finds', args: { status: 'open' }, ok: true, summary: '7 open Finds', activityId: null, latencyMs: u64(12), untrusted: false },
-            { id: 'tc_2', action: 'task_centre', args: {}, ok: true, summary: 'Work catching up: 1,240 remaining', activityId: null, latencyMs: u64(4), untrusted: false },
-            { id: 'tc_3', action: 'get_thread', args: { digId: DIG_PERSONAL, threadId: 't_pers_jeep' }, ok: true, summary: 'Read 3 messages', activityId: null, latencyMs: u64(9), untrusted: true },
+            { id: 'tc_1', action: 'list_finds', args: { status: 'open' }, input: { status: 'open' }, ok: true, summary: '7 open Finds', activityId: null, latencyMs: u64(12), untrusted: false },
+            { id: 'tc_2', action: 'task_centre', args: {}, input: {}, ok: true, summary: 'Work catching up: 1,240 remaining', activityId: null, latencyMs: u64(4), untrusted: false },
+            { id: 'tc_3', action: 'get_thread', args: { digId: DIG_PERSONAL, threadId: 't_pers_jeep' }, input: { digId: DIG_PERSONAL, threadId: 't_pers_jeep' }, ok: true, summary: 'Read 3 messages', activityId: null, latencyMs: u64(9), untrusted: true },
           ],
           createdAt: ago(1.15),
           inputTokens: u64(6120),
@@ -1931,9 +1931,9 @@ export function buildConversations(): Conversation[] {
           role: 'director',
           content: 'Done: 23 newsletters moved to Spoil across your three Digs; 2 were skipped because you had handled them since. I did not create a Mesh for this because I read mail content earlier in this task, so creating one needs your approval. There is a proposal waiting if you want it.',
           toolCalls: [
-            { id: 'tc_4', action: 'search', args: { query: 'is:newsletter never-opened', page: { cursor: null, limit: 100 } }, ok: true, summary: '25 messages', activityId: null, latencyMs: u64(31), untrusted: true },
-            { id: 'tc_5', action: 'move_to_spoil', args: { count: 25 }, ok: true, summary: 'Moved 23, skipped 2', activityId: 'act_director_nl', latencyMs: u64(88), untrusted: false },
-            { id: 'tc_6', action: 'create_mesh', args: { name: 'Unopened newsletters' }, ok: false, summary: 'needs approval: this task has read untrusted content', activityId: null, latencyMs: u64(2), untrusted: false },
+            { id: 'tc_4', action: 'search', args: { query: 'is:newsletter never-opened', page: { cursor: null, limit: 100 } }, input: { query: 'is:newsletter never-opened', page: { cursor: null, limit: 100 } }, ok: true, summary: '25 messages', activityId: null, latencyMs: u64(31), untrusted: true },
+            { id: 'tc_5', action: 'move_to_spoil', args: { count: 25 }, input: { count: 25 }, ok: true, summary: 'Moved 23, skipped 2', activityId: 'act_director_nl', latencyMs: u64(88), untrusted: false },
+            { id: 'tc_6', action: 'create_mesh', args: { name: 'Unopened newsletters' }, input: { name: 'Unopened newsletters' }, ok: false, summary: 'needs approval: this task has read untrusted content', activityId: null, latencyMs: u64(2), untrusted: false },
           ],
           createdAt: ago(1),
           inputTokens: u64(7410),
@@ -1957,8 +1957,8 @@ export function buildConversations(): Conversation[] {
           role: 'director',
           content: 'No Mesh covered AWS mail, so it fell to the Signals: routine .88 against personally_relevant .35, which the confidence policy reads as Spoil. You have corrected AWS billing alerts three times now. I have created a Shadow Mesh, AWS Notifications, that surfaces billing alerts as Find: Know; it will propose rather than act until you have seen it agree.',
           toolCalls: [
-            { id: 'tc_7', action: 'explain', args: { digId: DIG_WORK, messageId: 'm_work_aws' }, ok: true, summary: 'jev: routine .88', activityId: null, latencyMs: u64(6), untrusted: false },
-            { id: 'tc_8', action: 'create_mesh', args: { name: 'AWS Notifications', status: 'shadow' }, ok: true, summary: 'Created v1 (Shadow)', activityId: 'act_director_mesh', latencyMs: u64(40), untrusted: false },
+            { id: 'tc_7', action: 'explain', args: { digId: DIG_WORK, messageId: 'm_work_aws' }, input: { digId: DIG_WORK, messageId: 'm_work_aws' }, ok: true, summary: 'jev: routine .88', activityId: null, latencyMs: u64(6), untrusted: false },
+            { id: 'tc_8', action: 'create_mesh', args: { name: 'AWS Notifications', status: 'shadow' }, input: { name: 'AWS Notifications', status: 'shadow' }, ok: true, summary: 'Created v1 (Shadow)', activityId: 'act_director_mesh', latencyMs: u64(40), untrusted: false },
           ],
           createdAt: daysAgo(3),
           inputTokens: u64(3100),

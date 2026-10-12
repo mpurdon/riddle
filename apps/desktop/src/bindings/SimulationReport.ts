@@ -32,6 +32,28 @@ recordedChanges: bigint,
  */
 rescore: bigint, 
 /**
+ * Messages whose outcome this edit changes: the candidate against
+ * today's rules re-run unchanged, not against the stored decisions.
+ * `changed` counted both, and on a real mailbox 16 of a preview's 20
+ * "changes" happened with the Mesh text untouched (rules and Signals
+ * had moved since the mail was decided); the Director read the total
+ * as its edit's effect (12 Oct 2026).
+ */
+editChanged: bigint, 
+/**
+ * `edit_changed` by from → to, where "from" is what today's rules decide.
+ */
+editTransitions: Array<Transition>, 
+/**
+ * A sample of the messages the edit changes.
+ */
+sampleEditChanged: Array<MessageId>, 
+/**
+ * Messages today's rules, unchanged, would decide differently from how
+ * they are stored: re-decided by apply-to-history whatever the edit.
+ */
+drift: bigint, 
+/**
  * Running Meshes that decide mail this one matches, because they run
  * first: "15 of the messages this Mesh matches are taken first by
  * Security and account alerts". Most first.

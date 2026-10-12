@@ -117,6 +117,8 @@ pub const COMMANDS: &[&str] = &[
     "list_labels",
     "mail_places",
     "list_conversations",
+    "director_audit",
+    "list_proposals",
     "get_conversation",
     "director_send",
     "director_retry",
@@ -228,6 +230,7 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
                 action: opt(&args, "action"),
                 since: opt(&args, "since"),
                 until: opt(&args, "until"),
+                conversation_id: opt(&args, "conversationId"),
             };
             serde_json::to_value(app.list_activity(&filter, &page)?)?
         }
@@ -342,6 +345,14 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             serde_json::to_value(app.list_labels(dig.as_ref())?)?
         }
         "list_conversations" => serde_json::to_value(repo::conversations::list(&index, 100)?)?,
+        "director_audit" => {
+            serde_json::to_value(app.director_audit(&arg::<String>(&args, "conversationId")?)?)?
+        }
+        "list_proposals" => serde_json::to_value(repo::pending::proposals(
+            &index,
+            args.get("conversationId").and_then(|v| v.as_str()),
+            args.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as u32,
+        )?)?,
         "get_conversation" => serde_json::to_value(
             repo::conversations::get(&index, &arg(&args, "conversationId")?)?
                 .ok_or_else(|| RiddleError::not_found("conversation"))?,
@@ -356,6 +367,7 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
                 message: arg(&args, "message")?,
                 dig_ids: opt(&args, "digIds").unwrap_or_default(),
                 allow_contamination: opt(&args, "allowContamination").unwrap_or(false),
+                title: opt(&args, "title"),
             };
             let id = director.send(req)?;
             json!({ "conversationId": id })

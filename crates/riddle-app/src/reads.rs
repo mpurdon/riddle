@@ -449,6 +449,35 @@ impl App {
         repo::traces::get(&store, id)?.ok_or_else(|| RiddleError::not_found(format!("trace {id}")))
     }
 
+    /// One Director conversation's whole story (`DirectorAudit`), by its id
+    /// or by a link copied from the Director page
+    /// (`riddle://director/<id> (Director: <title>)`).
+    pub fn director_audit(&self, id_or_link: &str) -> Result<DirectorAudit> {
+        let id = id_or_link.trim().trim_start_matches("riddle://director/");
+        let conversation_id = &ConversationId::from(id.split_whitespace().next().unwrap_or(""));
+        let index = self.stores.index();
+        let conversation = repo::conversations::get(&index, conversation_id)?
+            .ok_or_else(|| RiddleError::not_found(format!("conversation {conversation_id}")))?;
+        let proposals = repo::pending::proposals(&index, Some(conversation_id.as_str()), 500)?;
+        let activity = self
+            .list_activity(
+                &repo::activities::ActivityFilter {
+                    conversation_id: Some(conversation_id.as_str().to_string()),
+                    ..Default::default()
+                },
+                &PageRequest {
+                    cursor: None,
+                    limit: Some(500),
+                },
+            )?
+            .items;
+        Ok(DirectorAudit {
+            conversation,
+            proposals,
+            activity,
+        })
+    }
+
     /// Every label of the enabled accounts (or one), named from the
     /// account's label list and counted over stored mail. Gmail's own labels
     /// with no mail, and the Unread and Chat bookkeeping labels, are left

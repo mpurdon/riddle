@@ -1,6 +1,6 @@
 id = "money"
 name = "Money"
-version = 3
+version = 4
 area = "Money"
 summary = "Bills, renewals and amounts due become Pay or Do Finds; transfers and credit alerts are Know Finds; receipts and charges are Filed; donation appeals are kept apart from bills."
 band = "general"
@@ -19,6 +19,15 @@ default = ["payments.interac.ca", "paypal.com", "wise.com"]
 name = "invoice_senders"
 description = "Senders whose invoices you pay yourself"
 question = "Who sends you invoices you pay by hand (a domain registrar, a contractor)?"
+default = []
+
+# v4: newsletters are not bills. A tech newsletter's issues scored .87 as
+# invoices and became Pay Finds; the invoice route now skips newsletters and
+# the senders in newsletter_senders, for the ones the Signal misses.
+[[lists]]
+name = "newsletter_senders"
+description = "Newsletters whose issues are never bills, however invoice-like the wording"
+question = "Which newsletters talk about money without ever billing you (the-stack@ghost.io)?"
 default = []
 
 [[lists]]
@@ -117,7 +126,7 @@ ROUTES
 
 IF marketing@v1 > .60 AND payment_related@v1 > .50 AND donation_appeal@v1 > .80
     → Find: Know + Stratum: Charity
-ELSE IF invoice@v1 > .80 AND requires_action@v1 > .60 AND marketing@v1 < .90
+ELSE IF invoice@v1 > .80 AND requires_action@v1 > .60 AND marketing@v1 < .90 AND newsletter@v1 < .80 AND NOT sender IN list:newsletter_senders
     → Find: Pay + Stratum: Finance
 ELSE IF payment_related@v1 > .80 AND requires_action@v1 > .70 AND marketing@v1 < .90
     → Find: Pay + Stratum: Finance

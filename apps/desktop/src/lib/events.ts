@@ -120,7 +120,8 @@ export function handleEvent(qc: QueryClient, e: RiddleEvent): void {
       inv(qk.usage)
       break
     case 'proposal_created':
-      // The event is a signal; the proposal itself comes from list_pending.
+    case 'proposal_resolved':
+      // The event is a signal; the proposals themselves come from list_pending.
       inv(qk.pending)
       break
     case 'expedition_changed':

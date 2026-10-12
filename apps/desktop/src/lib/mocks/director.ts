@@ -15,7 +15,7 @@ import { nextId, type MockState } from './state'
 import { MESH_GITHUB_V7 } from './fixtures'
 
 interface Script {
-  tools: (Omit<ToolCall, 'id'> & { delayMs: number })[]
+  tools: (Omit<ToolCall, 'id' | 'input'> & { delayMs: number })[]
   text: string
   proposal?: { action: string; args: Record<string, unknown>; realArguments: unknown; summary: string; reason: string }
   expedition?: boolean
@@ -109,7 +109,8 @@ function runScript(state: MockState, c: Conversation, message: string) {
   const calls: ToolCall[] = []
   for (const t of s.tools) {
     const { delayMs, ...rest } = t
-    const call: ToolCall = { id: nextId(state, 'tc'), ...rest }
+    // The mock's arguments carry no mail, so the record's full input is the same.
+    const call: ToolCall = { id: nextId(state, 'tc'), input: rest.args, ...rest }
     calls.push(call)
     setTimeout(() => {
       if (call.untrusted) c.readUntrusted = true
@@ -166,11 +167,11 @@ function runScript(state: MockState, c: Conversation, message: string) {
   }
 }
 
-export function directorSend(state: MockState, args: { conversationId?: string | null; message: string; digIds?: string[] | null }): { conversationId: string } {
+export function directorSend(state: MockState, args: { conversationId?: string | null; message: string; digIds?: string[] | null; title?: string | null }): { conversationId: string } {
   let conv = args.conversationId ? state.conversations.find((c) => c.id === args.conversationId) : undefined
   const now = iso(new Date())
   if (!conv) {
-    conv = { id: nextId(state, 'conv'), title: args.message.slice(0, 60), turns: [], readUntrusted: false, digIds: args.digIds ?? state.digs.map((d) => d.id), modelId: 'bedrock:us.anthropic.claude-sonnet-5', promptVersion: 'director/v3', createdAt: now, updatedAt: now }
+    conv = { id: nextId(state, 'conv'), title: (args.title || args.message.split('\n')[0]).slice(0, 60), turns: [], readUntrusted: false, digIds: args.digIds ?? state.digs.map((d) => d.id), modelId: 'bedrock:us.anthropic.claude-sonnet-5', promptVersion: 'director/v3', createdAt: now, updatedAt: now }
     state.conversations.unshift(conv)
   }
   const c: Conversation = conv

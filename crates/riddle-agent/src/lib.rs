@@ -30,6 +30,7 @@
 pub mod allowance;
 pub mod corrections;
 pub mod director;
+pub mod fit;
 pub mod reads;
 pub mod tool_loop;
 pub mod tools;

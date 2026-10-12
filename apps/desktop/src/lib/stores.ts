@@ -107,7 +107,9 @@ interface DirectorState {
    * The page shows it and focuses it; it is never sent until the person presses Enter.
    */
   prefill: string | null
-  setPrefill: (p: string | null) => void
+  /** What the prefilled draft is about ("The Stack · Runtime…"): the new conversation's title. */
+  prefillTitle: string | null
+  setPrefill: (p: string | null, title?: string | null) => void
   begin: (conversationId: string) => void
   delta: (conversationId: string, text: string) => void
   toolCall: (conversationId: string, call: ToolCall) => void
@@ -118,7 +120,8 @@ interface DirectorState {
 export const useDirector = create<DirectorState>((set) => ({
   live: {},
   prefill: null,
-  setPrefill: (prefill) => set({ prefill }),
+  prefillTitle: null,
+  setPrefill: (prefill, title = null) => set({ prefill, prefillTitle: title }),
   begin: (id) => set((s) => ({ live: { ...s.live, [id]: { text: '', toolCalls: [], done: false, error: null, startedAt: Date.now() } } })),
   delta: (id, text) =>
     set((s) => {

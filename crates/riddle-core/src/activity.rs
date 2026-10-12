@@ -144,7 +144,46 @@ pub struct Activity {
     pub trace_id: Option<TraceId>,
     /// The Activity this one undid, when it is an undo.
     pub undoes: Option<ActivityId>,
+    /// The Director conversation behind it: one the Director acted or
+    /// proposed in, or that proposed what the user applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub conversation_id: Option<crate::ids::ConversationId>,
     pub created_at: DateTime<Utc>,
+}
+
+impl Activity {
+    /// A row for something that changes nothing by itself: a proposal, a
+    /// preview. Linked to the conversation that did it, never undoable.
+    pub fn note(
+        actor: Actor,
+        action: &str,
+        summary: String,
+        inputs: serde_json::Value,
+        not_undoable: &str,
+        conversation_id: Option<crate::ids::ConversationId>,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Activity {
+            id: ActivityId::new(),
+            actor,
+            action: action.to_string(),
+            summary,
+            why: None,
+            inputs,
+            affected: vec![],
+            result: ActivityResult::Ok,
+            provenance: None,
+            undo: UndoInfo::NotUndoable {
+                reason: not_undoable.to_string(),
+            },
+            dig_id: None,
+            trace_id: None,
+            undoes: None,
+            conversation_id,
+            created_at: at,
+        }
+    }
 }
 
 /// Restore data keyed by affected entity id, so a bulk Activity can be undone

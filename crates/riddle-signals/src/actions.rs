@@ -47,6 +47,11 @@ impl Action for ProposeSignal {
             .autonomy(Autonomy::Suggest)
             .build()
     }
+    fn proposal_subject(&self, args: &Value) -> Option<String> {
+        args.get("name")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }
     async fn preview(&self, _ctx: &ActionContext, args: &Value) -> Result<Preview> {
         let s: Signal = serde_json::from_value(args.get("signal").cloned().unwrap_or(Value::Null))
             .map_err(|e| RiddleError::invalid(format!("signal: {e}")))?;

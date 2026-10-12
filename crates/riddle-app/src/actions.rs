@@ -980,6 +980,8 @@ fn apply_plan(ctx: &ActionContext, args: &Value) -> Result<ApplyPlan> {
     let mut input = riddle_mesh::simulate::SimulationInput::new(&ctx.services.stores, digs, &mesh);
     input.window_days = window_days;
     input.now = ctx.services.clock.now();
+    // Applying re-decides every change, the edit's or not; no baseline needed.
+    input.measure_edit = false;
     let (report, changed) = riddle_mesh::simulate::simulate_detailed(input)?;
     let mut redecide = Vec::new();
     let mut kept_yours = 0;
@@ -1982,19 +1984,27 @@ impl Action for DismissPending {
         let pending = repo::pending::get_pending(&index, id)?.ok_or_else(|| {
             RiddleError::not_found("that proposal was already applied, declined or expired")
         })?;
-        repo::pending::remove_pending(&index, id)?;
+        let reason = args
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        // Leaves the pending list and records the decline in one write.
+        repo::pending::resolve(
+            &index,
+            id,
+            ProposalOutcome::Declined,
+            reason.clone(),
+            Some(ctx.activity_id.clone()),
+        )?;
         rinfo!(Category::Actions, "declined pending action {}", id);
         let mut r = ActionResult::ok(
             json!({ "pendingId": id }),
             format!("Declined: {}", pending.summary),
         )
         .with_inputs(json!({ "pendingId": id, "action": pending.action }));
-        r.why = args
-            .get("reason")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
+        r.why = reason;
         r.undo = UndoInfo::NotUndoable {
             reason: "the Director can propose it again".into(),
         };

@@ -46,6 +46,7 @@ fn event_name(e: &RiddleEvent) -> &'static str {
         RiddleEvent::DirectorToolCall { .. } => "director_tool",
         RiddleEvent::DirectorDone { .. } => "director_done",
         RiddleEvent::ProposalCreated { .. } => "proposal",
+        RiddleEvent::ProposalResolved { .. } => "proposal_resolved",
         RiddleEvent::ExpeditionChanged { .. } => "expedition",
         RiddleEvent::SettingsChanged => "settings",
     }

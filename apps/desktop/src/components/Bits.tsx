@@ -47,18 +47,24 @@ export function ImportanceChip({ level, yours }: { level: Importance; yours?: bo
   )
 }
 
-/** A one-time sign-in code, large enough to read, with one click to copy. */
-export function CopyCode({ code }: { code: string }) {
+/** Copy text to the clipboard: `copied` is true for a moment after; a refusal says so. */
+export function useCopy(text: string): [boolean, () => Promise<void>] {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(code)
+      await navigator.clipboard.writeText(text)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
       toast('Copy failed', { body: 'Clipboard access was refused.', kind: 'warn' })
     }
   }
+  return [copied, copy]
+}
+
+/** A one-time sign-in code, large enough to read, with one click to copy. */
+export function CopyCode({ code }: { code: string }) {
+  const [copied, copy] = useCopy(code)
   return (
     <button
       type="button"
@@ -424,7 +430,7 @@ export function ExplanationCard({
               variant="ghost"
               title="Open the Director with this message filled in: why it was decided this way, and whether a Mesh should change. Nothing is sent until you press Enter there."
               onClick={() => {
-                setPrefill(directorAbout({ label: `message Riddle marked ${dispositionLabel(ex.disposition)}`, title: subject, from, digName }))
+                setPrefill(directorAbout({ label: `message Riddle marked ${dispositionLabel(ex.disposition)}`, title: subject, from, digName }), [from, subject].filter(Boolean).join(' · ') || null)
                 nav('/director')
               }}
             >

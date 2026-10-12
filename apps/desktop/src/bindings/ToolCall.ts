@@ -3,9 +3,23 @@ import type { ActivityId } from "./ActivityId";
 
 export type ToolCall = { id: string, action: string, 
 /**
- * Redacted arguments: identifiers and counts.
+ * Redacted arguments: identifiers and counts. What events, logs and
+ * Activity carry.
  */
-args: unknown, ok: boolean, summary: string, activityId: ActivityId | null, latencyMs: bigint, 
+args: unknown, 
+/**
+ * The arguments exactly as the Director sent them: a Mesh's text, a
+ * search's words. Kept in the conversation record, which is local and
+ * already holds the user's words in full; the redacted `args` had hidden
+ * the Payments text the Director simulated, so nobody could check its
+ * proposal against what it had tried (12 Oct 2026).
+ */
+input: unknown, 
+/**
+ * What the tool returned, compact: ids and counts for a read that
+ * carries mail, the result itself (cut at 4,000 characters) otherwise.
+ */
+output?: unknown, ok: boolean, summary: string, activityId: ActivityId | null, latencyMs: bigint, 
 /**
  * True when the result carried mail content, which marks the task as
  * having read untrusted input (§58).

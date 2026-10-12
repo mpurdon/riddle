@@ -88,3 +88,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 29 | feat: say when an account is not syncing; Labels page with Gmail label names | 6896 | 52147 | 40119484 | 70 | 0 |
 | 30 | fix: say when Gmail sign-in is not set up; signing in is not a mailbox write | 70 | 21372 | 28622247 | 45 | 0 |
 | 31 | feat: mail column with labels and Topics; model comparison; one Sift per account | 1642 | 302503 | 201840741 | 375 | 0 |
+| 32 | feat: Director audit trail, reads that fit, honest previews, named conversations | 764 | 190875 | 134714025 | 299 | 4 |

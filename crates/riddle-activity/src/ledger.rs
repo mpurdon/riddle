@@ -117,6 +117,7 @@ impl Entry {
             dig_id: self.dig_id,
             trace_id: self.trace_id,
             undoes: self.undoes,
+            conversation_id: None,
             created_at: at,
         }
     }

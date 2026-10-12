@@ -251,6 +251,71 @@ pub struct PendingAction {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// What became of a proposal. A pending proposal used to vanish when it was
+/// applied, declined or expired, leaving only "Declined" and an id in
+/// Activity: two Director drafts of one Mesh could not be read afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ProposalOutcome {
+    Pending,
+    Applied,
+    /// Applying it was tried and failed.
+    Failed,
+    Declined,
+    /// A newer proposal for the same thing from the same conversation.
+    Replaced,
+    Expired,
+}
+
+impl ProposalOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProposalOutcome::Pending => "pending",
+            ProposalOutcome::Applied => "applied",
+            ProposalOutcome::Failed => "failed",
+            ProposalOutcome::Declined => "declined",
+            ProposalOutcome::Replaced => "replaced",
+            ProposalOutcome::Expired => "expired",
+        }
+    }
+}
+
+/// A proposal and what became of it, kept after it leaves the pending list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ProposalRecord {
+    pub proposal: PendingAction,
+    /// The Director conversation that proposed it, if one did.
+    pub conversation_id: Option<ConversationId>,
+    pub outcome: ProposalOutcome,
+    /// The decline reason, the replacing proposal's id, or the failure.
+    pub note: Option<String>,
+    /// The Activity that applied it.
+    pub activity_id: Option<ActivityId>,
+    pub resolved_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl PendingAction {
+    /// The Director conversation behind it, when the Director proposed it.
+    pub fn conversation_id(&self) -> Option<&ConversationId> {
+        self.principal.conversation_id()
+    }
+}
+
+impl Principal {
+    /// The Director conversation acting, if this is the Director.
+    pub fn conversation_id(&self) -> Option<&ConversationId> {
+        match self {
+            Principal::Director {
+                conversation_id, ..
+            } => Some(conversation_id),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]

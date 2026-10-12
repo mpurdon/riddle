@@ -9,6 +9,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { mockState, registerMocks, resetMockState } from '@/lib/mocks'
 import { MESH_GITHUB_V7 } from '@/lib/mocks/fixtures'
+import { useDirector } from '@/lib/stores'
 import type { PendingAction } from '@/bindings/PendingAction'
 import { u64 } from '@/lib/format'
 import { App } from '@/app/app'
@@ -56,6 +57,26 @@ function renderDirector() {
 }
 
 describe('the Director page', () => {
+  it('titles a conversation by what the prefilled draft is about, and copies a link to it', async () => {
+    resetMockState()
+    registerMocks()
+    mockState().conversations.splice(0)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    renderDirector()
+    // "Talk to the Director about this" fills the draft and names what it is about; Enter sends.
+    useDirector.getState().setPrefill("Let's talk about this message Riddle marked Find: Pay. Why?", 'The Stack · Runtime: Big Iron')
+    const box = (await screen.findByLabelText('Message to the Director')) as HTMLTextAreaElement
+    await waitFor(() => expect(box.value).toContain("Let's talk about this message"))
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(mockState().conversations[0]?.title).toBe('The Stack · Runtime: Big Iron'))
+    const id = mockState().conversations[0].id
+    expect(await screen.findByRole('heading', { name: 'The Stack · Runtime: Big Iron' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`riddle://director/${id} (Director: The Stack · Runtime: Big Iron)`))
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeTruthy()
+  })
+
   it('shows a proposal that only the backend knows about, with the change in one line', async () => {
     resetMockState()
     registerMocks()

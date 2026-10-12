@@ -150,6 +150,8 @@ pub async fn list_activity(
             action,
             since,
             until,
+            // One conversation's Activity is read through `director_audit`.
+            conversation_id: None,
         },
         &page.unwrap_or_default(),
     )

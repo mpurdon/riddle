@@ -491,6 +491,11 @@ export function simulate(state: MockState, args: { text?: string | null; meshId?
     takesFrom: [],
     estimatedCostUsd: judgeCalls ? Math.round(judgeCalls * 1900 * 0.042) / 1_000_000 : 0,
     sampleChanged: sample,
+    // The mock keeps no baseline: everything that changes is the edit's doing.
+    editChanged: u64(candidates.length - unchanged),
+    editTransitions: transitions.sort((a, b) => Number(b.count) - Number(a.count)),
+    sampleEditChanged: sample,
+    drift: u64(0),
     windowDays,
   }
 }

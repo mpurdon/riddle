@@ -112,13 +112,13 @@ impl ReadTool {
             ),
             ReadTool::ListMeshes => ToolSpec::new(
                 self.name(),
-                "List Meshes (versioned policy) with their text, scope and status.",
-                json!({"type":"object","properties":{"includeDeleted":{"type":"boolean"}}}),
+                "List Meshes: without meshId, an index of every Mesh (id, name, version, status, Priority, pack); with meshId (an id or a name), that one Mesh's current text, routes and status. Read a Mesh's current text this way before proposing update_mesh, and change only what you mean to change.",
+                json!({"type":"object","properties":{"meshId":{"type":"string","description":"A Mesh id or its name"},"includeDeleted":{"type":"boolean"}}}),
             ),
             ReadTool::ListSignals => ToolSpec::new(
                 self.name(),
-                "List the Signal registry: every Signal's name, version, definition, choices and status. Call this before proposing a Signal.",
-                json!({"type":"object","properties":{}}),
+                "List the Signal registry: without name, an index of every Signal (name, version, status, kind, definition); with name, that Signal's versions in full (choices, inputs, calibration). Call this before proposing a Signal.",
+                json!({"type":"object","properties":{"name":{"type":"string"}}}),
             ),
             ReadTool::ExplainDecision => ToolSpec::new(
                 self.name(),

@@ -488,6 +488,7 @@ impl App {
                 dig_id: Some(dig.id.clone()),
                 trace_id: trace,
                 undoes: None,
+                conversation_id: None,
                 created_at: self.services.clock.now(),
             };
             match repo::activities::append(&index, &activity) {

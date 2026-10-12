@@ -118,6 +118,102 @@ impl Runtime {
             .ok_or_else(|| RiddleError::not_found(format!("no action named {name}")))
     }
 
+    /// Appends an Activity row and announces it. Bookkeeping: a failure is
+    /// logged and swallowed, never the work's failure.
+    pub fn record_activity(&self, activity: Activity) {
+        match repo::activities::append(&self.services.stores.index(), &activity) {
+            Ok(()) => self
+                .services
+                .emit(RiddleEvent::ActivityAppended { activity }),
+            Err(e) => rerror!(
+                Category::Actions,
+                "could not record {} in Activity: {e}",
+                activity.action
+            ),
+        }
+    }
+
+    /// The Director (or an Expedition) proposed something: an Activity row
+    /// under its name, linked to its conversation. Its proposals had left no
+    /// trace in Activity; only what the user applied or declined did.
+    fn record_proposal(
+        &self,
+        inv: &ActionInvocation,
+        p: &PendingAction,
+        conversation_id: Option<ConversationId>,
+    ) {
+        let mut a = Activity::note(
+            inv.principal.actor(),
+            "propose",
+            format!("Proposed: {}", p.summary),
+            serde_json::json!({ "pendingId": p.id, "action": p.action }),
+            "a proposal changes nothing until you apply it",
+            conversation_id,
+            self.services.clock.now(),
+        );
+        a.dig_id = inv.dig_id.clone();
+        self.record_activity(a);
+    }
+
+    /// A Director proposal replaces the same conversation's pending
+    /// proposals of the same Action about the same thing
+    /// (`Action::proposal_subject`). Bookkeeping: a failure is logged.
+    fn replace_older_proposals(
+        &self,
+        index: &riddle_store::Store,
+        action: &dyn Action,
+        inv: &ActionInvocation,
+        new_id: &str,
+    ) {
+        let Principal::Director {
+            conversation_id, ..
+        } = &inv.principal
+        else {
+            return;
+        };
+        let Some(subject) = action.proposal_subject(&inv.args) else {
+            return;
+        };
+        let older = match repo::pending::list_pending(index) {
+            Ok(l) => l,
+            Err(e) => {
+                return rerror!(
+                    Category::Actions,
+                    "could not list proposals to replace: {e}"
+                )
+            }
+        };
+        for p in older {
+            let same = p.action == inv.action
+                && p.conversation_id() == Some(conversation_id)
+                && action.proposal_subject(&p.args).as_deref() == Some(subject.as_str());
+            if !same {
+                continue;
+            }
+            let done = repo::pending::resolve(
+                index,
+                &p.id,
+                ProposalOutcome::Replaced,
+                Some(new_id.to_string()),
+                None,
+            );
+            match done {
+                Ok(()) => {
+                    rinfo!(
+                        Category::Actions,
+                        "proposal {} replaced by {}",
+                        riddle_observability::redact(&p.id),
+                        riddle_observability::redact(new_id)
+                    );
+                    self.services.emit(RiddleEvent::ProposalResolved {
+                        pending_id: p.id.clone(),
+                    });
+                }
+                Err(e) => rerror!(Category::Actions, "could not replace proposal: {e}"),
+            }
+        }
+    }
+
     pub fn list_actions(&self) -> Vec<ActionMeta> {
         self.registry.read().list()
     }
@@ -154,6 +250,8 @@ impl Runtime {
         }
 
         // A confirmation must match a pending action we issued.
+        // The conversation behind this: the Director's own, or the one that proposed what the user confirms.
+        let mut conversation_id = inv.principal.conversation_id().cloned();
         let confirmed = if let Some(pid) = &inv.pending_id {
             let _ = repo::pending::expire_pending(&index, PENDING_TTL_MS);
             let pending = repo::pending::get_pending(&index, pid)?
@@ -164,6 +262,7 @@ impl Runtime {
                 ));
             }
             repo::pending::remove_pending(&index, pid)?;
+            conversation_id = conversation_id.or_else(|| pending.conversation_id().cloned());
             true
         } else {
             inv.confirmed && inv.principal.is_user()
@@ -199,8 +298,10 @@ impl Runtime {
             }
             Decision::Confirm(tier, reason) => {
                 let preview = action.preview(&ctx, &inv.args).await?;
+                let id = uuid::Uuid::now_v7().to_string();
+                self.replace_older_proposals(&index, action.as_ref(), &inv, &id);
                 let pending = PendingAction {
-                    id: uuid::Uuid::now_v7().to_string(),
+                    id,
                     action: meta.name.clone(),
                     args: inv.args.clone(),
                     real_arguments: preview.real_arguments,
@@ -211,6 +312,9 @@ impl Runtime {
                     created_at: self.services.clock.now(),
                 };
                 repo::pending::put_pending(&index, &pending)?;
+                if !inv.principal.is_user() {
+                    self.record_proposal(&inv, &pending, conversation_id.clone());
+                }
                 return Err(
                     RiddleError::needs_confirmation(pending.summary.clone()).with_detail(&pending)
                 );
@@ -220,6 +324,19 @@ impl Runtime {
 
         let started = self.services.clock.now();
         let outcome = action.execute(&ctx, inv.args.clone()).await;
+        // A proposal confirmed: record what became of it (bookkeeping).
+        if let Some(pid) = &inv.pending_id {
+            let (o, note, act) = match &outcome {
+                Ok(_) => (ProposalOutcome::Applied, None, Some(activity_id.clone())),
+                Err(e) => (ProposalOutcome::Failed, Some(e.message.clone()), None),
+            };
+            if let Err(e) = repo::pending::resolve(&index, pid, o, note, act) {
+                rerror!(
+                    Category::Actions,
+                    "could not record the proposal's outcome: {e}"
+                );
+            }
+        }
         let (result_value, activity) = match outcome {
             Ok(r) => {
                 let activity = Activity {
@@ -227,7 +344,12 @@ impl Runtime {
                     actor: inv.principal.actor(),
                     action: meta.name.clone(),
                     summary: r.summary.clone(),
-                    why: r.why.clone(),
+                    // What the user applies from a Director proposal says where it came from.
+                    why: r.why.clone().or_else(|| {
+                        // A user's row has a conversation only when it came from a proposal.
+                        (inv.principal.is_user() && conversation_id.is_some())
+                            .then(|| "Proposed by the Director".to_string())
+                    }),
                     inputs: r.inputs.clone(),
                     affected: r.affected.clone(),
                     result: r.result.clone(),
@@ -236,6 +358,7 @@ impl Runtime {
                     dig_id: inv.dig_id.clone(),
                     trace_id: r.provenance.as_ref().and_then(|p| p.trace_id.clone()),
                     undoes: r.undoes.clone(),
+                    conversation_id: conversation_id.clone(),
                     created_at: started,
                 };
                 (r.value, activity)
@@ -262,6 +385,7 @@ impl Runtime {
                         dig_id: inv.dig_id.clone(),
                         trace_id: None,
                         undoes: None,
+                        conversation_id: conversation_id.clone(),
                         created_at: started,
                     };
                     if let Err(le) = repo::activities::append(&index, &activity) {

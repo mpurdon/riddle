@@ -425,8 +425,8 @@ pub struct Transition {
     pub count: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
 #[ts(export)]
 pub struct SimulationReport {
     pub mesh_id: Option<MeshId>,
@@ -458,6 +458,24 @@ pub struct SimulationReport {
     /// `new_judge_calls_required` and its cost).
     #[serde(default)]
     pub rescore: u64,
+    /// Messages whose outcome this edit changes: the candidate against
+    /// today's rules re-run unchanged, not against the stored decisions.
+    /// `changed` counted both, and on a real mailbox 16 of a preview's 20
+    /// "changes" happened with the Mesh text untouched (rules and Signals
+    /// had moved since the mail was decided); the Director read the total
+    /// as its edit's effect (12 Oct 2026).
+    #[serde(default)]
+    pub edit_changed: u64,
+    /// `edit_changed` by from → to, where "from" is what today's rules decide.
+    #[serde(default)]
+    pub edit_transitions: Vec<Transition>,
+    /// A sample of the messages the edit changes.
+    #[serde(default)]
+    pub sample_edit_changed: Vec<crate::ids::MessageId>,
+    /// Messages today's rules, unchanged, would decide differently from how
+    /// they are stored: re-decided by apply-to-history whatever the edit.
+    #[serde(default)]
+    pub drift: u64,
     /// Running Meshes that decide mail this one matches, because they run
     /// first: "15 of the messages this Mesh matches are taken first by
     /// Security and account alerts". Most first.

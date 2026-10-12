@@ -124,14 +124,21 @@ function dispositionWord(k: string): string {
   return k === 'unresolved' ? 'Escalate' : titleCase(k)
 }
 
-/** "Would change 14 messages: 6 to Find, 8 to Filed." from a SimulationReport. */
+/**
+ * "Would change 14 messages: 6 to Find, 8 to Filed." from a SimulationReport:
+ * what the edit itself changes (against today's rules re-run), then the mail
+ * applying to history would re-decide anyway. The total used to be read as
+ * the edit's effect, though most of it happened with the text untouched.
+ */
 export function impactLine(r: SimulationReport): string {
-  const changed = num(r.changed)
-  if (changed === 0) return `Would change nothing in the last ${r.windowDays} days (${fmtInt(r.historicalMessages)} messages).`
+  const changed = num(r.editChanged)
+  const drift = num(r.drift)
+  const anyway = drift ? ` Applying to history also re-decides ${fmtInt(drift)} that today's rules already decide differently.` : ''
+  if (changed === 0) return `Would change nothing in the last ${r.windowDays} days (${fmtInt(r.historicalMessages)} messages).${anyway}`
   const byTarget = new Map<string, number>()
-  for (const t of r.transitions) byTarget.set(t.to, (byTarget.get(t.to) ?? 0) + num(t.count))
+  for (const t of r.editTransitions) byTarget.set(t.to, (byTarget.get(t.to) ?? 0) + num(t.count))
   const parts = [...byTarget.entries()].sort((a, b) => b[1] - a[1]).map(([to, n]) => `${fmtInt(n)} to ${dispositionWord(to)}`)
-  return `Would change ${fmtInt(changed)} ${changed === 1 ? 'message' : 'messages'} in the last ${r.windowDays} days${parts.length ? `: ${parts.join(', ')}` : ''}.`
+  return `Would change ${fmtInt(changed)} ${changed === 1 ? 'message' : 'messages'} in the last ${r.windowDays} days${parts.length ? `: ${parts.join(', ')}` : ''}.${anyway}`
 }
 
 /** A label for a real-argument key: known ids get their noun, the rest read as words. */

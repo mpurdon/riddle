@@ -43,6 +43,9 @@ impl McpServer {
             tool("list_activity", "The Activity ledger, newest first.", json!({"type": "object", "properties": {"limit": {"type": "integer"}}})),
             tool("list_meshes", "Meshes (policy) at their latest version.", json!({"type": "object", "properties": {}})),
             tool("list_signals", "The Signal Registry.", json!({"type": "object", "properties": {}})),
+            tool("list_conversations", "Director conversations, newest first: id, title, when.", json!({"type": "object", "properties": {}})),
+            tool("director_audit", "One Director conversation's whole story: every turn and tool call in full, the proposals it made and what became of each (applied, declined with the reason, replaced, expired), and the Activity linked to it. A link copied from the Director page reads riddle://director/<conversationId>.", json!({"type": "object", "required": ["conversationId"], "properties": {"conversationId": {"type": "string"}}})),
+            tool("list_proposals", "Proposals and what became of them, newest first; one conversation's with conversationId.", json!({"type": "object", "properties": {"conversationId": {"type": "string"}, "limit": {"type": "integer"}}})),
         ];
         for meta in self.app.runtime.list_actions() {
             if !meta.user_only && (meta.read_only || self.allow_mutations) {
@@ -135,6 +138,20 @@ impl McpServer {
             "list_meshes" => serde_json::to_value(
                 riddle_mesh::service::MeshService::new(app.stores.index()).list(false)?,
             )?,
+            "list_conversations" => serde_json::to_value(riddle_store::repo::conversations::list(
+                &app.stores.index(),
+                100,
+            )?)?,
+            "director_audit" => {
+                let id = str_arg("conversationId")
+                    .ok_or_else(|| RiddleError::invalid("conversationId required"))?;
+                serde_json::to_value(app.director_audit(&id)?)?
+            }
+            "list_proposals" => serde_json::to_value(riddle_store::repo::pending::proposals(
+                &app.stores.index(),
+                str_arg("conversationId").as_deref(),
+                limit.unwrap_or(100),
+            )?)?,
             "list_signals" => {
                 serde_json::to_value(riddle_store::repo::signals::list(&app.stores.index())?)?
             }
@@ -319,5 +336,50 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("caughtUp"));
+    }
+
+    #[tokio::test]
+    async fn director_audit_reads_a_conversation_from_its_copied_link_with_its_proposals() {
+        let s = server(false);
+        let index = s.app.stores.index();
+        let now = chrono::Utc::now();
+        let conv = Conversation {
+            id: ConversationId::from("conv_audit"),
+            title: "The Stack · Runtime".into(),
+            turns: vec![],
+            read_untrusted: true,
+            dig_ids: vec![],
+            model_id: None,
+            prompt_version: None,
+            created_at: now,
+            updated_at: now,
+            allowance: None,
+        };
+        riddle_store::repo::conversations::upsert(&index, &conv).unwrap();
+        let pending = PendingAction {
+            id: "pend_audit".into(),
+            action: "update_mesh".into(),
+            args: json!({ "meshId": "mesh_payments", "text": "Mesh: Payments" }),
+            real_arguments: json!({}),
+            summary: "Change Mesh Payments from v6 to v7".into(),
+            confirmation: ConfirmationPolicy::Approval,
+            reason: "approval".into(),
+            principal: Principal::Director {
+                conversation_id: conv.id.clone(),
+                read_untrusted: true,
+            },
+            created_at: now,
+        };
+        riddle_store::repo::pending::put_pending(&index, &pending).unwrap();
+        let out = s
+            .call("director_audit", json!({ "conversationId": "riddle://director/conv_audit (Director: The Stack · Runtime)" }))
+            .await
+            .unwrap();
+        assert_eq!(out["conversation"]["title"], "The Stack · Runtime");
+        assert_eq!(
+            out["proposals"][0]["proposal"]["args"]["text"],
+            "Mesh: Payments"
+        );
+        assert_eq!(out["proposals"][0]["outcome"], "pending");
     }
 }

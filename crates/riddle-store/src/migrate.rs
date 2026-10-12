@@ -75,6 +75,21 @@ const INDEX: &[Migration] = &[
         name: "comparison",
         sql: include_str!("../migrations/index/0005_comparison.sql"),
     },
+    Migration {
+        version: 6,
+        name: "proposals",
+        sql: include_str!("../migrations/index/0006_proposals.sql"),
+    },
+    Migration {
+        version: 7,
+        name: "activity_conversation",
+        sql: include_str!("../migrations/index/0007_activity_conversation.sql"),
+    },
+    Migration {
+        version: 8,
+        name: "proposal_outcome_columns",
+        sql: include_str!("../migrations/index/0008_proposal_outcome_columns.sql"),
+    },
 ];
 
 fn set_for(kind: StoreKind) -> &'static [Migration] {
