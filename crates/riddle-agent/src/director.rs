@@ -301,6 +301,7 @@ impl Director {
             allow_contamination,
         };
         let req = LoopRequest {
+            task: None,
             system: prompt.text,
             messages,
             tools: tools::director_tools(&metas),
@@ -356,6 +357,59 @@ impl Director {
     /// The turn's limits, widened by what the person allowed. "Keep going"
     /// lifts the round limit to a ceiling no useful turn reaches; the cost
     /// and token limits hold unless a dollar figure was given.
+    /// Answer one question afresh with `model_id`, for a model comparison:
+    /// the Director's own prompt over every enabled account, read-only tools
+    /// only (a replay can look things up, never propose or change anything),
+    /// no conversation recorded, and the spend attributed to `Comparison`.
+    pub async fn replay(&self, question: &str, model_id: &str) -> Result<LoopOutcome> {
+        let index = self.stores.index();
+        let all_digs = repo::digs::list_enabled(&index).unwrap_or_default();
+        let (digs, excluded) = scope_digs(&all_digs, &[])?;
+        let privacy = riddle_privacy::most_restrictive(digs.iter().map(|d| d.privacy));
+        if !riddle_privacy::allowed(privacy, riddle_privacy::Purpose::Llm) {
+            return Err(RiddleError::policy_denied(
+                "an account's privacy setting does not allow cloud reasoning",
+            ));
+        }
+        let metas: Vec<_> = self
+            .tool_loop
+            .runtime
+            .list_actions()
+            .into_iter()
+            .filter(|m| m.read_only)
+            .collect();
+        let profile = repo::user_profile::get(&index).unwrap_or_default();
+        let prompt = self.prompts.render(
+            PromptName::Director,
+            &[
+                ("today", &self.clock.now().format("%A %Y-%m-%d").to_string()),
+                ("user_profile", &profile_summary(&profile)),
+                ("digs", &dig_list(&digs)),
+                ("excluded_digs", &excluded_line(&excluded)),
+                ("tools", &tools::describe_tools(&metas)),
+            ],
+        );
+        let req = LoopRequest {
+            system: prompt.text,
+            messages: vec![LlmMessage::user(question.to_string())],
+            tools: tools::director_tools(&metas),
+            principal: LoopPrincipal::Director(ConversationId::new()),
+            scope: ReadScope {
+                dig_ids: digs.iter().map(|d| d.id.clone()).collect(),
+                allow_contamination: false,
+            },
+            privacy,
+            dig_id: None,
+            model_id: Some(model_id.to_string()),
+            budget: self.budget(None),
+            read_untrusted: false,
+            cancel: None,
+            max_tokens_per_call: self.config.max_tokens_per_call,
+            task: Some(riddle_core::UsageTask::Comparison),
+        };
+        self.tool_loop.run(req, &mut |_| {}).await
+    }
+
     fn budget(&self, allowance: Option<&ToolAllowance>) -> LoopBudget {
         let a = allowance.cloned().unwrap_or_default();
         let calls = a.next_turn_tool_calls;

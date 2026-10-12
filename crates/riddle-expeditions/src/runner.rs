@@ -498,6 +498,7 @@ impl ExpeditionRunner {
             );
             let remaining_secs = e.budget.seconds.saturating_sub(e.spent.seconds);
             let req = LoopRequest {
+                task: None,
                 system: prompt.text,
                 messages: vec![LlmMessage::user(user)],
                 tools: tool_specs.clone(),

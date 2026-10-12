@@ -70,6 +70,8 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'contamination', keys: '!', label: 'Mark as Contamination', scope: 'messages' },
   { id: 'snooze_message', keys: 's', label: 'Snooze (opens the picker)', scope: 'messages' },
   { id: 'label', keys: 'l', label: 'Add a Stratum (opens the picker)', scope: 'messages' },
+  { id: 'go_place', keys: 'g l', label: 'Go to a label or Topic (opens the picker)', scope: 'messages' },
+  { id: 'toggle_mail_column', keys: 'mod+\\', label: 'Collapse or expand the mail column', scope: 'messages' },
   { id: 'reply', keys: 'r', label: 'Reply', scope: 'messages' },
   { id: 'forward', keys: 'f', label: 'Forward', scope: 'messages' },
   { id: 'follow_up', keys: 'shift+f', label: 'Follow up by… (opens the date picker; a Find until a reply arrives)', scope: 'messages' },

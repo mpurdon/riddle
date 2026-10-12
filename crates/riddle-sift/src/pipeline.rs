@@ -443,6 +443,9 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
 
     // 6. Confidence policy and 7. escalation.
     let mut verdict = assess(&sift.opts.policy, &decision, &facts.language);
+    if sift.opts.force_escalation && matches!(verdict, Confidence::Confident) {
+        verdict = Confidence::Uncertain("escalated for a model comparison".into());
+    }
     let mut refined_by_llm = false;
     if let Confidence::Uncertain(reason) = &verdict {
         if draft.judge_unavailable {

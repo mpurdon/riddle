@@ -70,6 +70,11 @@ const INDEX: &[Migration] = &[
         name: "find_kept",
         sql: include_str!("../migrations/index/0004_find_kept.sql"),
     },
+    Migration {
+        version: 5,
+        name: "comparison",
+        sql: include_str!("../migrations/index/0005_comparison.sql"),
+    },
 ];
 
 fn set_for(kind: StoreKind) -> &'static [Migration] {

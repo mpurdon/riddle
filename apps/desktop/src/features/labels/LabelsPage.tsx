@@ -39,9 +39,11 @@ export default function LabelsPage() {
   if (q.error) return <ErrorCard error={q.error} onRetry={() => q.refetch()} />
   const labels = q.data ?? []
   const accounts = digId ? [digId] : digs.map((d) => d.id).filter((id) => labels.some((l) => l.digId === id))
+  // Your own labels and Gmail's mailboxes are places in the mail column; the rest filter by id.
   const open = (l: LabelSummary) => {
     setDigId(l.digId)
-    nav(`/inbox?label=${encodeURIComponent(l.id)}`)
+    const place = l.kind === 'user' ? `label:${l.name}` : ['INBOX', 'STARRED', 'SENT'].includes(l.id) ? `mailbox:${l.id}` : null
+    nav(place ? `/inbox?place=${encodeURIComponent(place)}` : `/inbox?label=${encodeURIComponent(l.id)}`)
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">

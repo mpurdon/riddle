@@ -4449,6 +4449,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "dirs 6.0.0",
+ "futures",
  "iana-time-zone",
  "log",
  "parking_lot",

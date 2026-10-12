@@ -82,6 +82,15 @@ impl App {
     /// them with `Services`. Idempotent per process: calling it again
     /// replaces the previous set (settings changed).
     pub fn attach_ai(self: &Arc<Self>, cfg: &AiConfig) -> Arc<AiServices> {
+        self.attach_ai_with(cfg, None)
+    }
+
+    /// `attach_ai` with a given model client, for tests that script one.
+    pub fn attach_ai_with(
+        self: &Arc<Self>,
+        cfg: &AiConfig,
+        given: Option<Arc<dyn Llm>>,
+    ) -> Arc<AiServices> {
         let mut catalog = ModelCatalog::default();
         catalog.set_tier(ModelTier::Escalation, cfg.escalation_model.clone());
         catalog.set_tier(ModelTier::Verification, cfg.escalation_model.clone());
@@ -89,20 +98,23 @@ impl App {
         catalog.set_tier(ModelTier::Expedition, cfg.director_model.clone());
         let catalog = Arc::new(catalog);
         let recorder = store_recorder(self.stores.clone());
-        let llm: Arc<dyn Llm> = match cfg.provider.as_str() {
-            "bedrock" => Arc::new(
-                BedrockLlm::new(
-                    BedrockConfig {
-                        profile: cfg.profile.clone(),
-                        region: cfg.region.clone(),
-                        default_model: cfg.escalation_model.clone(),
-                        ..Default::default()
-                    },
-                    catalog.clone(),
-                )
-                .with_recorder(recorder),
-            ),
-            _ => Arc::new(ScriptedLlm::new(vec![])),
+        let llm: Arc<dyn Llm> = match (given, cfg.provider.as_str()) {
+            (Some(l), _) => l,
+            (None, provider) => match provider {
+                "bedrock" => Arc::new(
+                    BedrockLlm::new(
+                        BedrockConfig {
+                            profile: cfg.profile.clone(),
+                            region: cfg.region.clone(),
+                            default_model: cfg.escalation_model.clone(),
+                            ..Default::default()
+                        },
+                        catalog.clone(),
+                    )
+                    .with_recorder(recorder),
+                ),
+                _ => Arc::new(ScriptedLlm::new(vec![])),
+            },
         };
         let prompts = Arc::new(match &cfg.prompt_override_dir {
             Some(d) => PromptStore::with_override_dir(d),

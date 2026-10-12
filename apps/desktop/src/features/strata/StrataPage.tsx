@@ -67,7 +67,7 @@ export default function StrataPage() {
             {strata.map((s) => (
               <tr key={s.id} className="border-b border-line/60 hover:bg-sand/60">
                 <td className="px-5 py-1.5">
-                  <button type="button" className="font-medium hover:underline" onClick={() => nav(`/inbox?stratum=${encodeURIComponent(s.name)}`)}>
+                  <button type="button" className="font-medium hover:underline" onClick={() => nav(`/inbox?place=${encodeURIComponent(`topic:${s.name}`)}`)}>
                     {s.name}
                   </button>
                   <div className="text-xs text-ink-2">{s.description}</div>

@@ -4,6 +4,7 @@
  * from every angle: a message's disposition, its Find, its trace and its
  * explanation all agree.
  */
+import { atPlace } from './places'
 import type { Importance } from '@/bindings/Importance'
 import type { Disposition } from '@/bindings/Disposition'
 import type { Activity } from '@/bindings/Activity'
@@ -130,6 +131,7 @@ export function listMessages(state: MockState, args: { digId?: string | null; fi
     if (f.disposition && c?.disposition?.kind !== f.disposition) return false
     if (f.findType && !(c?.disposition?.kind === 'find' && c.disposition.find_type === f.findType)) return false
     if (f.label && !m.labels.includes(f.label)) return false
+    if (f.place && !atPlace(state, m, f.place)) return false
     if (f.stratum && !(c?.strata ?? []).includes(f.stratum)) return false
     if (f.from && !(m.from.email.toLowerCase().includes(f.from.toLowerCase()) || (m.from.name ?? '').toLowerCase().includes(f.from.toLowerCase()))) return false
     if (f.threadId && m.threadId !== f.threadId) return false

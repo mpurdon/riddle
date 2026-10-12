@@ -21,6 +21,13 @@ pub fn set(store: &Store, key: &str, value: &str) -> Result<()> {
     })
 }
 
+pub fn delete(store: &Store, key: &str) -> Result<()> {
+    store.write(|c| {
+        c.execute("DELETE FROM kv WHERE key = ?1", [key])
+            .map(|_| ())
+    })
+}
+
 pub fn get_json<T: serde::de::DeserializeOwned>(store: &Store, key: &str) -> Result<Option<T>> {
     Ok(get(store, key)?.and_then(|s| serde_json::from_str(&s).ok()))
 }

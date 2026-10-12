@@ -168,6 +168,8 @@ pub fn sentence(s: &Sentence) -> String {
         "pause_job" => format!("paused {}", named(s, "job")),
         "resume_job" => format!("resumed {}", named(s, "job")),
         "arm_dev" => "armed the dev build".to_string(),
+        "pin_place" => "pinned a place to the mail column".to_string(),
+        "unpin_place" => "unpinned a place from the mail column".to_string(),
         "set_mailbox_writes" => "changed what the dev build writes to the mailbox".to_string(),
         other => {
             let verb = other.replace('_', " ");

@@ -11,6 +11,7 @@ import { EscalationInspector, ExportTraces, MessageInspector, RawJevInspector } 
 import { MeshInspector, Playground, SignalInspector } from './Registry'
 import { ActionInspector, ActivityTimeline, CostObservatory, DecisionQuality, DirectorInspector, FailureInspector, LivePipeline, PerformanceObservatory } from './Observatories'
 import { DemoMode } from './DemoMode'
+import { ModelsPane } from './ModelsPane'
 
 const NAV: { to: string; label: string; group: string }[] = [
   { to: '', label: 'Operations', group: 'Ops' },
@@ -25,6 +26,7 @@ const NAV: { to: string; label: string; group: string }[] = [
   { to: 'timeline', label: 'Activity Timeline', group: 'Live' },
   { to: 'pipeline', label: 'Live Pipeline', group: 'Live' },
   { to: 'demo', label: 'Demo Mode', group: 'Live' },
+  { to: 'models', label: 'Models', group: 'Observatories' },
   { to: 'cost', label: 'Cost', group: 'Observatories' },
   { to: 'quality', label: 'Decision Quality', group: 'Observatories' },
   { to: 'performance', label: 'Performance', group: 'Observatories' },
@@ -71,6 +73,7 @@ export default function DeveloperPage() {
           <Route path="timeline" element={<ActivityTimeline />} />
           <Route path="pipeline" element={<LivePipeline />} />
           <Route path="demo" element={<DemoMode />} />
+          <Route path="models" element={<ModelsPane />} />
           <Route path="cost" element={<CostObservatory />} />
           <Route path="quality" element={<DecisionQuality />} />
           <Route path="performance" element={<PerformanceObservatory />} />

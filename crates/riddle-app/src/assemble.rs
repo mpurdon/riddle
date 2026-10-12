@@ -17,6 +17,7 @@ impl App {
         let events = Arc::new(Broadcast::new());
         let sink: Arc<dyn EventSink> = events.clone();
         let services = Arc::new(Services::new(stores.clone(), sink, config.build.clone()));
+        services.insert(Arc::new(crate::engine::SiftLocks::default()));
         let mut builder = RuntimeBuilder::new(services.clone());
         builder = builder.registry(riddle_actions::actions::register_all);
         let mut policy = riddle_actions::policy::AutonomyPolicy {
@@ -37,6 +38,8 @@ impl App {
             runtime,
             events,
         });
+        app.services
+            .insert(Arc::new(crate::comparison::AppHandle(Arc::downgrade(&app))));
         Ok(app)
     }
 }

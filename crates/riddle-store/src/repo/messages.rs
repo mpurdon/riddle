@@ -224,6 +224,9 @@ pub struct MessageFilter {
     pub superseded: Option<bool>,
     /// Only messages at this level or above (the user's own level first).
     pub min_importance: Option<riddle_core::Importance>,
+    /// A place in the mail column, resolved for this Dig: a label's ids,
+    /// or a Topic's Stratum and same-named label, OR-combined.
+    pub any_of: Option<PriorityCriteria>,
 }
 
 /// One OR group for the Priority inbox: a message matches when it carries
@@ -274,6 +277,97 @@ pub struct SearchExtras {
     pub disposition_in: Vec<String>,
     /// Sender addresses to exclude (`-from:` in a query).
     pub exclude_from: Vec<String>,
+}
+
+/// Appends one OR group: EXISTS on the (message_id, stratum) key, json_each
+/// over the label array, and an IN list for the Find sources. An empty
+/// group matches nothing.
+fn or_group(sql: &mut String, args: &mut Vec<Box<dyn rusqlite::ToSql>>, p: &PriorityCriteria) {
+    let mut parts: Vec<String> = Vec::new();
+    if !p.strata.is_empty() {
+        let marks = vec!["?"; p.strata.len()].join(",");
+        parts.push(format!("EXISTS (SELECT 1 FROM message_strata ms WHERE ms.message_id = m.id AND ms.stratum IN ({marks}))"));
+        for s in &p.strata {
+            args.push(Box::new(s.clone()));
+        }
+    }
+    if !p.labels.is_empty() {
+        let marks = vec!["?"; p.labels.len()].join(",");
+        parts.push(format!(
+            "EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value IN ({marks}))"
+        ));
+        for l in &p.labels {
+            args.push(Box::new(l.clone()));
+        }
+    }
+    if !p.message_ids.is_empty() {
+        // One JSON array parameter, not one `?` per id: SQLite caps
+        // bound parameters, and the count query binds the list a
+        // second time, so 400 open Finds were 800 parameters a page.
+        let ids: Vec<&str> = p.message_ids.iter().map(|id| id.as_str()).collect();
+        parts.push("m.id IN (SELECT value FROM json_each(?))".to_string());
+        args.push(Box::new(
+            serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into()),
+        ));
+    }
+    if let Some(i) = p.min_importance {
+        parts.push("coalesce(io.importance, k.importance, 1) >= ?".to_string());
+        args.push(Box::new(i.rank()));
+    }
+    if parts.is_empty() {
+        sql.push_str(" AND 0");
+    } else {
+        sql.push_str(&format!(" AND ({})", parts.join(" OR ")));
+    }
+}
+
+/// Messages and unread messages per Stratum, over live mail.
+pub fn strata_counts(store: &Store) -> Result<std::collections::HashMap<String, (u64, u64)>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT ms.stratum, count(*),
+                    sum(EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = 'UNREAD'))
+             FROM message_strata ms JOIN messages m ON m.id = ms.message_id
+             WHERE m.deleted_at IS NULL GROUP BY ms.stratum",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (r.get::<_, i64>(1)? as u64, r.get::<_, i64>(2)? as u64),
+            ))
+        })?;
+        rows.collect()
+    })
+}
+
+/// Messages and unread messages carrying any of these Strata or labels:
+/// a Topic's count, where a message with both the label and the Stratum
+/// counts once.
+pub fn count_any_of(store: &Store, strata: &[String], labels: &[String]) -> Result<(u64, u64)> {
+    if strata.is_empty() && labels.is_empty() {
+        return Ok((0, 0));
+    }
+    let mut sql = String::from(
+        "SELECT count(*), coalesce(sum(EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value = 'UNREAD')), 0)
+         FROM messages m WHERE m.deleted_at IS NULL",
+    );
+    let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    or_group(
+        &mut sql,
+        &mut args,
+        &PriorityCriteria {
+            strata: strata.to_vec(),
+            labels: labels.to_vec(),
+            ..Default::default()
+        },
+    );
+    store.read(|c| {
+        c.query_row(
+            &sql,
+            rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())),
+            |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? as u64)),
+        )
+    })
 }
 
 pub fn search(
@@ -329,41 +423,8 @@ pub fn search(
             sql.push_str(" AND EXISTS (SELECT 1 FROM message_strata ms WHERE ms.message_id = m.id AND ms.stratum = ?)");
             args.push(Box::new(s.clone()));
         }
-        if let Some(p) = &filter.priority {
-            // One OR group: EXISTS on the (message_id, stratum) key, json_each
-            // over the label array, and an IN list for the Find sources.
-            let mut parts: Vec<String> = Vec::new();
-            if !p.strata.is_empty() {
-                let marks = vec!["?"; p.strata.len()].join(",");
-                parts.push(format!("EXISTS (SELECT 1 FROM message_strata ms WHERE ms.message_id = m.id AND ms.stratum IN ({marks}))"));
-                for s in &p.strata {
-                    args.push(Box::new(s.clone()));
-                }
-            }
-            if !p.labels.is_empty() {
-                let marks = vec!["?"; p.labels.len()].join(",");
-                parts.push(format!("EXISTS (SELECT 1 FROM json_each(m.labels_json) WHERE value IN ({marks}))"));
-                for l in &p.labels {
-                    args.push(Box::new(l.clone()));
-                }
-            }
-            if !p.message_ids.is_empty() {
-                // One JSON array parameter, not one `?` per id: SQLite caps
-                // bound parameters, and the count query binds the list a
-                // second time, so 400 open Finds were 800 parameters a page.
-                let ids: Vec<&str> = p.message_ids.iter().map(|id| id.as_str()).collect();
-                parts.push("m.id IN (SELECT value FROM json_each(?))".to_string());
-                args.push(Box::new(serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into())));
-            }
-            if let Some(i) = p.min_importance {
-                parts.push("coalesce(io.importance, k.importance, 1) >= ?".to_string());
-                args.push(Box::new(i.rank()));
-            }
-            if parts.is_empty() {
-                sql.push_str(" AND 0");
-            } else {
-                sql.push_str(&format!(" AND ({})", parts.join(" OR ")));
-            }
+        for p in [&filter.priority, &filter.any_of].into_iter().flatten() {
+            or_group(&mut sql, &mut args, p);
         }
         if let Some(f) = &filter.from {
             sql.push_str(" AND m.from_email LIKE ?");

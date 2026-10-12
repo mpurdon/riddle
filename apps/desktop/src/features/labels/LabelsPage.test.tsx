@@ -48,6 +48,6 @@ describe('the Labels page', () => {
     )
     const gmail = (await screen.findAllByRole('table', { name: /: Gmail$/ }))[0]
     fireEvent.click(within(gmail).getByRole('button', { name: 'Inbox' }))
-    expect((await screen.findByTestId('where')).textContent).toBe('/inbox?label=INBOX')
+    expect((await screen.findByTestId('where')).textContent).toBe('/inbox?place=mailbox%3AINBOX')
   })
 })

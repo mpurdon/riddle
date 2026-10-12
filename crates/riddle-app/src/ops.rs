@@ -674,6 +674,22 @@ impl App {
         if background {
             let app = self.clone();
             tokio::task::spawn_blocking(move || app.backfill_all());
+            // Model comparison: which candidates the account may call, at
+            // boot and every six hours, so a newly enabled model joins.
+            let app = self.clone();
+            tokio::spawn(async move {
+                let mut every = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
+                loop {
+                    every.tick().await;
+                    if let Err(e) = app.probe_models().await {
+                        rdebug!(
+                            Category::Llm,
+                            "model access check skipped: {}",
+                            e.kind.as_str()
+                        );
+                    }
+                }
+            });
             self.start_background(&ops);
             self.enqueue_catch_up_all();
         } else {

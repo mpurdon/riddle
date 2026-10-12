@@ -6,6 +6,10 @@
  * with its id, which is how every confirmation tier completes.
  */
 import { call } from './ipc'
+import type { BenchOverview } from '@/bindings/BenchOverview'
+import type { BenchRow } from '@/bindings/BenchRow'
+import type { DirectorComparison } from '@/bindings/DirectorComparison'
+import type { MailPlaces } from '@/bindings/MailPlaces'
 import type { LabelSummary } from '@/bindings/LabelSummary'
 import type { MailboxWritesState } from '@/bindings/MailboxWritesState'
 import type { ActionInvocation } from '@/bindings/ActionInvocation'
@@ -192,6 +196,11 @@ export const devInfo = () => call<DevInfo>('dev_info')
 export const devArmed = () => call<boolean>('dev_armed')
 /** Each account's labels, named, with message and unread counts. */
 export const listLabels = (digId?: string | null) => call<LabelSummary[]>('list_labels', { digId: digId ?? null })
+export const mailPlaces = (digId?: string | null) => call<MailPlaces>('mail_places', { digId: digId ?? null })
+/** Model comparison (Developer → Models). */
+export const comparisonOverview = () => call<BenchOverview>('comparison_overview')
+export const comparisonRows = (limit = 50) => call<BenchRow[]>('comparison_rows', { limit })
+export const directorComparisons = (limit = 20) => call<DirectorComparison[]>('director_comparisons', { limit })
 /** The dev build's Hold / Ask / Allow and how many mailbox changes wait. */
 export const mailboxWrites = () => call<MailboxWritesState>('mailbox_writes')
 export const probeJudge = () => call<ProbeResult>('probe_judge')
@@ -254,6 +263,9 @@ export const qk = {
   devArmed: ['dev_armed'] as const,
   mailboxWrites: ['mailbox_writes'] as const,
   labels: ['labels'] as const,
+  /** Under `messages`, so every message Action's invalidation refreshes the column's counts too. */
+  places: ['messages', 'places'] as const,
+  comparison: ['comparison'] as const,
   logs: ['logs'] as const,
   logCategories: ['log_categories'] as const,
   inFlight: ['in_flight'] as const,

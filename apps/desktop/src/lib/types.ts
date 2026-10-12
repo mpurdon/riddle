@@ -24,6 +24,8 @@ export interface MessageFilter {
   shadowOnly?: boolean
   /** false hides mail a newer one of its `+ Replaces` series superseded; true lists only that. */
   superseded?: boolean
+  /** A place in the mail column (`label:Receipts`, `topic:Receipts`, `mailbox:INBOX`). */
+  place?: string
 }
 
 export type { LogLevel as LogLevelSetting } from '@/bindings/LogLevel'

@@ -164,6 +164,11 @@ pub fn classify(name: &str) -> ToolKind {
 /// Actions that are operator controls, never Director tools.
 pub const NEVER_DIRECTOR: &[&str] = &[
     "set_mailbox_writes",
+    // Model comparison spends on other models; the person starts it.
+    "check_model_access",
+    "run_model_benchmark",
+    "run_director_comparison",
+    "pick_director_answer",
     "apply_update_preview",
     "save_settings",
     "remove_dig",

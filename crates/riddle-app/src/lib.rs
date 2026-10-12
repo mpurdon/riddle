@@ -10,6 +10,7 @@ pub mod actions;
 pub mod ai;
 pub mod assemble;
 pub mod bridge;
+pub mod comparison;
 pub mod director_reads;
 pub mod dispatch;
 pub mod domains;
@@ -20,6 +21,7 @@ pub mod live;
 pub mod notify;
 pub mod ops;
 pub mod paths;
+pub mod places;
 pub mod reads;
 pub mod words;
 

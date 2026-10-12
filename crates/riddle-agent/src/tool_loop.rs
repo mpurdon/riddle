@@ -107,6 +107,9 @@ pub struct LoopRequest {
     pub read_untrusted: bool,
     pub cancel: Option<Arc<AtomicBool>>,
     pub max_tokens_per_call: u32,
+    /// Ledger attribution when it is not the principal's own (a model
+    /// comparison replaying a Director question records as `Comparison`).
+    pub task: Option<UsageTask>,
 }
 
 impl LoopRequest {
@@ -129,6 +132,7 @@ impl LoopRequest {
             read_untrusted: false,
             cancel: None,
             max_tokens_per_call: 4096,
+            task: None,
         }
     }
 }
@@ -222,6 +226,7 @@ impl ToolLoop {
             read_untrusted,
             cancel,
             max_tokens_per_call,
+            task: task_override,
         } = req;
         let mut st = State {
             read_untrusted,
@@ -242,7 +247,7 @@ impl ToolLoop {
         let mut text = String::new();
         let mut stop = LoopStop::EndTurn;
         let mut pending_stop: Option<LoopStop> = None;
-        let task = principal.task();
+        let task = task_override.unwrap_or_else(|| principal.task());
 
         for iteration in 0..budget.max_iterations.max(1) {
             if cancel.as_ref().is_some_and(|c| c.load(Ordering::SeqCst)) {

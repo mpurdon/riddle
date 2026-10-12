@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Riddle Mail Navigation</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/dossier.css">
+</head>
+<body>
+<style>
+.opt-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-top: 36px; }
+.opt-head .k { font-family: var(--mono); font-size: 12px; color: var(--ochre); font-weight: 600; letter-spacing: .08em; }
+.opt-head.rec .k::after { content: " · recommended"; color: var(--moss); }
+.lede2 { font-size: 16px; max-width: 75ch; margin: 6px 0 0; }
+.pros { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 24px; font-family: var(--ui); font-size: 13.5px; margin-top: 10px; }
+.pros ul { margin: 4px 0 0; padding-left: 18px; }
+.pros b { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--clay); }
+.try { font-family: var(--ui); font-size: 12.5px; color: var(--ink-2); margin-top: 6px; }
+
+/* The app frame: a miniature Riddle in its own palette. */
+.app { --row: 30px; font-family: var(--ui); font-size: 12.5px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-top: 14px; height: 470px; display: grid; grid-template-rows: 34px 1fr; }
+.app .top { display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--sand); }
+.app .top .dots { display: inline-flex; gap: 5px; } .app .top .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--clay); opacity: .55; display: block; }
+.app .top .acct { border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; background: var(--paper); color: var(--ink-2); }
+.app .top .search { flex: 1; max-width: 320px; border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; background: var(--paper); color: var(--clay); }
+.app .main { display: flex; min-height: 0; }
+.rail { width: 150px; flex: none; border-right: 1px solid var(--line); background: var(--sand); padding: 8px 6px; overflow: auto; }
+.rail .g, .col .g { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--clay); margin: 10px 8px 3px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+.rail .g:first-child, .col .g:first-child { margin-top: 2px; }
+.it { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 6px; color: var(--ink-2); cursor: pointer; white-space: nowrap; user-select: none; }
+.it:hover { background: var(--sand-2); color: var(--ink); }
+.it.on { background: var(--ochre-soft); color: var(--ink); font-weight: 600; box-shadow: inset 2px 0 0 var(--ochre); }
+.it .n { margin-left: auto; font-size: 11px; color: var(--clay); font-variant-numeric: tabular-nums; }
+.it .n.u { color: var(--ink); font-weight: 600; }
+.it .ic { width: 14px; text-align: center; color: var(--clay); flex: none; font-size: 11px; }
+.it .tw { width: 12px; flex: none; color: var(--clay); font-size: 9px; text-align: center; }
+.it.empty { opacity: .5; }
+.it .lbl { overflow: hidden; text-overflow: ellipsis; }
+.it .src { font-size: 9.5px; color: var(--clay); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.col { width: 220px; flex: none; border-right: 1px solid var(--line); background: var(--paper); padding: 8px 6px; overflow: auto; }
+.col.slim { width: 44px; padding: 8px 4px; }
+.more { font-size: 11.5px; color: var(--clay); padding: 4px 8px; cursor: pointer; }
+.more:hover { color: var(--ochre); }
+.list { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.list .hd { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); min-height: 40px; }
+.crumb { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
+.crumb .sep { color: var(--clay); font-weight: 400; }
+.crumb .seg { cursor: pointer; } .crumb .seg:hover { color: var(--ochre); }
+.crumb .seg.pick { border: 1px solid var(--line); border-radius: 6px; padding: 1px 8px; font-weight: 600; background: var(--sand); }
+.crumb .seg.pick::after { content: " ▾"; color: var(--clay); font-weight: 400; }
+.hd .count { color: var(--clay); font-size: 12px; font-weight: 400; }
+.chips { display: flex; gap: 6px; padding: 6px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); border-radius: 999px; padding: 1px 10px; cursor: pointer; color: var(--ink-2); background: var(--paper); font-size: 12px; }
+.chip.on { border-color: var(--ochre); background: var(--ochre-soft); color: var(--ink); font-weight: 600; }
+.chip .n { color: var(--clay); margin-left: 4px; }
+.rows { overflow: auto; flex: 1; }
+.r { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 10px; align-items: center; height: var(--row); padding: 0 14px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
+.r .from { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r.read .from { font-weight: 400; color: var(--ink-2); }
+.r .subj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r .subj i { color: var(--clay); font-style: normal; }
+.r .when { color: var(--clay); font-size: 11.5px; }
+.empty-state { padding: 40px 20px; text-align: center; color: var(--clay); }
+.pop { position: absolute; z-index: 10; width: 280px; max-height: 330px; overflow: auto; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.14); padding: 6px; }
+.pop input { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; background: var(--sand); color: var(--ink); margin-bottom: 4px; box-sizing: border-box; }
+.rel { position: relative; }
+.kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--ink-2); background: var(--sand); }
+.toolbtn { margin-left: auto; border: 1px solid var(--line); border-radius: 6px; padding: 1px 8px; background: var(--paper); color: var(--ink-2); cursor: pointer; font: inherit; font-size: 11.5px; }
+
+table.eval { width: 100%; border-collapse: collapse; font-family: var(--ui); font-size: 13.5px; margin-top: 12px; }
+table.eval th, table.eval td { border-bottom: 1px solid var(--line); padding: 7px 8px; text-align: left; vertical-align: top; }
+table.eval th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--clay); font-weight: 600; }
+table.eval td.s { font-family: var(--mono); white-space: nowrap; color: var(--ochre); }
+table.eval td.s.best { color: var(--moss); font-weight: 600; }
+.pick { margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; background: var(--sand); font-family: var(--ui); font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.pick label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; padding: 3px 8px; border-radius: 6px; border: 1px solid transparent; }
+.pick label:has(input:checked) { border-color: var(--ochre); background: var(--ochre-soft); }
+.pick input[type=radio] { accent-color: var(--ochre); }
+.pick input[type=text] { flex: 1 1 260px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; background: var(--paper); color: var(--ink); }
+.mini { font: inherit; font-size: 12px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+.rec-box { margin-top: 14px; border: 1px solid var(--moss); background: var(--moss-soft); border-radius: 8px; padding: 14px 16px; font-family: var(--ui); font-size: 14.5px; }
+.rec-box ol { margin: 6px 0 0; padding-left: 20px; } .rec-box li { margin-bottom: 4px; }
+@media (max-width: 860px) { .app { height: auto; min-height: 420px; } .rail { display: none; } .col { width: 170px; } .r { grid-template-columns: 100px minmax(0, 1fr); } .r .when { display: none; } }
+</style>
+<div class="wrap">
+  <div class="series">
+    <div class="crumbs"><a href="index.html">Riddle UX study</a><span>›</span><b>Mail navigation</b></div>
+    <div class="crumbs"><a href="#a">A</a><span>·</span><a href="#b">B</a><span>·</span><a href="#c">C</a><span>·</span><a href="#d">D</a><span>·</span><a href="#compare">Compare</a><span>·</span><a href="#pick">Pick</a></div>
+  </div>
+
+  <header class="hero">
+    <div>
+      <div class="eyebrow">11 October 2026 · the Inbox and your labels</div>
+      <h1>Getting to your labels</h1>
+      <p class="lede">Today the only way into a Gmail label is the Inbox's Label filter: a flat menu of 32 labels, children not under their parents, half of them empty. Four ways to give labels a place, each a working mockup on your own labels and counts. Click around; the list follows.</p>
+    </div>
+    <dl class="card">
+      <dt>Your mailbox, as Riddle holds it</dt><dd>32 Gmail labels, 21 of them empty in Riddle's window; one branch (Work › Northwind › Github) holds 2,463 messages. 19 Strata, three of which share a name with a label (Newsletters, Receipts, Travel).</dd>
+      <dt>Judged against</dt><dd>Luke Wroblewski's <i>Obvious Always Wins</i>, Jared Spool's scent of information, Kole Jain's sidebar as the spine and progressive disclosure, Jesse Showalter's rail that disappears, and Hick's law as Zander Whitehurst and Showalter teach it.</dd>
+      <dt>Recording a pick</dt><dd>At the bottom; kept in this browser, copied as Markdown.</dd>
+    </dl>
+  </header>
+
+  <section id="a">
+    <div class="opt-head"><span class="k">OPTION A</span><h2>A mail column, Mimestream-style</h2></div>
+    <p class="lede2">Choosing a mail view opens a second column beside the rail: Gmail's own places, the category tabs, every label as a tree with unread counts, then Riddle's Strata. Everything is visible, all the time.</p>
+    <div class="app" data-opt="A"></div>
+    <div class="pros"><div><b>For</b><ul><li>Obvious: every place is on screen (Wroblewski)</li><li>Familiar from Gmail, Apple Mail, Mimestream (Jakob's law)</li><li>Counts on every row give scent (Spool)</li></ul></div><div><b>Against</b><ul><li>A second spine beside the rail costs 220px, every visit</li><li>32 labels plus 19 Strata is a long list to scan (Hick)</li><li>Labels and Strata with the same name sit apart and compete</li></ul></div></div>
+  </section>
+
+  <section id="b">
+    <div class="opt-head"><span class="k">OPTION B</span><h2>The rail opens in place</h2></div>
+    <p class="lede2">No new column: Inbox in the rail grows a disclosure triangle, and your labels unfold beneath it as a tree. One spine, as Kole Jain puts it; the mail list keeps its width.</p>
+    <div class="app" data-opt="B"></div>
+    <div class="pros"><div><b>For</b><ul><li>One navigation spine, one active state</li><li>Costs no width; labels appear only when Inbox is open</li><li>Still visible, not behind a menu</li></ul></div><div><b>Against</b><ul><li>The rail grows long and pushes Rules and Director below the fold</li><li>A 150px rail truncates deep names (Work › Northwind › Github)</li><li>Mixes "where in the app" with "which mail", two kinds of place</li></ul></div></div>
+  </section>
+
+  <section id="c">
+    <div class="opt-head"><span class="k">OPTION C</span><h2>A scope bar with a label picker</h2></div>
+    <p class="lede2">The list's header becomes a path: <i>Inbox ▾ › Accounting ▾</i>. Each step opens a picker you can type into. The labels you use most sit as chips under it. Built for the keyboard: <span class="kbd">g</span> <span class="kbd">l</span> opens the picker.</p>
+    <div class="app" data-opt="C"></div>
+    <div class="pros"><div><b>For</b><ul><li>Scales to hundreds of labels; type to find one</li><li>The list keeps its full width</li><li>Fast for anyone who knows the name</li></ul></div><div><b>Against</b><ul><li>Hidden until opened: what you cannot see you do not use (Wroblewski)</li><li>Weak scent for labels you forgot you had (Spool)</li><li>Counts are only visible inside the picker</li></ul></div></div>
+  </section>
+
+  <section id="d">
+    <div class="opt-head rec"><span class="k">OPTION D</span><h2>Places: one column that knows what matters</h2></div>
+    <p class="lede2">A's visible column, with Kole Jain's progressive disclosure. Pinned favourites first; then <b>Topics</b>, where a Gmail label and a Stratum with the same name are one row (marked with where they come from); then the rest of your labels, folded, with empty ones out of the way. The column collapses to icons (<span class="kbd">⌘</span> <span class="kbd">\</span>), and C's picker is there for the keyboard (<span class="kbd">g</span> <span class="kbd">l</span>).</p>
+    <div class="app" data-opt="D"></div>
+    <div class="pros"><div><b>For</b><ul><li>Visible like A, but short: about a dozen rows before you open anything (Hick)</li><li>Riddle's Strata and your labels finally meet; one "Receipts", not two</li><li>Every row is a trigger word with a count (Spool)</li><li>Collapses away when you want width (Showalter's disappearing rail)</li></ul></div><div><b>Against</b><ul><li>More to build than A: merging, pinning, a collapsed state</li><li>"Topics" is a new idea to learn (one tooltip covers it)</li></ul></div></div>
+  </section>
+
+  <section id="compare">
+    <div class="eyebrow" style="margin-top:40px">Compare</div>
+    <h2>Against the principles</h2>
+    <table class="eval">
+      <thead><tr><th>Principle</th><th>Source</th><th>A</th><th>B</th><th>C</th><th>D</th></tr></thead>
+      <tbody>
+        <tr><td>Labels are visible without opening anything</td><td>Wroblewski, Obvious Always Wins</td><td class="s best">●●●</td><td class="s">●●○</td><td class="s">●○○</td><td class="s best">●●●</td></tr>
+        <tr><td>Each place carries a trigger word and a count</td><td>Spool, scent of information</td><td class="s best">●●●</td><td class="s">●●○</td><td class="s">●○○</td><td class="s best">●●●</td></tr>
+        <tr><td>Short enough to scan; the rest disclosed on demand</td><td>Hick; Kole Jain, progressive disclosure</td><td class="s">●○○</td><td class="s">●○○</td><td class="s best">●●●</td><td class="s best">●●●</td></tr>
+        <tr><td>One spine, one active state</td><td>Kole Jain, the sidebar as spine</td><td class="s">●●○</td><td class="s best">●●●</td><td class="s best">●●●</td><td class="s">●●○</td></tr>
+        <tr><td>The list keeps the focus and the width</td><td>Showalter, the rail disappears</td><td class="s">●○○</td><td class="s best">●●●</td><td class="s best">●●●</td><td class="s">●●○</td></tr>
+        <tr><td>Works the way other mail apps do</td><td>Jakob's law (via Showalter)</td><td class="s best">●●●</td><td class="s">●●○</td><td class="s">●○○</td><td class="s">●●○</td></tr>
+        <tr><td>Strata and labels make sense together</td><td>Riddle's own model</td><td class="s">●○○</td><td class="s">●○○</td><td class="s">●○○</td><td class="s best">●●●</td></tr>
+        <tr><td>Keyboard reaches any label by name</td><td>Riddle house rules</td><td class="s">●○○</td><td class="s">●○○</td><td class="s best">●●●</td><td class="s best">●●●</td></tr>
+      </tbody>
+    </table>
+    <div class="rec-box"><b>Recommendation: D, built in two steps.</b>
+      <ol>
+        <li><b>First, A done well.</b> The visible column with the tree nested, unread counts, empty labels folded under "Show 21 empty", and the keyboard picker. This alone fixes today's problem.</li>
+        <li><b>Then D's two ideas.</b> Pinning (favourites to the top), and Topics, which merge a label and a Stratum of the same name, once that merge has been tried on real mail; then the collapse to icons.</li>
+      </ol>
+      Rejected: B, because a rail that unfolds mail places pushes the rest of the app away; C on its own, because hidden labels are forgotten labels. C's picker survives inside A and D.</div>
+  </section>
+
+  <section id="pick">
+    <div class="eyebrow" style="margin-top:40px">Your pick</div>
+    <h2>Which one?</h2>
+    <div class="pick"><span style="font-weight:600">Pick</span>
+      <label><input type="radio" name="nav" value="A"> A · Mail column</label>
+      <label><input type="radio" name="nav" value="B"> B · Rail opens</label>
+      <label><input type="radio" name="nav" value="C"> C · Scope bar</label>
+      <label><input type="radio" name="nav" value="D"> D · Places</label>
+      <label><input type="radio" name="nav" value="rec"> As recommended (A, then D)</label>
+      <input type="text" id="nav-note" placeholder="Notes: what to keep, what to change">
+      <button type="button" class="mini" id="copy">Copy as Markdown</button><span id="flash" style="color:var(--moss);font-weight:600"></span>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  // Your mailbox: label names and counts as Riddle holds them (all mail, unread).
+  var LABELS = [
+    ['Accounting', 35, 7], ['Accounting/Taxes', 0, 0], ['Agreements', 0, 0], ['Agreements/Lease', 0, 0],
+    ['basement', 0, 0], ['Bills', 30, 5], ['Storage', 2, 1], ['House', 0, 0], ['Medical', 0, 0],
+    ['Medical/Dentist', 0, 0], ['Newsletters', 40, 27], ['Notes', 0, 0], ['Personal', 5, 0], ['Promos', 99, 34],
+    ['Receipts', 22, 4], ['Security', 21, 2], ['Sent Messages', 0, 0], ['Travel', 0, 0], ['Travel/Iceland 2027', 0, 0],
+    ['Rowing', 34, 2], ['Unwanted', 0, 0], ['Work', 0, 0], ['Work/Consulting', 0, 0], ['Work/Retainer', 0, 0], ['Work/Receipts', 0, 0],
+    ['Work/Receipts/Registrar', 6, 2], ['Work/Northwind', 0, 0], ['Work/Northwind/Github', 2463, 0],
+    ['[Gmail]/Trash', 0, 0], ['[Imap]/Drafts', 0, 0], ['[Imap]/Sent', 0, 0], ['[Imap]/Trash', 0, 0]
+  ];
+  var STRATA = [['Engineering', 2593], ['Promotions', 2188], ['Social', 700], ['Newsletters', 490], ['Finance', 273], ['Notifications', 244], ['Community', 124], ['Receipts', 95], ['Purchases', 95], ['Entertainment', 60], ['Creators', 29], ['Sign-in', 25], ['Government', 25], ['Travel', 2]];
+  var GMAIL = [['Inbox', 6417, 707, '⌂'], ['Starred', 133, 0, '★'], ['Important', 1806, 0, '»'], ['Sent', 12, 0, '➤'], ['Drafts', 3, 0, '✎'], ['Spam', 119, 0, '!']];
+  var TABS = [['Primary', 2134], ['Updates', 2485], ['Promotions', 2332], ['Social', 239]];
+  var PINNED = ['Accounting', 'Bills', 'Work/Northwind/Github'];
+
+  // Believable rows per place, so the list changes as you click.
+  var SAMPLES = {
+    Accounting: [['FreshBooks', 'Invoice #2291 from Harbour Light Studio is due Friday'], ['CRA My Business', 'Your HST return has been received'], ['QuickBooks', 'September reconciliation is ready']],
+    Bills: [['Enbridge', 'Your October bill is ready'], ['Rogers', 'Your bill is ready to view'], ['Lakeshore Hydro', 'Your bill for account 4471 is available']],
+    Newsletters: [['The Stack', 'Runtime: the father of Java on the art of code'], ['InfoQ', 'Causal AI, SafeChat, JEP 540'], ['Nate', 'Codex, Grok and Claude all agree']],
+    Promos: [['Canada Computers', 'Save up to $700 on laptops'], ['Holt Renfrew', 'Colour Coded: a new take on hues'], ['Storage Plus', 'Last chance to save!']],
+    Receipts: [['Uber', 'Your Tuesday trip with Uber'], ['Kilo Code', 'Your receipt #2633-0984'], ['AWS', 'Thank you for your payment']],
+    Security: [['Microsoft', 'Your single-use code'], ['Moniker', 'Login notification from 203.0.113.7'], ['Kickstarter', '035277 is your sign-in code']],
+    Rowing: [['Rowing Club', 'October meeting notes'], ['Jo R.', 'Re: Saturday potluck'], ['Rowing Club', 'Membership renewal']],
+    Github: [['GitHub', '[northwind/platform] fix(api): URL-encode'], ['GitHub', 'Re: [northwind/event-bus] bump actions'], ['GitHub', 'Run failed: CI on main']],
+    Community: [['Nextdoor', 'Car break-in on Elm St last night'], ['Nextdoor', '96 free items from your neighbours'], ['Nextdoor', 'Weather alert for Lakeview']],
+    Inbox: [['Sam Carter', 'Re: Follow-up on the quote'], ['IcePanel', 'CA$76.84 payment was unsuccessful'], ['Moniker', '2 of your domain names expire soon']]
+  };
+  function rowsFor(name, total, unread) {
+    var leaf = name.split('/').pop();
+    var pool = SAMPLES[leaf] || SAMPLES[name] || [['Riddle', 'Messages filed under ' + leaf]];
+    var n = Math.min(total, 9);
+    var out = [];
+    for (var i = 0; i < n; i++) {
+      var s = pool[i % pool.length];
+      out.push({ from: s[0], subj: s[1], read: i >= unread, when: i < 2 ? (9 + i) + ':4' + i : 'Oct ' + (10 - i) });
+    }
+    return out;
+  }
+
+  function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+  function esc(s) { return String(s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+  function fmt(n) { return n.toLocaleString(); }
+  function item(label, n, unread, opts) {
+    opts = opts || {};
+    var it = el('div', 'it' + (opts.on ? ' on' : '') + (opts.empty ? ' empty' : ''));
+    it.style.paddingLeft = (8 + (opts.depth || 0) * 14) + 'px';
+    it.innerHTML = (opts.tw != null ? '<span class="tw">' + opts.tw + '</span>' : '') + (opts.ic ? '<span class="ic">' + opts.ic + '</span>' : '') +
+      '<span class="lbl">' + esc(label) + '</span>' + (opts.src ? '<span class="src">' + opts.src + '</span>' : '') +
+      (n ? '<span class="n' + (unread ? ' u' : '') + '">' + (unread ? fmt(unread) : fmt(n)) + '</span>' : '');
+    if (opts.title) it.title = opts.title;
+    return it;
+  }
+
+  // The label tree: parents first, children indented, legacy folders last.
+  function tree(includeEmpty) {
+    var sorted = LABELS.slice().sort(function (a, b) { var la = a[0][0] === '[', lb = b[0][0] === '['; return (la - lb) || a[0].toLowerCase().localeCompare(b[0].toLowerCase()); });
+    return sorted.filter(function (l) { return includeEmpty || l[1] > 0 || LABELS.some(function (x) { return x[0].indexOf(l[0] + '/') === 0 && x[1] > 0; }); });
+  }
+  function hasChildren(name) { return LABELS.some(function (x) { return x[0].indexOf(name + '/') === 0; }); }
+
+  function Frame(root, opt) {
+    var st = { place: 'Inbox', kind: 'gmail', open: {}, showEmpty: false, slim: false, pop: false, filter: '' };
+    function select(name, kind) { st.place = name; st.kind = kind; st.pop = false; render(); }
+    function totals() {
+      if (st.kind === 'gmail') { var g = GMAIL.find(function (x) { return x[0] === st.place; }) || TABS.find(function (x) { return x[0] === st.place; }); return [g ? g[1] : 0, g && g[2] ? g[2] : 0]; }
+      if (st.kind === 'stratum') { var s = STRATA.find(function (x) { return x[0] === st.place; }); return [s ? s[1] : 0, 0]; }
+      var l = LABELS.find(function (x) { return x[0] === st.place; }); return [l ? l[1] : 0, l ? l[2] : 0];
+    }
+    function rail(withTree) {
+      var r = el('div', 'rail');
+      r.appendChild(el('div', 'g', 'Mail'));
+      ['Summary', 'Finds', 'Unresolved', 'Priority'].forEach(function (x) { r.appendChild(item(x)); });
+      var inbox = item('Inbox', 0, 707, { on: st.place === 'Inbox' && !withTree || (withTree && st.place === 'Inbox'), tw: withTree ? (st.open.__inbox !== false ? '▾' : '▸') : null });
+      inbox.onclick = function (e) { if (withTree && e.target.classList.contains('tw')) { st.open.__inbox = st.open.__inbox === false; render(); return; } select('Inbox', 'gmail'); };
+      r.appendChild(inbox);
+      if (withTree && st.open.__inbox !== false) {
+        tree(st.showEmpty).forEach(function (l) {
+          var parts = l[0].split('/'); var depth = l[0][0] === '[' ? 0 : parts.length - 1;
+          var parent = parts.slice(0, -1).join('/');
+          if (depth && st.open[parent] === false) return;
+          var it = item(depth ? parts[parts.length - 1] : l[0], l[1], l[2], { depth: depth + 1, on: st.place === l[0], empty: !l[1], tw: hasChildren(l[0]) ? (st.open[l[0]] === false ? '▸' : '▾') : '', title: l[0] });
+          it.onclick = function (e) { if (e.target.classList.contains('tw') && hasChildren(l[0])) { st.open[l[0]] = st.open[l[0]] === false; render(); return; } select(l[0], 'label'); };
+          r.appendChild(it);
+        });
+        var m = el('div', 'more', st.showEmpty ? 'Hide empty labels' : 'Show 21 empty labels'); m.style.paddingLeft = '30px';
+        m.onclick = function () { st.showEmpty = !st.showEmpty; render(); }; r.appendChild(m);
+      }
+      ['Spoil', 'Contamination'].forEach(function (x) { r.appendChild(item(x)); });
+      r.appendChild(el('div', 'g', 'Rules'));
+      ['Meshes', 'Packs', 'Strata', 'Labels'].forEach(function (x) { r.appendChild(item(x)); });
+      r.appendChild(el('div', 'g', 'Director'));
+      ['Director', 'Activity', 'Settings'].forEach(function (x) { r.appendChild(item(x)); });
+      return r;
+    }
+    function labelTree(c, opts) {
+      opts = opts || {};
+      tree(st.showEmpty).forEach(function (l) {
+        if (opts.skip && opts.skip(l[0])) return;
+        var parts = l[0].split('/'); var depth = l[0][0] === '[' ? 0 : parts.length - 1;
+        var parent = parts.slice(0, -1).join('/');
+        if (depth && st.open[parent] === false) return;
+        var it = item(depth ? parts[parts.length - 1] : l[0], l[1], l[2], { depth: depth, ic: depth ? '' : '◇', on: st.place === l[0], empty: !l[1], tw: hasChildren(l[0]) ? (st.open[l[0]] === false ? '▸' : '▾') : '', title: l[0] });
+        it.onclick = function (e) { if (e.target.classList.contains('tw') && hasChildren(l[0])) { st.open[l[0]] = st.open[l[0]] === false; render(); return; } select(l[0], 'label'); };
+        c.appendChild(it);
+      });
+      var m = el('div', 'more', st.showEmpty ? 'Hide empty labels' : 'Show 21 empty labels');
+      m.onclick = function () { st.showEmpty = !st.showEmpty; render(); }; c.appendChild(m);
+    }
+    function colA() {
+      var c = el('div', 'col');
+      c.appendChild(el('div', 'g', 'Gmail'));
+      GMAIL.forEach(function (g) { var it = item(g[0], g[1], g[2], { ic: g[3], on: st.place === g[0] }); it.onclick = function () { select(g[0], 'gmail'); }; c.appendChild(it); });
+      c.appendChild(el('div', 'g', 'Categories'));
+      TABS.forEach(function (t) { var it = item(t[0], t[1], 0, { ic: '▤', on: st.place === t[0] && st.kind === 'gmail' }); it.onclick = function () { select(t[0], 'gmail'); }; c.appendChild(it); });
+      c.appendChild(el('div', 'g', 'Labels'));
+      labelTree(c);
+      c.appendChild(el('div', 'g', 'Strata'));
+      STRATA.forEach(function (s) { var it = item(s[0], s[1], 0, { ic: '≡', on: st.place === s[0] && st.kind === 'stratum' }); it.onclick = function () { select(s[0], 'stratum'); }; c.appendChild(it); });
+      return c;
+    }
+    function colD() {
+      var c = el('div', 'col' + (st.slim ? ' slim' : ''));
+      if (st.slim) {
+        [['⌂', 'Inbox', 'gmail'], ['★', 'Starred', 'gmail'], ['$', 'Accounting', 'label'], ['≋', 'Bills', 'label'], ['⌥', 'Work/Northwind/Github', 'label']].forEach(function (x) {
+          var it = item('', 0, 0, { ic: x[0], on: st.place === x[1], title: x[1] }); it.style.justifyContent = 'center'; it.onclick = function () { select(x[1], x[2]); }; c.appendChild(it);
+        });
+        var ex = el('div', 'more', '»'); ex.title = 'Expand (⌘\\)'; ex.style.textAlign = 'center'; ex.onclick = function () { st.slim = false; render(); }; c.appendChild(ex);
+        return c;
+      }
+      var g = el('div', 'g', 'Places <span class="more" style="padding:0" title="Collapse to icons (⌘\\)">«</span>');
+      g.querySelector('.more').onclick = function () { st.slim = true; render(); };
+      c.appendChild(g);
+      [GMAIL[0], GMAIL[1], GMAIL[3]].forEach(function (x) { var it = item(x[0], x[1], x[2], { ic: x[3], on: st.place === x[0] }); it.onclick = function () { select(x[0], 'gmail'); }; c.appendChild(it); });
+      c.appendChild(el('div', 'g', 'Pinned'));
+      PINNED.forEach(function (p) { var l = LABELS.find(function (x) { return x[0] === p; }); var it = item(p.split('/').pop(), l[1], l[2], { ic: '◆', on: st.place === p, title: p }); it.onclick = function () { select(p, 'label'); }; c.appendChild(it); });
+      c.appendChild(el('div', 'g', 'Topics <span style="font-weight:400;text-transform:none;letter-spacing:0">label + Stratum</span>'));
+      var merged = ['Newsletters', 'Receipts', 'Travel'];
+      STRATA.slice(0, 9).forEach(function (s) {
+        var both = merged.indexOf(s[0]) >= 0;
+        var it = item(s[0], s[1], 0, { ic: '≡', src: both ? 'label + Riddle' : 'Riddle', on: st.place === s[0] && st.kind === 'stratum', title: both ? 'Your Gmail label and Riddle\'s Stratum, together' : 'A Riddle Stratum' });
+        it.onclick = function () { select(s[0], 'stratum'); }; c.appendChild(it);
+      });
+      var lab = el('div', 'g', 'Labels');
+      c.appendChild(lab);
+      if (st.open.__labels) {
+        labelTree(c, { skip: function (n) { return PINNED.indexOf(n) >= 0 || merged.indexOf(n) >= 0; } });
+      } else {
+        var m = el('div', 'more', '▸ 11 more labels with mail'); m.onclick = function () { st.open.__labels = true; render(); }; c.appendChild(m);
+      }
+      return c;
+    }
+    function picker(anchor) {
+      var p = el('div', 'pop');
+      var inp = el('input'); inp.placeholder = 'Type a label or Stratum…'; inp.value = st.filter;
+      p.appendChild(inp);
+      var list = el('div');
+      function fill() {
+        list.innerHTML = '';
+        var q = st.filter.toLowerCase();
+        var all = LABELS.filter(function (l) { return l[1] > 0; }).map(function (l) { return [l[0], l[1], l[2], 'label'] })
+          .concat(STRATA.map(function (s) { return [s[0], s[1], 0, 'stratum'] }));
+        all.filter(function (x) { return !q || x[0].toLowerCase().indexOf(q) >= 0; }).slice(0, 14).forEach(function (x) {
+          var it = item(x[0], x[1], x[2], { ic: x[3] === 'label' ? '◇' : '≡', src: x[3] === 'label' ? 'label' : 'Stratum' });
+          it.onclick = function () { st.filter = ''; select(x[0], x[3]); }; list.appendChild(it);
+        });
+      }
+      inp.oninput = function () { st.filter = inp.value; fill(); };
+      fill(); p.appendChild(list);
+      p.style.top = '36px'; p.style.left = '0';
+      anchor.appendChild(p);
+      setTimeout(function () { inp.focus(); }, 0);
+    }
+    function list() {
+      var t = totals();
+      var l = el('div', 'list');
+      var hd = el('div', 'hd');
+      var crumb = el('div', 'crumb rel');
+      if (opt === 'C') {
+        var s1 = el('span', 'seg pick', st.kind === 'gmail' ? esc(st.place) : 'Inbox'); s1.onclick = function () { select('Inbox', 'gmail'); };
+        crumb.appendChild(s1);
+        crumb.appendChild(el('span', 'sep', '›'));
+        var s2 = el('span', 'seg pick', st.kind === 'gmail' ? '<span style="color:var(--clay);font-weight:400">All labels</span>' : esc(st.place.split('/').join(' › ')));
+        s2.onclick = function (e) { e.stopPropagation(); st.pop = !st.pop; render(); };
+        crumb.appendChild(s2);
+        if (st.pop) picker(crumb);
+      } else {
+        var parts = st.kind === 'label' ? st.place.split('/') : [st.place];
+        var prefix = st.kind === 'stratum' ? (opt === 'D' ? 'Topic' : 'Stratum') : st.kind === 'label' ? 'Label' : null;
+        if (prefix) crumb.appendChild(el('span', 'sep', prefix));
+        parts.forEach(function (p, i) {
+          if (i) crumb.appendChild(el('span', 'sep', '›'));
+          var path = parts.slice(0, i + 1).join('/');
+          var seg = el('span', 'seg', esc(p)); seg.onclick = function () { if (st.kind === 'label') select(path, 'label'); }; crumb.appendChild(seg);
+        });
+      }
+      hd.appendChild(crumb);
+      hd.appendChild(el('span', 'count', fmt(t[0]) + ' messages' + (t[1] ? ' · ' + fmt(t[1]) + ' unread' : '')));
+      if (opt === 'C' || opt === 'D') { var k = el('span', 'toolbtn', '<span class="kbd">g</span> <span class="kbd">l</span> label'); k.onclick = function (e) { e.stopPropagation(); if (opt === 'C') { st.pop = true; render(); } else { st.pop = !st.pop; render(); } }; hd.appendChild(k); if (opt === 'D' && st.pop) { var a = el('div', 'rel'); a.style.marginLeft = '-280px'; hd.appendChild(a); picker(a); } }
+      l.appendChild(hd);
+      if (opt === 'C') {
+        var chips = el('div', 'chips');
+        [['Accounting', 'label'], ['Bills', 'label'], ['Newsletters', 'label'], ['Community', 'stratum'], ['Work/Northwind/Github', 'label']].forEach(function (x) {
+          var src = x[1] === 'label' ? LABELS.find(function (y) { return y[0] === x[0]; }) : STRATA.find(function (y) { return y[0] === x[0]; });
+          var ch = el('span', 'chip' + (st.place === x[0] ? ' on' : ''), esc(x[0].split('/').pop()) + '<span class="n">' + fmt(src[1]) + '</span>');
+          ch.onclick = function () { select(x[0], x[1]); }; chips.appendChild(ch);
+        });
+        l.appendChild(chips);
+      }
+      var rows = el('div', 'rows');
+      var data = rowsFor(st.place, t[0], t[1]);
+      if (!data.length) rows.appendChild(el('div', 'empty-state', 'Nothing in ' + esc(st.place.split('/').pop()) + ' in the mail Riddle holds.'));
+      data.forEach(function (d) { rows.appendChild(el('div', 'r' + (d.read ? ' read' : ''), '<span class="from">' + esc(d.from) + '</span><span class="subj">' + esc(d.subj) + '</span><span class="when">' + d.when + '</span>')); });
+      l.appendChild(rows);
+      return l;
+    }
+    function render() {
+      root.innerHTML = '';
+      var top = el('div', 'top', '<span class="dots"><i></i><i></i><i></i></span><span class="acct">Gmail ▾</span><span class="search">Search your mail, or ask the Director</span>');
+      root.appendChild(top);
+      var main = el('div', 'main');
+      main.appendChild(rail(opt === 'B'));
+      if (opt === 'A') main.appendChild(colA());
+      if (opt === 'D') main.appendChild(colD());
+      main.appendChild(list());
+      root.appendChild(main);
+    }
+    root.addEventListener('click', function (e) { if (st.pop && !e.target.closest('.pop') && !e.target.closest('.seg.pick') && !e.target.closest('.toolbtn')) { st.pop = false; render(); } });
+    render();
+  }
+  document.querySelectorAll('.app').forEach(function (a) { Frame(a, a.dataset.opt); });
+
+  // The pick, kept in this browser.
+  var KEY = 'riddle-mail-nav-pick';
+  var saved = {}; try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+  if (saved.pick) { var r = document.querySelector('input[name=nav][value="' + saved.pick + '"]'); if (r) r.checked = true; }
+  document.getElementById('nav-note').value = saved.note || '';
+  function save() { try { localStorage.setItem(KEY, JSON.stringify({ pick: (document.querySelector('input[name=nav]:checked') || {}).value || null, note: document.getElementById('nav-note').value })); } catch (e) {} }
+  document.querySelectorAll('input[name=nav]').forEach(function (r) { r.onchange = save; });
+  document.getElementById('nav-note').oninput = save;
+  document.getElementById('copy').onclick = function () {
+    var pick = (document.querySelector('input[name=nav]:checked') || {}).value || 'none';
+    var md = '# Mail navigation pick\n\n- Pick: ' + pick + '\n- Notes: ' + (document.getElementById('nav-note').value || '—') + '\n';
+    var done = function () { document.getElementById('flash').textContent = 'Copied'; setTimeout(function () { document.getElementById('flash').textContent = ''; }, 1500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(md).then(done, function () { prompt('Copy:', md); }); else prompt('Copy:', md);
+  };
+})();
+</script>
+</body>
+</html>

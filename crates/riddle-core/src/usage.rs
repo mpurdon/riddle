@@ -17,6 +17,9 @@ pub enum UsageTask {
     Backfill,
     SignalTest,
     Probe,
+    /// Model comparison (Developer → Models): recorded apart so it never
+    /// reads as the Sift's or the Director's spend.
+    Comparison,
 }
 
 impl UsageTask {
@@ -29,6 +32,7 @@ impl UsageTask {
             UsageTask::Backfill => "backfill",
             UsageTask::SignalTest => "signal_test",
             UsageTask::Probe => "probe",
+            UsageTask::Comparison => "comparison",
         }
     }
 }

@@ -4,6 +4,7 @@
  * PendingAction whose realArguments are what the user must see, executes on
  * confirm, appends Activity, records undo information and emits events.
  */
+import { checkModelAccess, runBenchmark, runDirectorComparison } from './comparison'
 import type { Importance } from '@/bindings/Importance'
 import type { ActionInvocation } from '@/bindings/ActionInvocation'
 import type { ActionMeta } from '@/bindings/ActionMeta'
@@ -98,6 +99,12 @@ export const ACTIONS: Record<string, Meta> = {
   delete_dig_group: m('Delete a Dig Group (its accounts stay)', { reversible: true }),
   apply_mesh_to_history: m('Re-decide recent mail under a Mesh\'s current version', { reversible: true, risk: 'medium', confirmation: 'two_step' }),
   decide_again: m('Decide messages again under the current rules', { reversible: true }),
+  check_model_access: m('Check which candidate models this account may call', { risk: 'low' }),
+  run_model_benchmark: m('Compare models on messages you have decided', { risk: 'medium', minimumAutonomy: 'trusted' }),
+  run_director_comparison: m('Replay past Director questions on each model', { risk: 'medium', minimumAutonomy: 'trusted' }),
+  pick_director_answer: m('Pick the best model answer to a replayed question', { reversible: true, minimumAutonomy: 'trusted' }),
+  pin_place: m('Pin a label, Topic or mailbox to the top of the mail column', { reversible: true, minimumAutonomy: 'trusted' }),
+  unpin_place: m('Unpin a place from the mail column', { reversible: true, minimumAutonomy: 'trusted' }),
   set_mailbox_writes: m('Choose what this dev build may write to the mailbox: hold, ask or allow', { reversible: true, risk: 'high', confirmation: 'press_hold' }),
   send_held_changes: m('Write the mailbox changes waiting in the outbox now', { externalSideEffect: true, risk: 'medium', confirmation: 'approval', minimumAutonomy: 'trusted' }),
   discard_held_changes: m('Drop the mailbox changes waiting in the outbox; Riddle keeps its decisions', { risk: 'medium', confirmation: 'approval', minimumAutonomy: 'trusted' }),
@@ -1166,6 +1173,34 @@ function execute(state: MockState, action: string, args: Args): Exec {
       for (const d of state.digs) if (d.group === name) d.group = to
       emitMock({ type: 'settings_changed' })
       return { result: { name: to ?? name }, summary: to !== null ? `You renamed group ${name} to ${to}` : `You deleted group ${name}`, undo: { state: 'not_undoable', reason: 'mock' } }
+    }
+    case 'check_model_access': {
+      const models = checkModelAccess(state)
+      return { result: { models }, summary: `${models.filter((x) => x.access === 'usable').length} of ${models.length} models are usable`, undo: { state: 'not_undoable', reason: 'a check only reads' } }
+    }
+    case 'run_model_benchmark': {
+      const n = runBenchmark(state, (args.models as string[] | undefined) ?? [], Number(args.count ?? 20))
+      if (!n) throw err('invalid', 'no message has a right answer yet: correct a few, or grade some in Rule check')
+      return { result: { messages: n }, summary: `Comparing models on ${plural(n, 'message')}`, undo: { state: 'not_undoable', reason: 'outputs are records' } }
+    }
+    case 'run_director_comparison': {
+      const n = runDirectorComparison(state, (args.models as string[] | undefined) ?? [], Number(args.count ?? 5))
+      return { result: { questions: n }, summary: `Replaying ${plural(n, 'question')} on each model`, undo: { state: 'not_undoable', reason: 'outputs are records' } }
+    }
+    case 'pin_place': {
+      const place = str(args, 'place')
+      if (!/^(all|(mailbox|label|topic):.+)$/.test(place)) throw err('invalid', `not a place: ${place}`)
+      if (!state.pinnedPlaces.includes(place)) state.pinnedPlaces.push(place)
+      return { result: { place }, summary: `Pinned ${place.replace(/^\w+:/, '')}`, undo: { state: 'not_undoable', reason: 'mock' } }
+    }
+    case 'unpin_place': {
+      const place = str(args, 'place')
+      state.pinnedPlaces = state.pinnedPlaces.filter((p) => p !== place)
+      return { result: { place }, summary: `Unpinned ${place.replace(/^\w+:/, '')}`, undo: { state: 'not_undoable', reason: 'mock' } }
+    }
+    case 'pick_director_answer': {
+      state.comparisonPicks[str(args, 'questionKey')] = str(args, 'modelId')
+      return { result: {}, summary: `Picked ${str(args, 'modelId')}`, undo: { state: 'not_undoable', reason: 'mock' } }
     }
     case 'set_mailbox_writes': {
       const w = args.writes

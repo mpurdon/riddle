@@ -28,6 +28,3 @@ export function labelName(id: string): string {
   if (id.startsWith(CATEGORY) && id.length > CATEGORY.length) return titleCase(id.slice(CATEGORY.length).toLowerCase())
   return id
 }
-
-/** The labels the Inbox filter offers, in the order Gmail's own sidebar uses. */
-export const FILTERABLE_LABELS = ['INBOX', 'STARRED', 'IMPORTANT', 'SNOOZED', 'SENT', 'CATEGORY_PERSONAL', 'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS'] as const

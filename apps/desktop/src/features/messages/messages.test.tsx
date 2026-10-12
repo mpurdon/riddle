@@ -18,6 +18,7 @@ afterEach(() => {
   cleanup()
   // The by-sender view is remembered per machine; a test that chose it must not choose for the next.
   localStorage.removeItem(SPOIL_VIEW_KEY)
+  for (const k of Object.keys(localStorage)) if (k.startsWith('riddle.mailColumn.')) localStorage.removeItem(k)
 })
 
 const key = (k: string) => fireEvent.keyDown(window, { key: k })
@@ -51,11 +52,66 @@ describe('the Inbox list model', () => {
     expect(await screen.findByRole('button', { name: 'Archive 2 selected' })).toBeTruthy()
   })
 
-  it('shows Gmail labels by name in the label filter', async () => {
+})
+
+describe('the mail column', () => {
+  /** Two of the fixture's messages carry the person's labels: one `Receipts` (a Stratum's name too), one nested. */
+  const withLabels = (state: MockState) => {
+    const [a, b] = state.messages
+    a.labels = [...a.labels, 'Receipts']
+    b.labels = [...b.labels, 'Work/Clients', 'UNREAD']
+  }
+  const column = () => screen.getByRole('navigation', { name: 'Mail places' })
+
+  it('lists the mailboxes by their Gmail names, and a label with a Stratum of its name as one Topic', async () => {
+    mountApp('#/inbox', withLabels)
+    const nav = await screen.findByRole('navigation', { name: 'Mail places' })
+    await within(nav).findByRole('button', { name: /^Receipts/ })
+    for (const name of ['All mail', 'Inbox', 'Starred', 'Sent']) expect(within(nav).getByRole('button', { name: new RegExp(`^${name}`) })).toBeTruthy()
+    expect(nav.textContent).not.toMatch(/CATEGORY_|INBOX/)
+    expect(within(nav).getAllByText('+ label').length).toBe(1)
+    // Your labels are folded under one line until opened; the merged one is a Topic, not a label.
+    fireEvent.click(within(nav).getByRole('button', { name: /1 label with mail/ }))
+    expect(within(nav).getByRole('button', { name: /^Clients/ })).toBeTruthy()
+  })
+
+  it('a click on a Topic lists its mail, the label or the Stratum, and says where you are', async () => {
+    const state = mountApp('#/inbox', withLabels)
+    const a = state.messages[0]
+    const nav = await screen.findByRole('navigation', { name: 'Mail places' })
+    fireEvent.click(await within(nav).findByRole('button', { name: /^Receipts/ }))
+    await waitFor(() => expect(window.location.hash).toBe('#/inbox?place=topic%3AReceipts'))
+    const want = listMessages(state, { digId: null, filter: { place: 'topic:Receipts' }, page: firstPage }).items
+    expect(want.some((m) => m.id === a.id)).toBe(true)
+    await waitFor(() => expect(screen.getAllByRole('option').length).toBe(want.length))
+    expect(screen.getByRole('heading', { name: 'Receipts' })).toBeTruthy()
+    expect(within(nav).getByRole('button', { name: /^Receipts/ }).getAttribute('aria-current')).toBe('page')
+  })
+
+  it('pins a place to the top, and g l goes anywhere by name', async () => {
+    const state = mountApp('#/inbox', withLabels)
+    const nav = await screen.findByRole('navigation', { name: 'Mail places' })
+    fireEvent.click(await within(nav).findByRole('button', { name: 'Pin Receipts' }))
+    await waitFor(() => expect(state.pinnedPlaces).toEqual(['topic:Receipts']))
+    await within(nav).findByText('Pinned')
+    expect(within(nav).getByRole('button', { name: 'Unpin Receipts' })).toBeTruthy()
+    key('g')
+    key('l')
+    const input = await screen.findByRole('combobox', { name: 'Label or Topic' })
+    fireEvent.change(input, { target: { value: 'clie' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(window.location.hash).toBe('#/inbox?place=label%3AWork%2FClients'))
+    // The chord's second key went to the chord: no Stratum picker opened behind it.
+    expect(screen.queryAllByRole('dialog')).toEqual([])
+  })
+
+  it('collapses to icons with ⌘\\ and back', async () => {
     mountApp('#/inbox')
-    await screen.findAllByRole('option')
-    const select = screen.getByLabelText('Label')
-    expect(select.textContent ?? '').not.toMatch(/CATEGORY_|INBOX/)
+    await screen.findByRole('navigation', { name: 'Mail places' })
+    fireEvent.keyDown(window, { key: '\\', metaKey: true, ctrlKey: true })
+    expect(await within(column()).findByRole('button', { name: 'Expand the mail column' })).toBeTruthy()
+    fireEvent.click(within(column()).getByRole('button', { name: 'Expand the mail column' }))
+    expect(await within(column()).findByRole('button', { name: 'Collapse the mail column' })).toBeTruthy()
   })
 })
 

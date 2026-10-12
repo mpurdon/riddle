@@ -280,3 +280,36 @@ pub fn recent_sift_ids_of_kind(
         rows
     })
 }
+
+/// Messages whose current decision is the person's own, newest first: the
+/// right answers a model comparison scores against.
+pub fn user_decided(store: &Store, limit: u32) -> Result<Vec<MessageId>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT message_id FROM classifications
+             WHERE superseded_at IS NULL AND shadow = 0 AND json_extract(json, '$.mechanism') = 'user'
+             ORDER BY created_at DESC LIMIT ?1",
+        )?;
+        let rows = st
+            .query_map([limit], |r| Ok(MessageId(r.get::<_, String>(0)?)))?
+            .collect();
+        rows
+    })
+}
+
+/// The hard cases: messages the LLM decided or left Unresolved, newest
+/// first. Where escalation matters, so where models are worth comparing.
+pub fn recent_hard(store: &Store, limit: u32) -> Result<Vec<MessageId>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT message_id FROM classifications
+             WHERE superseded_at IS NULL AND shadow = 0
+               AND (json_extract(json, '$.mechanism') = 'llm' OR disposition_kind = 'unresolved')
+             ORDER BY created_at DESC LIMIT ?1",
+        )?;
+        let rows = st
+            .query_map([limit], |r| Ok(MessageId(r.get::<_, String>(0)?)))?
+            .collect();
+        rows
+    })
+}

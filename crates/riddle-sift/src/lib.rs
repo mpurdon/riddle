@@ -191,6 +191,10 @@ pub struct SiftOptions {
     /// own type, so a preview never promises what Sift would hold back.
     pub policy: riddle_mesh::ConfidencePolicy,
     pub objective: String,
+    /// Escalate even when the judge's scores were decisive. Only model
+    /// comparison sets it: every candidate must be asked, or each would
+    /// just repeat the judge on the messages it was sure about.
+    pub force_escalation: bool,
 }
 
 impl Default for SiftOptions {
@@ -199,6 +203,7 @@ impl Default for SiftOptions {
             token_budget: 2_000,
             policy: riddle_mesh::ConfidencePolicy::default(),
             objective: "classify the message and decide whether it deserves attention".into(),
+            force_escalation: false,
         }
     }
 }

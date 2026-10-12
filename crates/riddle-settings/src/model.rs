@@ -295,6 +295,45 @@ impl Default for PriorityInboxSettings {
     }
 }
 
+/// Model comparison (Developer → Models): the candidate models, and whether
+/// challengers run alongside every real escalation under a daily cap.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct ComparisonSettings {
+    /// Bedrock model ids to compare. A model the account may not call yet
+    /// stays listed and joins once its access check passes.
+    pub roster: Vec<String>,
+    /// Run every usable roster model on each real escalation too, recorded
+    /// and never applied.
+    pub challengers: bool,
+    /// USD a day that challengers and benchmarks may spend together.
+    pub daily_usd: f64,
+}
+
+/// The roster as of October 2026: the newest of each family the dev
+/// account could call, then the ones Bedrock lists that it could not yet.
+pub const DEFAULT_ROSTER: &[&str] = &[
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "us.anthropic.claude-sonnet-4-6",
+    "us.anthropic.claude-opus-4-6-v1",
+    "us.anthropic.claude-haiku-5-5",
+    "us.anthropic.claude-sonnet-5-5",
+    "us.anthropic.claude-opus-5-5",
+    "us.openai.gpt-6-luna",
+    "us.openai.gpt-5.6-luna",
+];
+
+impl Default for ComparisonSettings {
+    fn default() -> Self {
+        Self {
+            roster: DEFAULT_ROSTER.iter().map(|s| s.to_string()).collect(),
+            challengers: true,
+            daily_usd: 3.0,
+        }
+    }
+}
+
 /// The config file (`settings.toml`). See the module header.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
@@ -318,6 +357,8 @@ pub struct Settings {
     pub privacy_default: PrivacyMode,
     pub launch_at_login: bool,
     pub close_to_hide: bool,
+    #[serde(default)]
+    pub comparison: ComparisonSettings,
 }
 
 impl Default for Settings {
@@ -350,6 +391,7 @@ impl Settings {
             privacy_default: PrivacyMode::CloudJudgment,
             launch_at_login: false,
             close_to_hide: true,
+            comparison: ComparisonSettings::default(),
         }
     }
 

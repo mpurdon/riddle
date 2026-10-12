@@ -2,6 +2,8 @@
  * The mutable browser-mode state the mock commands read and the mock
  * actions change. Built fresh per session (and per test).
  */
+import type { BenchOutput } from '@/bindings/BenchOutput'
+import type { ModelAccess } from '@/bindings/ModelAccess'
 import type { ProviderWrites } from '@/bindings/ProviderWrites'
 import type { Importance } from '@/bindings/Importance'
 import type { InstalledPack } from '@/bindings/InstalledPack'
@@ -87,6 +89,12 @@ export interface MockState {
   shadowProposals: Map<string, Disposition>
   idempotent: Map<string, unknown>
   armed: boolean
+  /** Model comparison: access the check found, outputs recorded, Director picks. */
+  modelAccess: Record<string, ModelAccess>
+  comparisonOutputs: BenchOutput[]
+  comparisonPicks: Record<string, string>
+  /** The mail column's pins, as place strings in pin order. */
+  pinnedPlaces: string[]
   /** The dev build's mailbox writes, and the projected changes waiting on them. */
   writes: ProviderWrites
   held: number
@@ -155,6 +163,10 @@ export function buildState(): MockState {
     idempotent: new Map(),
     armed: false,
     writes: 'hold',
+    modelAccess: {},
+    comparisonOutputs: [],
+    comparisonPicks: {},
+    pinnedPlaces: [],
     held: 0,
     seq: 1000,
   }

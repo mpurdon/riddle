@@ -31,10 +31,14 @@ pub async fn list_messages(
     filter: Option<MessageFilterArgs>,
     page: Option<PageRequest>,
 ) -> Result<Page<MessageSummary>> {
-    let filter = filter.unwrap_or_default().into();
-    state
-        .app
-        .list_messages(dig_id.as_ref(), &filter, &page.unwrap_or_default())
+    let mut filter = filter.unwrap_or_default();
+    let place = filter.place.take();
+    state.app.list_messages_at(
+        dig_id.as_ref(),
+        &filter.into(),
+        place.as_ref(),
+        &page.unwrap_or_default(),
+    )
 }
 
 #[tauri::command]
@@ -240,6 +244,11 @@ pub async fn list_labels(
     dig_id: Option<DigId>,
 ) -> Result<Vec<LabelSummary>> {
     state.app.list_labels(dig_id.as_ref())
+}
+
+#[tauri::command]
+pub async fn mail_places(state: State<'_, AppState>, dig_id: Option<DigId>) -> Result<MailPlaces> {
+    state.app.mail_places(dig_id.as_ref())
 }
 
 #[tauri::command]

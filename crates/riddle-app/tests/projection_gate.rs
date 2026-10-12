@@ -32,6 +32,14 @@ async fn sifted_fixture(autonomy: Autonomy) -> (Arc<App>, Dig) {
         repo::messages::count(&store).unwrap() > 0,
         "the fixture synced"
     );
+    // The catch-up's Sift can still be finishing under load; finish it here
+    // so the test is about projection, not timing.
+    for _ in 0..20 {
+        if repo::messages::unclassified_count(&store).unwrap() == 0 {
+            break;
+        }
+        app.sift_pass(&dig, 500, None).await.unwrap();
+    }
     assert_eq!(
         repo::messages::unclassified_count(&store).unwrap(),
         0,

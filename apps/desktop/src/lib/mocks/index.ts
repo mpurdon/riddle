@@ -4,6 +4,8 @@
  * mode except through the ipc wrapper's registry, which only consults it
  * when `!isTauri`.
  */
+import { mailPlaces } from './places'
+import { comparisonOverview, comparisonRows, directorComparisons } from './comparison'
 import { mock, clearMocks, isTauri, inFlightCalls } from '../ipc'
 import { emitMock } from '../events'
 import { u64 } from '../format'
@@ -80,6 +82,7 @@ export function registerMocks(): void {
   })
   mock('signal_versions', (a) => state.signals.filter((s) => s.name === a.name).sort((x, y) => y.version - x.version))
   mock('signal_evaluations', (a) => state.traces.get(`tr_${str(a, 'messageId')}`)?.signals ?? [])
+  mock('mail_places', (a) => mailPlaces(state, opt(a, 'digId') as string | null))
   mock('list_labels', (a) => {
     // The fixture's labels are their own names; counts come from the mail.
     const out: { digId: string; id: string; name: string; kind: string; messages: number; unread: number }[] = []
@@ -126,6 +129,9 @@ export function registerMocks(): void {
   mock('trace_stats', (a) => q.traceStats(state, { digId: opt(a, 'digId') as string | null, sinceDays: opt(a, 'sinceDays') as number | null }))
   mock('dev_info', () => ({ ...state.devInfo, uptimeSeconds: state.devInfo.uptimeSeconds + Math.round(performance.now() / 1000) }))
   mock('dev_armed', () => state.armed)
+  mock('comparison_overview', () => comparisonOverview(state))
+  mock('comparison_rows', () => comparisonRows(state))
+  mock('director_comparisons', () => directorComparisons(state))
   mock('mailbox_writes', () => ({ dev: state.devInfo.dev, writes: state.writes, held: u64(state.held) }))
   mock('probe_judge', async () => {
     await new Promise((r) => setTimeout(r, 420))

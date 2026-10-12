@@ -41,6 +41,7 @@ parking_lot.workspace = true
 chrono.workspace = true
 iana-time-zone.workspace = true
 uuid.workspace = true
+futures.workspace = true
 dirs.workspace = true
 reqwest.workspace = true
 

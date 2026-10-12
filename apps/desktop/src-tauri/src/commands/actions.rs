@@ -3,7 +3,10 @@
 //! the `PendingAction`; the client re-invokes with `pendingId`.
 
 use crate::state::AppState;
-use riddle_core::{ActionInvocation, ActionMeta, ActionOutcome, MailboxWritesState, PendingAction};
+use riddle_core::{
+    ActionInvocation, ActionMeta, ActionOutcome, BenchOverview, BenchRow, DirectorComparison,
+    MailboxWritesState, PendingAction,
+};
 use riddle_errors::Result;
 use riddle_store::repo;
 use tauri::State;
@@ -37,6 +40,27 @@ pub async fn list_pending(state: State<'_, AppState>) -> Result<Vec<PendingActio
 #[tauri::command]
 pub async fn dev_armed(state: State<'_, AppState>) -> Result<bool> {
     Ok(state.runtime().is_armed())
+}
+
+#[tauri::command]
+pub async fn comparison_overview(state: State<'_, AppState>) -> Result<BenchOverview> {
+    state.app.comparison_overview()
+}
+
+#[tauri::command]
+pub async fn comparison_rows(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<BenchRow>> {
+    state.app.comparison_rows(limit.unwrap_or(50) as usize)
+}
+
+#[tauri::command]
+pub async fn director_comparisons(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<DirectorComparison>> {
+    state.app.director_comparisons(limit.unwrap_or(20) as usize)
 }
 
 #[tauri::command]

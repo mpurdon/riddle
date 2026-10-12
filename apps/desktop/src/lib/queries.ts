@@ -44,6 +44,12 @@ export function useLabels() {
   return useQuery({ queryKey: [...qk.labels, digId], queryFn: () => api.listLabels(digId), staleTime: 60_000 })
 }
 
+/** The Inbox's mail column for the selected account (or all): mailboxes, pins, Topics, labels. */
+export function useMailPlaces() {
+  const digId = useUi((s) => s.digId)
+  return useQuery({ queryKey: [...qk.places, digId], queryFn: () => api.mailPlaces(digId), staleTime: 30_000 })
+}
+
 /** A label id as its name: the account's own label list first, then Gmail's built-in names. */
 export function useLabelName(): (id: string, digId?: string) => string {
   const labels = useLabels().data

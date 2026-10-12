@@ -315,7 +315,7 @@ impl App {
     /// One page across Digs, newest first, with the filter built per Dig.
     /// Cross-Dig paging uses one offset applied per Dig, which over-fetches
     /// by the number of Digs; acceptable for a desktop list.
-    fn merge_messages(
+    pub(crate) fn merge_messages(
         &self,
         digs: &[Dig],
         filter_for: impl Fn(&Dig) -> MessageFilter,

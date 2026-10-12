@@ -286,6 +286,8 @@ impl App {
                 .chain(riddle_mesh::actions())
                 .chain(riddle_signals::actions())
                 .chain(crate::actions::actions())
+                .chain(crate::comparison::actions())
+                .chain(crate::places::actions())
             {
                 reg.register(a);
             }

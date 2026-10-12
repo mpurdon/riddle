@@ -31,6 +31,7 @@ pub struct LlmRefiner {
     model_id: Option<String>,
     privacy: PrivacyMode,
     max_tokens: u32,
+    task: UsageTask,
 }
 
 /// The Bedrock-backed refiner is `LlmRefiner` over `BedrockLlm`.
@@ -46,6 +47,7 @@ impl LlmRefiner {
             model_id,
             privacy: PrivacyMode::CloudReasoning,
             max_tokens: 4096,
+            task: UsageTask::Sift,
         }
     }
 
@@ -54,6 +56,13 @@ impl LlmRefiner {
     /// is the boundary's own, not a substitute for Sift's.
     pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
         self.max_tokens = max_tokens;
+        self
+    }
+
+    /// Ledger attribution: the Sift's by default; model comparison runs
+    /// record as `Comparison`.
+    pub fn with_task(mut self, task: UsageTask) -> Self {
+        self.task = task;
         self
     }
 
@@ -126,7 +135,7 @@ impl SignalRefiner for LlmRefiner {
         let system = self.prompts.load(PromptName::Escalation);
         let user = Self::build_user_message(&req);
         let mut llm_req = LlmRequest::new(system.text, vec![LlmMessage::user(user)])
-            .with_task(UsageTask::Sift)
+            .with_task(self.task)
             .with_privacy(self.privacy)
             .with_temperature(0.0)
             .with_max_tokens(self.max_tokens)

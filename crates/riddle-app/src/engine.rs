@@ -181,11 +181,21 @@ impl App {
 
     /// Sift the backlog of one Dig, newest first, up to `limit` messages.
     pub async fn sift_pass(
-        &self,
+        self: &Arc<Self>,
         dig: &Dig,
         limit: u32,
         cancel: Option<&CancelFlag>,
     ) -> Result<SiftPassReport> {
+        // One pass per account at a time. A sync, a "decide again" and a
+        // catch-up each run a pass; side by side they read the same
+        // unclassified ids, and after a two-week gap 455 of 924 messages
+        // were judged twice, paying for both. The one that waits finds them
+        // classified.
+        let lock = self.services.get::<SiftLocks>().map(|l| l.for_dig(&dig.id));
+        let _held = match &lock {
+            Some(l) => Some(l.lock().await),
+            None => None,
+        };
         let _t = Timed::start(
             Category::Sift,
             format!("sift pass {}", dig.id),
@@ -285,6 +295,11 @@ impl App {
                             .or_insert_with(|| (Vec::new(), outcome.trace.id.clone()))
                             .0
                             .extend(outcome.superseded.iter().cloned());
+                    }
+                    // A real escalation: the challengers answer the same
+                    // message beside it (Developer → Models), never applied.
+                    if outcome.trace.escalation.is_some() && !outcome.shadow {
+                        self.spawn_challengers(&dig.id, &id);
                     }
                     if let Some(proposal) = outcome.find.as_ref().filter(|_| !outcome.shadow) {
                         match domains.finds.apply_proposal(proposal) {
@@ -621,7 +636,7 @@ impl App {
     /// The whole pass for one Dig. `sift_limit` bounds one cycle so the
     /// runner can checkpoint and yield.
     pub async fn full_pass(
-        &self,
+        self: &Arc<Self>,
         dig_id: &DigId,
         sift_limit: u32,
         cancel: &CancelFlag,
@@ -672,7 +687,7 @@ impl App {
 
     /// A pass over every Dig.
     pub async fn full_pass_all(
-        &self,
+        self: &Arc<Self>,
         sift_limit: u32,
         cancel: &CancelFlag,
     ) -> Result<Vec<PassReport>> {
@@ -723,5 +738,22 @@ impl riddle_sift::EscalationBudget for EscalationCap {
             .and_then(|s| repo::usage::spent_today_on(&s, &provider, UsageTask::Sift))
             .unwrap_or(0.0);
         spent < limit
+    }
+}
+
+/// One Sift pass per account at a time (`App::sift_pass`).
+#[derive(Default)]
+pub struct SiftLocks(
+    std::sync::Mutex<std::collections::HashMap<DigId, Arc<tokio::sync::Mutex<()>>>>,
+);
+
+impl SiftLocks {
+    pub fn for_dig(&self, dig: &DigId) -> Arc<tokio::sync::Mutex<()>> {
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entry(dig.clone())
+            .or_default()
+            .clone()
     }
 }

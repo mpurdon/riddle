@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FILTERABLE_LABELS, labelName } from './labels'
+import { labelName } from './labels'
 
 describe('Gmail label names', () => {
   it('names the system labels the way Gmail does', () => {
@@ -26,9 +26,5 @@ describe('Gmail label names', () => {
   it('does not mistake the bare prefix or an unknown id for a category', () => {
     expect(labelName('CATEGORY_')).toBe('CATEGORY_')
     expect(labelName('')).toBe('')
-  })
-
-  it('offers only labels it can name in the Inbox filter', () => {
-    for (const id of FILTERABLE_LABELS) expect(labelName(id)).not.toBe(id)
   })
 })

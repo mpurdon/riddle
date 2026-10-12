@@ -2062,6 +2062,11 @@ export function buildSettings(): Settings {
     privacyDefault: 'cloud_judgment',
     launchAtLogin: false,
     closeToHide: true,
+    comparison: {
+      roster: ['us.anthropic.claude-haiku-4-5-20251001-v1:0', 'us.anthropic.claude-sonnet-4-6', 'us.anthropic.claude-opus-4-6-v1', 'us.anthropic.claude-haiku-5-5', 'us.openai.gpt-6-luna'],
+      challengers: true,
+      dailyUsd: 3,
+    },
   }
 }
 

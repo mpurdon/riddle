@@ -46,6 +46,10 @@ pub struct MessageFilterArgs {
     /// Only messages at this level or above.
     #[serde(default)]
     pub min_importance: Option<riddle_core::Importance>,
+    /// A place in the mail column (`label:Receipts`, `topic:Receipts`),
+    /// resolved per account by `App::list_messages_at`.
+    #[serde(default)]
+    pub place: Option<Place>,
 }
 
 impl From<MessageFilterArgs> for repo::messages::MessageFilter {
@@ -66,6 +70,7 @@ impl From<MessageFilterArgs> for repo::messages::MessageFilter {
             priority: None,
             superseded: a.superseded,
             min_importance: a.min_importance,
+            any_of: None,
         }
     }
 }
@@ -106,7 +111,11 @@ pub const COMMANDS: &[&str] = &[
     "list_pending",
     "dev_armed",
     "mailbox_writes",
+    "comparison_overview",
+    "comparison_rows",
+    "director_comparisons",
     "list_labels",
+    "mail_places",
     "list_conversations",
     "get_conversation",
     "director_send",
@@ -146,13 +155,16 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
         "list_digs" => serde_json::to_value(app.list_all_digs()?)?,
         "list_dig_groups" => serde_json::to_value(app.list_dig_groups()?)?,
         "list_messages" => {
-            let filter: repo::messages::MessageFilter = opt::<MessageFilterArgs>(&args, "filter")
-                .unwrap_or_default()
-                .into();
+            let mut filter: MessageFilterArgs = match args.get("filter") {
+                Some(f) if !f.is_null() => serde_json::from_value(f.clone())?,
+                _ => MessageFilterArgs::default(),
+            };
+            let place = filter.place.take();
             let page: PageRequest = opt(&args, "page").unwrap_or_default();
-            serde_json::to_value(app.list_messages(
+            serde_json::to_value(app.list_messages_at(
                 opt::<DigId>(&args, "digId").as_ref(),
-                &filter,
+                &filter.into(),
+                place.as_ref(),
                 &page,
             )?)?
         }
@@ -311,6 +323,16 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
         "list_pending" => serde_json::to_value(repo::pending::list_pending(&index)?)?,
         "dev_armed" => json!(app.runtime.is_armed()),
         "mailbox_writes" => serde_json::to_value(app.mailbox_writes()?)?,
+        "comparison_overview" => serde_json::to_value(app.comparison_overview()?)?,
+        "comparison_rows" => serde_json::to_value(
+            app.comparison_rows(args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize)?,
+        )?,
+        "director_comparisons" => serde_json::to_value(app.director_comparisons(
+            args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize,
+        )?)?,
+        "mail_places" => {
+            serde_json::to_value(app.mail_places(opt::<DigId>(&args, "digId").as_ref())?)?
+        }
         "list_labels" => {
             let dig: Option<DigId> = args
                 .get("digId")
