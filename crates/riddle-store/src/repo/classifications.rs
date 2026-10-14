@@ -313,3 +313,29 @@ pub fn recent_hard(store: &Store, limit: u32) -> Result<Vec<MessageId>> {
         rows
     })
 }
+/// Unresolved messages Riddle decided (not the user) under rules older than
+/// `rules_changed_at`, or that ran out of escalation budget before
+/// `budget_reset_at`: worth deciding again. Oldest first.
+pub fn stale_unresolved(
+    store: &Store,
+    rules_changed_at: Option<&chrono::DateTime<chrono::Utc>>,
+    budget_reset_at: &chrono::DateTime<chrono::Utc>,
+    limit: u32,
+) -> Result<Vec<MessageId>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT message_id FROM classifications
+             WHERE superseded_at IS NULL AND shadow = 0 AND disposition_kind = 'unresolved'
+               AND coalesce(json_extract(json, '$.mechanism'), '') <> 'user'
+               AND (created_at < ?1 OR (json_extract(json, '$.reason') LIKE '%budget%' AND created_at < ?2))
+             ORDER BY created_at LIMIT ?3",
+        )?;
+        let rows = st
+            .query_map(
+                params![rules_changed_at.map(ts).unwrap_or(0), ts(budget_reset_at), limit],
+                |r| Ok(MessageId::from(r.get::<_, String>(0)?)),
+            )?
+            .collect();
+        rows
+    })
+}

@@ -1416,6 +1416,7 @@ export function buildFacts(s: MessageSpec, from: Address): Facts {
     isReply: false,
     knownThread: false,
     knownDomain: false,
+    noreplySender: false,
     freeMailSender: false,
     glyphSubstitution: false,
     suspiciousDomain: false,

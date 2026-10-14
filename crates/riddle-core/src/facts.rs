@@ -41,6 +41,12 @@ pub struct Facts {
     /// A Gmail draft; Sift files it without judging it.
     #[serde(default)]
     pub is_draft: bool,
+    /// The sender's address says no one reads replies (`noreply@`,
+    /// `account-noreply@`, `donotreply@`, `notifications@`): automated even
+    /// without bulk headers. 33 of 91 Unresolved came from such addresses,
+    /// counted as not automated, so the Updates rule never caught them.
+    #[serde(default)]
+    pub noreply_sender: bool,
     /// The thread already has mail from the user or from a sender the user
     /// knows. A CPA's reply in a thread the user's household was in was
     /// "unknown" because the user had never written to that address, so it
@@ -243,8 +249,10 @@ impl Facts {
                 self.mailing_list
                     || self.precedence_bulk
                     || self.auto_submitted
-                    || self.list_unsubscribe,
+                    || self.list_unsubscribe
+                    || self.noreply_sender,
             ),
+            "noreply_sender" => Bool(self.noreply_sender),
             "known_sender" => Bool(self.known()),
             _ => return None,
         })
@@ -305,6 +313,7 @@ impl Facts {
         "community_platform",
         "from_community",
         "automated_sender",
+        "noreply_sender",
         "known_sender",
     ];
 
@@ -387,6 +396,20 @@ pub fn free_mail_domain(domain: &str) -> bool {
         && ending.split('.').all(|l| (2..=3).contains(&l.len()))
 }
 
+/// Whether an address says nobody reads replies to it: `noreply`,
+/// `no-reply`, `donotreply` anywhere in the local part
+/// (`account-noreply@`, `jobs-noreply@`), or a bare `notifications@`.
+pub fn noreply_address(email: &str) -> bool {
+    let local = email.split('@').next().unwrap_or("").to_ascii_lowercase();
+    let squashed: String = local
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    squashed.contains("noreply")
+        || squashed.contains("donotreply")
+        || matches!(local.as_str(), "notifications" | "notification")
+}
+
 /// Domains many unrelated people or companies send from: ISP mailboxes,
 /// which are personal accounts though not free, and shared help desks,
 /// which send for thousands of companies (`moniker.zendesk.com`).
@@ -440,6 +463,28 @@ pub enum FactValue {
 #[cfg(test)]
 mod organisation_domain_tests {
     use super::organisation_domain;
+
+    #[test]
+    fn an_address_that_takes_no_replies_is_recognised() {
+        use super::noreply_address;
+        for a in [
+            "noreply@google.com",
+            "no-reply@x.com",
+            "account-noreply@amazon.com",
+            "jobs-noreply@linkedin.com",
+            "do_not_reply@bank.ca",
+            "notifications@github.com",
+        ] {
+            assert!(noreply_address(a), "{a}");
+        }
+        for a in [
+            "terry@delyaccounting.ca",
+            "replies@x.com",
+            "notifications-team@x.com",
+        ] {
+            assert!(!noreply_address(a), "{a}");
+        }
+    }
 
     #[test]
     fn only_one_organisation_s_domain_makes_its_people_known() {

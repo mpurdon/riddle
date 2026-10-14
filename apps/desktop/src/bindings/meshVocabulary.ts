@@ -56,6 +56,7 @@ export const MESH_FACTS = [
   { name: 'community_platform', kind: 'text' },
   { name: 'from_community', kind: 'bool' },
   { name: 'automated_sender', kind: 'bool' },
+  { name: 'noreply_sender', kind: 'bool' },
   { name: 'known_sender', kind: 'bool' },
 ] as const;
 

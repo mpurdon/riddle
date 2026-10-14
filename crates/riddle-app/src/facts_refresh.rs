@@ -29,6 +29,7 @@
 //! and hidden genuine AWS past-due notices. v13 adds `community_platform`.
 //! v14 adds `known_thread` and `known_domain`, after an accountant's reply
 //! in a thread the household was in ended Unresolved as a stranger's.
+//! v15 adds `noreply_sender`, which `automated_sender` now includes.
 
 use crate::App;
 use riddle_core::DigId;
@@ -36,7 +37,7 @@ use riddle_errors::Result;
 use riddle_store::repo;
 
 /// The `once_per_dig` key. Renamed when the set of refreshed fields widens.
-const KEY: &str = "message_facts_v14";
+const KEY: &str = "message_facts_v15";
 
 impl App {
     /// Refresh the message-derived facts of every message in this Dig that

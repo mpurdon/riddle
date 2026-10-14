@@ -177,15 +177,19 @@ pub fn count_since(store: &Store, since: &chrono::DateTime<chrono::Utc>) -> Resu
 }
 
 /// Message ids with no current classification, newest first: the Sift backlog.
-pub fn unclassified_ids(store: &Store, limit: u32) -> Result<Vec<MessageId>> {
+/// Messages Sift has not decided. A Shadow proposal counts as a decision
+/// only while the account is in its Shadow Period (`shadow_decides`), when
+/// proposals are all it records; otherwise mail a Mesh in Shadow had only
+/// proposed for still needs a live decision.
+pub fn unclassified_ids(store: &Store, limit: u32, shadow_decides: bool) -> Result<Vec<MessageId>> {
     store.read(|c| {
         let mut st = c.prepare(
             "SELECT m.id FROM messages m
              WHERE m.deleted_at IS NULL
-               AND NOT EXISTS (SELECT 1 FROM classifications k WHERE k.message_id = m.id AND k.superseded_at IS NULL)
+               AND NOT EXISTS (SELECT 1 FROM classifications k WHERE k.message_id = m.id AND k.superseded_at IS NULL AND (?2 OR k.shadow = 0))
              ORDER BY m.date DESC LIMIT ?1",
         )?;
-        let rows = st.query_map([limit], |r| Ok(MessageId(r.get(0)?)))?.collect();
+        let rows = st.query_map(params![limit, shadow_decides], |r| Ok(MessageId(r.get(0)?)))?.collect();
         rows
     })
 }
@@ -799,6 +803,23 @@ pub fn thread_senders_before(
         let rows = st
             .query_map(params![thread_id.as_str(), ts(before)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)))?
             .collect();
+        rows
+    })
+}
+
+/// The Strata on the other messages of a thread, for a reply the user sent
+/// in it (`message_strata` holds live decisions only).
+pub fn thread_strata(
+    store: &Store,
+    thread_id: &ThreadId,
+    except: &MessageId,
+) -> Result<Vec<String>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT DISTINCT ms.stratum FROM message_strata ms JOIN messages m ON m.id = ms.message_id
+             WHERE m.thread_id = ?1 AND m.id <> ?2 AND m.deleted_at IS NULL ORDER BY ms.stratum",
+        )?;
+        let rows = st.query_map(params![thread_id.as_str(), except.as_str()], |r| r.get::<_, String>(0))?.collect();
         rows
     })
 }

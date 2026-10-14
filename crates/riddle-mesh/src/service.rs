@@ -72,8 +72,19 @@ impl MeshService {
     }
 
     /// Running Meshes (Active or Shadow) whose scope applies to the Dig.
+    /// The running Meshes for a Dig, Shadow versions included: what Signals
+    /// are selected for, and what a Shadow proposal is measured with.
     pub fn in_scope(&self, dig_id: &DigId, group: Option<&str>) -> Result<Vec<Mesh>> {
         Ok(repo::meshes::list_running(&self.index)?
+            .into_iter()
+            .filter(|m| m.scope.applies_to(dig_id, group))
+            .collect())
+    }
+
+    /// The Mesh versions that decide a Dig's mail (`repo::meshes::list_live`):
+    /// a Mesh in Shadow decides with its last Active version, or not at all.
+    pub fn live_in_scope(&self, dig_id: &DigId, group: Option<&str>) -> Result<Vec<Mesh>> {
+        Ok(repo::meshes::list_live(&self.index)?
             .into_iter()
             .filter(|m| m.scope.applies_to(dig_id, group))
             .collect())

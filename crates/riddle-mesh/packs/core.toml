@@ -1,6 +1,6 @@
 id = "core"
 name = "Core"
-version = 1
+version = 2
 area = "Essentials"
 summary = "Never hides the people you protect, sets scams apart, surfaces mail from people you write to and real security alerts, and gives everything else a place to land."
 band = "specific"
@@ -26,6 +26,9 @@ NEVER Spoil IF sender IN family
 NEVER Spoil IF has_calendar_part
 '''
 
+# v2: a recruiter is not a scam. "I came across your profile" is how a
+# recruiter opens, and it scored .70 as a claim of prior contact; a message
+# about a job for the reader skips that route (disguised glyphs still count).
 [[meshes]]
 band = "safety"
 rank = 20
@@ -38,7 +41,7 @@ ROUTES
 
 WHEN cold_outreach
     IF glyph_substitution → Contamination
-    ELSE IF claims_prior_contact@v1 > .6 → Contamination
+    ELSE IF claims_prior_contact@v1 > .6 AND recruiting@v1 < .80 → Contamination
 END
 '''
 
@@ -58,6 +61,10 @@ WHEN suspicious_domain AND NOT known_sender
 END
 '''
 
+# v2: a reply in a thread you or someone you know already wrote in, or from
+# a firm where you know someone, is correspondence (known_thread,
+# known_domain): an accountant's reply in a household thread ended
+# Unresolved as a stranger's.
 [[meshes]]
 band = "personal"
 rank = 39
@@ -68,7 +75,7 @@ All Digs
 
 ROUTES
 
-WHEN (known_sender OR same_organisation) AND NOT automated_sender AND NOT from_me
+WHEN (known_sender OR known_thread OR known_domain OR same_organisation) AND NOT automated_sender AND NOT from_me
     IF requires_response@v1 > .70
         → Find: Respond + Stratum: People
     ELSE IF asks_question@v1 > .75
@@ -80,6 +87,10 @@ WHEN (known_sender OR same_organisation) AND NOT automated_sender AND NOT from_m
 END
 '''
 
+# v2: the guard reads what the route reads. A security gear launch, a
+# security newsletter and a bank's cashback promo scored .81-.96 as security
+# alerts, and the guard kept 13 of them from Spoil though the route had
+# already passed them over as marketing; a real alert is neither.
 [[meshes]]
 rank = 20
 text = '''
@@ -94,7 +105,7 @@ IF security_alert@v1 > .80 AND marketing@v1 < .70
 
 GUARDS
 
-NEVER Spoil IF security_alert@v1 > .80
+NEVER Spoil IF security_alert@v1 > .80 AND marketing@v1 < .70 AND newsletter@v1 < .80
 '''
 
 [[meshes]]
@@ -112,6 +123,12 @@ ELSE IF meeting_related@v1 > .85 AND requires_response@v1 > .70
     → Find: Attend
 '''
 
+# v2: account notices were just out of reach. Terms and privacy notices
+# (an app store's terms, a bank's agreement) scored .55-.75 as routine, and
+# a to-do on an account (verify a developer account, confirm your client
+# details) is not routine at all; 13 went Unresolved. Policy notices are
+# Filed by subject first, so they land with no judge; an account notice
+# that wants something done is a Do Find; routine needs only be likely.
 [[meshes]]
 band = "fallback"
 rank = 4
@@ -123,7 +140,11 @@ All Digs
 
 ROUTES
 
-IF account_notification@v1 > .85 AND routine@v1 > .80
+IF (automated_sender OR list_unsubscribe) AND NOT gmail_category = promotions AND (subject CONTAINS "terms of service" OR subject CONTAINS "terms of use" OR subject CONTAINS "privacy policy" OR subject CONTAINS "privacy notice" OR subject CONTAINS "legal update" OR subject CONTAINS "agreement")
+    → Filed + Stratum: Notifications
+ELSE IF account_notification@v1 > .85 AND requires_action@v1 > .75 AND marketing@v1 < .70
+    → Find: Do + Stratum: Notifications
+ELSE IF account_notification@v1 > .85 AND routine@v1 > .50
     → Filed + Stratum: Notifications
 '''
 

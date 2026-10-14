@@ -118,3 +118,52 @@ async fn a_reply_in_a_known_thread_or_from_a_known_firm_is_known() {
         "a shared help desk says nothing about the next sender"
     );
 }
+
+/// A reply the user sent is about what its thread is about: their answers
+/// to an accountant were Filed with no Stratum beside a thread under Finance.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_sent_reply_takes_its_thread_s_strata() {
+    let (app, ops) = common::boot_scripted(false, |_| {}).await;
+    app.runtime.arm(true);
+    let dig =
+        common::fixture_dig_synced(&app, &ops, "Personal", "me@gmail.com", 3, 1, json!({})).await;
+    let store = app.stores.dig(&dig.id).unwrap();
+    let theirs = message(&dig.id, "q1", "tq", "terry@firm.example", 60, false);
+    let mine = message(&dig.id, "q2", "tq", "me@gmail.com", 30, true);
+    repo::messages::upsert(&store, &theirs).unwrap();
+    repo::classifications::record(
+        &store,
+        &Classification {
+            id: ClassificationId::new(),
+            message_id: theirs.id.clone(),
+            dig_id: dig.id.clone(),
+            importance: Importance::Normal,
+            disposition: Disposition::Find {
+                find_type: FindType::Respond,
+            },
+            strata: vec!["People".into(), "Finance".into()],
+            notify: false,
+            mechanism: DecisionMechanism::Mesh,
+            mesh_id: None,
+            mesh_version: None,
+            matched_rule: None,
+            confidence: None,
+            reason: String::new(),
+            trace_id: TraceId::new(),
+            shadow: false,
+            created_at: chrono::Utc::now(),
+            superseded_at: None,
+            series: None,
+        },
+    )
+    .unwrap();
+    repo::messages::upsert(&store, &mine).unwrap();
+    app.full_pass(&dig.id, 500, &riddle_sync::engine::CancelFlag::new())
+        .await
+        .unwrap();
+    let k = repo::classifications::current(&store, &mine.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(k.disposition, Disposition::Filed);
+    assert_eq!(k.strata, vec!["Finance".to_string(), "People".to_string()]);
+}

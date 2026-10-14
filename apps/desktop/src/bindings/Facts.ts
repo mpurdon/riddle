@@ -41,6 +41,13 @@ isReply: boolean,
  */
 isDraft: boolean, 
 /**
+ * The sender's address says no one reads replies (`noreply@`,
+ * `account-noreply@`, `donotreply@`, `notifications@`): automated even
+ * without bulk headers. 33 of 91 Unresolved came from such addresses,
+ * counted as not automated, so the Updates rule never caught them.
+ */
+noreplySender: boolean, 
+/**
  * The thread already has mail from the user or from a sender the user
  * knows. A CPA's reply in a thread the user's household was in was
  * "unknown" because the user had never written to that address, so it

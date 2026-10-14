@@ -1,8 +1,8 @@
 id = "shopping"
 name = "Shopping and promotions"
-version = 2
+version = 3
 area = "Shopping"
-summary = "Promotions from stores that write daily or weekly are set aside, keeping only the newest from each; Gmail's Promotions tab is set aside too. Promotions from stores you name are Filed under Promotions instead, where you can find them."
+summary = "Delivery notices are Filed under Purchases; promotions from stores that write daily or weekly are set aside, keeping only the newest from each; Gmail's Promotions tab is set aside too. Promotions from stores you name are Filed under Promotions instead, where you can find them."
 band = "general"
 
 [detect]
@@ -14,6 +14,23 @@ name = "keep_promotions"
 description = "Stores and services whose promotions you still want to see"
 question = "Which stores' or services' promotions do you still want to see?"
 default = []
+
+# v3: deliveries. A carrier's "Package Scheduled for Delivery" and a store's
+# tracking-number mail had no rule and went Unresolved; they are Filed under
+# Purchases, ahead of the promotion rules, since a carrier's mail can land in
+# the Promotions tab.
+[[meshes]]
+rank = 1
+text = '''
+Mesh: Deliveries
+Scope:
+All Digs
+
+ROUTES
+
+IF shipment_update@v1 > .85 AND marketing@v1 < .60
+    → Filed + Stratum: Purchases
+'''
 
 [[meshes]]
 rank = 7

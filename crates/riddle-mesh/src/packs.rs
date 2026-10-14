@@ -167,6 +167,7 @@ const BUILTIN: &[&str] = &[
     include_str!("../packs/documents.toml"),
     include_str!("../packs/accounts.toml"),
     include_str!("../packs/travel.toml"),
+    include_str!("../packs/career.toml"),
 ];
 
 /// Parse and check a pack file: its id, that every Mesh parses, that every
@@ -892,5 +893,241 @@ mod tests {
         assert!(back.lists[0].default.is_empty(), "entries stay private");
         assert!(!back.meshes[0].text.contains("Priority"));
         assert_eq!(back.meshes[0].band, Some(Band::Specific));
+    }
+
+    /// The built-in packs' Meshes as they would run once installed: each at
+    /// its band start plus its rank, Active.
+    fn running(pack_ids: &[&str]) -> Vec<Mesh> {
+        let mut out = Vec::new();
+        for p in builtin_packs()
+            .into_iter()
+            .filter(|p| pack_ids.contains(&p.id.as_str()))
+        {
+            for pm in &p.meshes {
+                let mut m = crate::parse::parse(&pm.text).unwrap();
+                m.id = MeshId(format!("mesh_{}", m.name.replace(' ', "_")));
+                m.priority = pm.band.unwrap_or(p.band).range().0 + pm.rank;
+                m.status = MeshStatus::Active;
+                out.push(m);
+            }
+        }
+        out
+    }
+
+    struct Lists(Vec<&'static str>);
+    impl crate::eval::ListMembership for Lists {
+        fn is_member(&self, _list: riddle_core::NamedList) -> bool {
+            false
+        }
+        fn in_named_list(&self, list: &str) -> bool {
+            self.0.contains(&list)
+        }
+    }
+
+    fn ev(name: &str, yes: f64) -> riddle_core::SignalEvaluation {
+        let mut d = riddle_core::Distribution::new();
+        d.insert("YES".into(), yes);
+        d.insert("NO".into(), 1.0 - yes);
+        riddle_core::SignalEvaluation {
+            message_id: riddle_core::MessageId("m".into()),
+            signal_name: name.into(),
+            signal_version: 1,
+            engine_identity: "t".into(),
+            selected: if yes >= 0.5 { "YES" } else { "NO" }.into(),
+            distribution: d.clone(),
+            calibrated: d,
+            confidence: yes.max(1.0 - yes),
+            latency_ms: 0,
+            input_tokens: 0,
+            cached: false,
+            deterministic: true,
+            context_hash: None,
+            request_hash: None,
+            evaluated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn decide(
+        packs: &[&str],
+        facts: &riddle_core::Facts,
+        evals: &[riddle_core::SignalEvaluation],
+        lists: &[&'static str],
+    ) -> crate::eval::MeshDecision {
+        crate::eval::evaluate(&running(packs), facts, evals, &Lists(lists.to_vec()))
+    }
+
+    fn bulk(category: &str) -> riddle_core::Facts {
+        riddle_core::Facts {
+            sender_domain: "example.com".into(),
+            gmail_category: Some(category.into()),
+            list_unsubscribe: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn every_built_in_pack_installs_on_a_fresh_store_with_the_signals_it_names() {
+        let index = index();
+        for p in builtin_packs() {
+            install(
+                &index,
+                &p,
+                &BTreeMap::new(),
+                MeshStatus::Shadow,
+                false,
+                CreatedBy::User,
+            )
+            .unwrap_or_else(|e| panic!("{}: {}", p.id, e.message));
+        }
+    }
+
+    /// Security promos and newsletters scored .81-.96 as security alerts,
+    /// and the guard kept them out of Spoil though its own route had passed
+    /// them over as marketing.
+    #[test]
+    fn a_security_themed_promotion_can_be_spoiled_and_a_real_alert_cannot() {
+        let promo = [
+            ev("security_alert", 0.92),
+            ev("marketing", 0.93),
+            ev("newsletter", 0.2),
+        ];
+        let d = decide(&["core", "shopping"], &bulk("promotions"), &promo, &[]);
+        assert!(!d.vetoed(), "{:?}", d.vetoes);
+        assert_eq!(d.disposition(), Some(&riddle_core::Disposition::Spoil));
+
+        let core = running(&["core"]);
+        let security = core
+            .iter()
+            .find(|m| m.name == "Security and account alerts")
+            .unwrap();
+        let guard = &security.guards[0].condition;
+        let lists = Lists(vec![]);
+        let truth = |e: &[riddle_core::SignalEvaluation]| {
+            crate::eval::truth_of(guard, &bulk("updates"), e, &lists)
+        };
+        let newsletter = [
+            ev("security_alert", 0.9),
+            ev("marketing", 0.3),
+            ev("newsletter", 0.95),
+        ];
+        assert_eq!(truth(&newsletter), crate::eval::Truth::False);
+        let alert = [
+            ev("security_alert", 0.95),
+            ev("marketing", 0.05),
+            ev("newsletter", 0.05),
+        ];
+        assert_eq!(truth(&alert), crate::eval::Truth::True);
+    }
+
+    #[test]
+    fn an_account_to_do_is_a_do_find_and_a_terms_notice_is_filed_without_the_judge() {
+        let to_do = [
+            ev("account_notification", 0.93),
+            ev("requires_action", 0.88),
+            ev("routine", 0.6),
+            ev("marketing", 0.1),
+        ];
+        let mut facts = bulk("updates");
+        facts.subject = "Verify your developer account".into();
+        let d = decide(&["core"], &facts, &to_do, &[]);
+        assert_eq!(
+            d.disposition(),
+            Some(&riddle_core::Disposition::Find {
+                find_type: riddle_core::FindType::Do
+            })
+        );
+        assert_eq!(d.mesh_name.as_deref(), Some("Account notices"));
+
+        facts.subject = "Updates to our Terms of Service".into();
+        let d = decide(&["core"], &facts, &[], &[]);
+        assert_eq!(d.disposition(), Some(&riddle_core::Disposition::Filed));
+        assert_eq!(d.mesh_name.as_deref(), Some("Account notices"));
+    }
+
+    /// A recruiter "came across your profile": a claim of prior contact
+    /// that, from a stranger's free mailbox, used to read as a scam.
+    #[test]
+    fn a_recruiter_from_a_free_mailbox_is_career_mail_not_contamination() {
+        let facts = riddle_core::Facts {
+            sender: "recruiter@gmail.com".into(),
+            sender_domain: "gmail.com".into(),
+            free_mail_sender: true,
+            ..Default::default()
+        };
+        assert!(facts.cold_outreach());
+        let evals = [ev("claims_prior_contact", 0.7), ev("recruiting", 0.93)];
+        let d = decide(&["core", "career"], &facts, &evals, &[]);
+        assert_eq!(d.disposition(), Some(&riddle_core::Disposition::Filed));
+        assert_eq!(
+            d.output.unwrap().strata,
+            vec!["Career".to_string()],
+            "the tag and the deciding route agree"
+        );
+        // The same opener about anything else is still Contamination.
+        let scam = [ev("claims_prior_contact", 0.7), ev("recruiting", 0.05)];
+        let d = decide(&["core", "career"], &facts, &scam, &[]);
+        assert_eq!(
+            d.disposition(),
+            Some(&riddle_core::Disposition::Contamination)
+        );
+    }
+
+    #[test]
+    fn a_job_alert_is_career_before_it_is_social() {
+        let mut facts = bulk("social");
+        facts.sender = "jobs-noreply@linkedin.com".into();
+        facts.sender_domain = "linkedin.com".into();
+        facts.mailing_list = true;
+        let d = decide(
+            &["core", "reading-social", "career"],
+            &facts,
+            &[],
+            &["job_boards", "social_platforms"],
+        );
+        assert_eq!(d.mesh_name.as_deref(), Some("Job alerts and recruiters"));
+        let out = d.output.unwrap();
+        assert_eq!(out.disposition, Some(riddle_core::Disposition::Filed));
+        assert_eq!(out.strata, vec!["Career".to_string()]);
+    }
+
+    #[test]
+    fn tickets_you_hold_deliveries_and_a_hotel_stay_each_have_a_place() {
+        let packs = ["core", "money", "shopping", "reading-social", "travel"];
+        let know = riddle_core::Disposition::Find {
+            find_type: riddle_core::FindType::Know,
+        };
+        let tickets = [ev("event_ticket", 0.94), ev("marketing", 0.2)];
+        let d = decide(&packs, &bulk("promotions"), &tickets, &[]);
+        assert_eq!(d.mesh_name.as_deref(), Some("Event tickets"));
+        assert_eq!(d.disposition(), Some(&know));
+
+        let parcel = [ev("shipment_update", 0.95), ev("marketing", 0.1)];
+        let d = decide(&packs, &bulk("updates"), &parcel, &[]);
+        assert_eq!(d.mesh_name.as_deref(), Some("Deliveries"));
+        assert_eq!(d.output.unwrap().strata, vec!["Purchases".to_string()]);
+
+        let stay = [ev("travel_reservation", 0.88), ev("marketing", 0.2)];
+        let d = decide(&packs, &bulk("updates"), &stay, &[]);
+        assert_eq!(d.mesh_name.as_deref(), Some("Travel"));
+        assert_eq!(d.disposition(), Some(&know));
+    }
+
+    #[test]
+    fn a_tax_return_to_sign_is_under_documents_and_finance() {
+        let mut facts = bulk("updates");
+        facts.sender = "echosign@echosign.com".into();
+        facts.sender_domain = "adobesign.com".into();
+        facts.subject = "Signature requested on T183".into();
+        let d = decide(
+            &["documents", "money"],
+            &facts,
+            &[ev("finance_topic", 0.92)],
+            &["signature_services"],
+        );
+        assert_eq!(d.mesh_name.as_deref(), Some("Documents and signatures"));
+        assert_eq!(
+            d.output.unwrap().strata,
+            vec!["Documents".to_string(), "Finance".to_string()]
+        );
     }
 }

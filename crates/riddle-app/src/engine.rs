@@ -177,7 +177,77 @@ pub(crate) fn known_context(
     Ok((known_thread, known_domain))
 }
 
+/// The Actions that change how mail is decided: rules, lists, an
+/// account's settings (its privacy among them), and the app's settings.
+const RULE_ACTIONS: &[&str] = &[
+    "create_mesh",
+    "update_mesh",
+    "set_mesh_status",
+    "delete_mesh",
+    "restore_mesh",
+    "set_mesh_fallback",
+    "install_pack",
+    "remove_pack",
+    "save_list",
+    "delete_list",
+    "update_dig",
+    "save_settings",
+];
+
+/// Stale Unresolved sent back to Sift in one pass, so a rule change costs a
+/// few escalations a pass rather than all at once.
+const STALE_PER_PASS: u32 = 25;
+
 impl App {
+    /// Unresolved mail Riddle decided under rules that have changed since,
+    /// or that ran out of escalation budget before today, goes back to Sift.
+    /// 27 of 91 Unresolved on a real mailbox had been decided before its
+    /// rule packs were installed, or while cloud reasoning was off, and
+    /// nothing ever looked at them again (13 Oct 2026).
+    fn retry_stale_unresolved(&self, dig: &Dig, store: &riddle_store::Store) -> Result<usize> {
+        let index = self.stores.index();
+        let rules_changed = repo::activities::last_of(&index, RULE_ACTIONS)?;
+        let today = chrono::Utc::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .map(|d| d.and_utc())
+            .unwrap_or_else(chrono::Utc::now);
+        let ids = repo::classifications::stale_unresolved(
+            store,
+            rules_changed.as_ref(),
+            &today,
+            STALE_PER_PASS,
+        )?;
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let sent = crate::actions::send_back_to_sift(
+            &self.services,
+            ids.iter().map(|m| (dig.id.clone(), m.clone())),
+        )?;
+        let n = sent.restored.len();
+        let mut note = Activity::note(
+            Actor::Sift,
+            "decide_again",
+            format!(
+                "Sift is deciding {n} Unresolved message{} again under the current rules",
+                if n == 1 { "" } else { "s" }
+            ),
+            serde_json::json!({ "digId": dig.id, "count": n }),
+            "they were Unresolved; deciding them again hides nothing",
+            None,
+            self.services.clock.now(),
+        );
+        note.dig_id = Some(dig.id.clone());
+        self.runtime.record_activity(note);
+        rinfo!(
+            Category::Sift,
+            "sent {n} stale Unresolved in {} back to Sift",
+            dig.id
+        );
+        Ok(n)
+    }
+
     fn domains(&self) -> Result<Arc<Domains>> {
         self.services.require::<Domains>()
     }
@@ -238,6 +308,14 @@ impl App {
         );
         let domains = self.domains()?;
         let store = self.stores.dig(&dig.id)?;
+        // Bookkeeping: a failure to look for stale Unresolved never stops the pass.
+        if let Err(e) = self.retry_stale_unresolved(dig, &store) {
+            rwarn!(
+                Category::Sift,
+                "could not retry stale Unresolved for {}: {e}",
+                dig.id
+            );
+        }
         let mut sift = Sift::from_services(&self.services);
         if let Some(settings) = self.services.get::<riddle_settings::SettingsStore>() {
             sift = sift.with_budget(Arc::new(EscalationCap {
@@ -245,7 +323,11 @@ impl App {
                 settings,
             }));
         }
-        let ids = repo::messages::unclassified_ids(&store, limit)?;
+        let ids = repo::messages::unclassified_ids(
+            &store,
+            limit,
+            matches!(dig.status, DigStatus::Shadow { .. }),
+        )?;
         let mut report = SiftPassReport::default();
         // Grouped for the ledger: (mesh id, version, name, disposition kind) -> (ids, cached, fresh, trace of first).
         let mut groups: SiftGroups = std::collections::BTreeMap::new();

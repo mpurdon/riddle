@@ -475,6 +475,63 @@ impl ScriptedJudge {
                     0.04
                 }
             }
+            "recruiting" => {
+                if Self::any(
+                    &t,
+                    &[
+                        "recruiter",
+                        "recruiting",
+                        "job opportunity",
+                        "job alert",
+                        "we're hiring",
+                        "we are hiring",
+                        "interview",
+                        "your resume",
+                        "your cv",
+                        "candidate",
+                        "open role",
+                    ],
+                ) {
+                    0.9
+                } else {
+                    0.05
+                }
+            }
+            "event_ticket" => {
+                if Self::any(
+                    &t,
+                    &[
+                        "your tickets",
+                        "mobile entry",
+                        "mobile ticket",
+                        "e-ticket",
+                        "parking pass",
+                        "parking reservation",
+                        "gates open",
+                    ],
+                ) {
+                    0.92
+                } else {
+                    0.04
+                }
+            }
+            "shipment_update" => {
+                if Self::any(
+                    &t,
+                    &[
+                        "tracking number",
+                        "out for delivery",
+                        "scheduled for delivery",
+                        "has shipped",
+                        "in transit",
+                        "delivered",
+                    ],
+                ) {
+                    0.92
+                } else {
+                    0.04
+                }
+            }
             "acknowledges_cancellation" => {
                 if Self::any(&t, &["cancelled", "canceled", "cancellation"]) {
                     0.9

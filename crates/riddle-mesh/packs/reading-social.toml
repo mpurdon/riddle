@@ -1,8 +1,8 @@
 id = "reading-social"
 name = "Reading and social"
-version = 3
+version = 4
 area = "Reading"
-summary = "Newsletters you do not read are set aside; posts from communities you belong to and creators you back are kept under their own Strata; social network mail, crowdfunding updates and entertainment are Filed under their own Strata; daily reminders on a schedule become a Find that lasts the day."
+summary = "Newsletters you do not read are set aside; posts from communities you belong to and creators you back are kept under their own Strata; social network mail, crowdfunding updates and entertainment are Filed under their own Strata; tickets you hold for an event are a Find under Entertainment; daily reminders on a schedule become a Find that lasts the day."
 band = "general"
 
 [detect]
@@ -61,6 +61,25 @@ IF automated_sender AND newsletter@v1 > .60 AND personally_relevant@v1 < .40
     → Spoil + Stratum: Newsletters
 ELSE IF automated_sender AND marketing@v1 > .60 AND personally_relevant@v1 < .40
     → Spoil + Stratum: Newsletters
+'''
+
+# v4: tickets you hold. A concert's mobile-entry instructions (five of
+# them) and a parking booking went Unresolved: nothing read "tickets you
+# already have" apart from an event's ads. It runs at the end of the
+# specific band, ahead of the promotion rules, because ticket sellers'
+# mail often lands in the Promotions tab.
+[[meshes]]
+band = "specific"
+rank = 39
+text = '''
+Mesh: Event tickets
+Scope:
+All Digs
+
+ROUTES
+
+IF event_ticket@v1 > .85 AND marketing@v1 < .50
+    → Find: Know + Stratum: Entertainment
 '''
 
 # v3: before Payments and Social. A community's posts are neither a

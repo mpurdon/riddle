@@ -1,8 +1,8 @@
 id = "documents"
 name = "Documents and signatures"
-version = 1
+version = 2
 area = "Work and home"
-summary = "A document waiting for your signature, or a file someone wants you to see, becomes a Find; a copy of something you already signed is Filed."
+summary = "A document waiting for your signature, or a file someone wants you to see, becomes a Find; a copy of something you already signed is Filed; a document about money (a tax return to sign) is under Finance too."
 band = "specific"
 
 [detect]
@@ -30,4 +30,22 @@ ELSE IF sender_domain IN list:signature_services
     → Find: Do + Stratum: Documents
 ELSE IF sender CONTAINS "drive-shares" OR subject CONTAINS "Share request for"
     → Find: Review + Stratum: Documents
+'''
+
+# v2: a tax return to sign is Finance. An accountant's e-file signature
+# requests came through a signature service and were under Documents only;
+# Money talk reads only a person's own mail. A tag: Documents and
+# signatures still decides, and Finance is added to what it decides.
+[[meshes]]
+band = "personal"
+rank = 31
+text = '''
+Mesh: Documents about money
+Scope:
+All Digs
+
+ROUTES
+
+IF sender_domain IN list:signature_services AND finance_topic@v1 > .80
+    → Stratum: Finance
 '''

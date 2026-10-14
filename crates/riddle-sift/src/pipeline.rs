@@ -45,6 +45,9 @@ struct Draft {
     fresh: usize,
     truncated: Vec<String>,
     decision: Option<MeshDecision>,
+    /// What the running set, Shadow versions included, decides, when a
+    /// Mesh in Shadow decides it differently from the live versions.
+    shadow_trial: Option<MeshDecision>,
     thread_state_update: Option<ThreadStateUpdate>,
 }
 
@@ -73,6 +76,7 @@ impl Draft {
             fresh: 0,
             truncated: vec![],
             decision: None,
+            shadow_trial: None,
             thread_state_update: None,
         }
     }
@@ -266,7 +270,11 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
 
     // 3. Signal Selection and 4. the judge (cache first).
     let registry = Registry::new(index.clone());
-    let meshes = MeshService::new(index.clone()).in_scope(&dig_id, input.dig.group.as_deref())?;
+    // Live versions decide; the running set (Shadow included) picks the
+    // Signals and measures what a Mesh in Shadow would do instead.
+    let svc = MeshService::new(index.clone());
+    let trial = svc.in_scope(&dig_id, input.dig.group.as_deref())?;
+    let meshes = svc.live_in_scope(&dig_id, input.dig.group.as_deref())?;
     // The user's named lists (`sender IN list:banks`), read once per message.
     let named = repo::lists::named(&index)?;
     let judge = sift
@@ -283,7 +291,7 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
             facts: &facts,
             named: &named,
         };
-        select_signals(&registry, &meshes, &facts, &lists)
+        select_signals(&registry, &trial, &facts, &lists)
     };
     let mut judge_reason: Option<String> = None;
     if judge.is_none() {
@@ -397,6 +405,14 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
                 .collect(),
         });
         draft.disposition = Disposition::Filed;
+        // A reply is about what its thread is about: the user's own answers
+        // to an accountant were Filed with no Stratum beside a thread under
+        // People and Finance.
+        draft.strata = repo::messages::thread_strata(
+            &*sift.stores.dig(&dig_id)?,
+            &input.message.thread_id,
+            &message_id,
+        )?;
         draft.mechanism = DecisionMechanism::Deterministic;
         draft.matched_rule =
             Some("sent mail is Filed; its asks and commitments update Thread State".into());
@@ -556,9 +572,6 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
     draft.mesh_version = decision.mesh_version;
     draft.mesh_name = decision.mesh_name.clone();
     draft.matched_rule = decision.matched_rule.clone();
-    if decision.mesh_status == Some(MeshStatus::Shadow) {
-        draft.shadow = true;
-    }
 
     // 9. Disposition.
     match (&verdict, &decision.output) {
@@ -668,6 +681,23 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
         }
     }
 
+    // A Mesh in Shadow records what it would do, beside the live decision.
+    // (A Dig in its Shadow Period records its decisions as proposals already.)
+    if !draft.shadow && trial.iter().any(|m| m.status == MeshStatus::Shadow) {
+        let t = evaluate_with(
+            &trial,
+            &facts,
+            &draft.evaluations,
+            &lists,
+            Some(&sift.opts.policy),
+        );
+        let differs = t.mesh_status == Some(MeshStatus::Shadow)
+            && (t.disposition() != Some(&draft.disposition)
+                || t.output.as_ref().is_some_and(|o| o.strata != draft.strata));
+        if differs {
+            draft.shadow_trial = Some(t);
+        }
+    }
     draft.decision = Some(decision);
     Ok(finish(
         sift, &input, facts, draft, timing, cost, started, now,
@@ -873,7 +903,29 @@ fn finish(
         timing.total_ms,
         note
     );
+    // A Shadow proposal: the same message as a Mesh in Shadow would decide it.
+    let shadow_proposal = draft.shadow_trial.as_ref().map(|t| Classification {
+        id: ClassificationId::new(),
+        disposition: t.disposition().cloned().unwrap_or(Disposition::Unresolved),
+        strata: t
+            .output
+            .as_ref()
+            .map(|o| o.strata.clone())
+            .unwrap_or_default(),
+        notify: t.output.as_ref().is_some_and(|o| o.notify),
+        mesh_id: t.mesh_id.clone(),
+        mesh_version: t.mesh_version,
+        matched_rule: t.matched_rule.clone(),
+        reason: t
+            .words
+            .clone()
+            .unwrap_or_else(|| "What a Mesh in Shadow would do.".into()),
+        shadow: true,
+        series: None,
+        ..classification.clone()
+    });
     SiftOutcome {
+        shadow_proposal,
         classification,
         trace,
         find,
@@ -899,6 +951,9 @@ pub fn persist(sift: &Sift, outcome: &mut SiftOutcome) -> Result<Option<FindProp
     let id = outcome.classification.message_id.clone();
     repo::facts::put(&store, &id, &outcome.facts)?;
     repo::classifications::record(&store, &outcome.classification)?;
+    if let Some(p) = &outcome.shadow_proposal {
+        repo::classifications::record(&store, p)?;
+    }
     outcome.timing.persist_ms = t.elapsed().as_millis() as u64;
     outcome.timing.total_ms += outcome.timing.persist_ms;
     outcome.trace.timing = outcome.timing.clone();

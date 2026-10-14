@@ -505,6 +505,10 @@ fn bool_words(fact: &str, holds: bool) -> String {
         "sender_is_vip" => ("the sender is a VIP", "the sender is not a VIP"),
         "automated_sender" => ("it was sent automatically", "it was not sent automatically"),
         "known_sender" => ("you know the sender", "you do not know the sender"),
+        "noreply_sender" => (
+            "the sender's address takes no replies",
+            "the sender's address takes replies",
+        ),
         "known_thread" => (
             "you or someone you know already wrote in this thread",
             "nobody you know has written in this thread",

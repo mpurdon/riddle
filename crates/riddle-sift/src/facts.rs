@@ -734,6 +734,11 @@ pub fn refresh_from_message(facts: &mut Facts, m: &Message, derived: Derived<'_>
     );
     set(&mut facts.subject, m.subject.clone(), &mut changed);
     set(&mut facts.known_thread, derived.known_thread, &mut changed);
+    set(
+        &mut facts.noreply_sender,
+        riddle_core::noreply_address(&m.from.email),
+        &mut changed,
+    );
     set(&mut facts.known_domain, derived.known_domain, &mut changed);
     set(&mut facts.headers, m.headers.extra.clone(), &mut changed);
     set(

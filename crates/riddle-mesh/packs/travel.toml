@@ -1,6 +1,6 @@
 id = "travel"
 name = "Travel"
-version = 1
+version = 2
 area = "Travel"
 summary = "Bookings, tickets and changes to a trip become a Find you can see before you go; travel deals are left to the promotion rules."
 band = "general"
@@ -9,6 +9,9 @@ band = "general"
 sender_domains = ["expedia.com", "booking.com", "airbnb.com", "aircanada.ca", "westjet.com", "vrbo.com", "hotels.com"]
 min_messages = 2
 
+# v2: a hotel's check-in and stay confirmation scored .88 as a reservation
+# and was passed over, its margin over .85 too thin to decide; a booking is
+# a reservation from .75, and the marketing clause still keeps deals out.
 [[meshes]]
 rank = 2
 text = '''
@@ -18,6 +21,6 @@ All Digs
 
 ROUTES
 
-IF marketing@v1 < .50 AND travel_reservation@v1 > .85
+IF marketing@v1 < .50 AND travel_reservation@v1 > .75
     → Find: Know + Stratum: Travel
 '''

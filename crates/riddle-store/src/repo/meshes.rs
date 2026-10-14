@@ -70,6 +70,41 @@ pub fn list_latest(store: &Store, include_deleted: bool) -> Result<Vec<Mesh>> {
     })
 }
 
+/// The Mesh versions that decide mail: per id, the latest when it is
+/// Active; when the latest is in Shadow, the newest earlier Active version.
+/// Changing an active Mesh put its new version in Shadow and the whole Mesh
+/// stopped deciding: a Payments fix left an "access turned off" notice with
+/// no decision for a day (13 Oct 2026). The old version now decides until
+/// the new one is made Active.
+pub fn list_live(store: &Store) -> Result<Vec<Mesh>> {
+    let all: Vec<Mesh> = store.read(|c| {
+        let mut st = c.prepare("SELECT json FROM meshes ORDER BY id, version DESC")?;
+        let rows = st
+            .query_map([], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
+        rows
+    })?;
+    let mut out: Vec<Mesh> = Vec::new();
+    let mut i = 0;
+    while i < all.len() {
+        let id = all[i].id.clone();
+        let versions: Vec<&Mesh> = all[i..].iter().take_while(|m| m.id == id).collect();
+        i += versions.len();
+        let latest = versions[0];
+        let live = match latest.status {
+            MeshStatus::Active => Some(latest),
+            MeshStatus::Shadow => versions[1..]
+                .iter()
+                .copied()
+                .find(|m| m.status == MeshStatus::Active),
+            _ => None,
+        };
+        out.extend(live.cloned());
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
 /// The Meshes that run in production: latest version per id with status
 /// Active or Shadow.
 pub fn list_running(store: &Store) -> Result<Vec<Mesh>> {

@@ -1,0 +1,64 @@
+id = "career"
+name = "Career"
+version = 1
+area = "Work and home"
+summary = "Job alerts and mail from recruiters are Filed under Career; a conversation about a job with someone you know stays a Find and is under Career too."
+band = "specific"
+
+[detect]
+sender_domains = ["linkedin.com", "indeed.com", "glassdoor.com", "ziprecruiter.com", "workopolis.com"]
+min_messages = 3
+
+# v1: recruiting mail had no home. A job board's alerts were Social, an
+# InMail was Social, a staffing agency's recruiter went to Promotions or
+# Unresolved, and one came close to Contamination for "seeing your profile".
+[[lists]]
+name = "job_boards"
+description = "Job boards and job-alert senders"
+question = "Which job boards send you job alerts (Indeed, a LinkedIn alert address)?"
+default = ["jobs-noreply@linkedin.com", "jobalerts-noreply@linkedin.com", "indeed.com", "glassdoor.com", "ziprecruiter.com", "workopolis.com"]
+
+[[lists]]
+name = "recruiters"
+description = "Recruiters and staffing agencies"
+question = "Which recruiters or staffing agencies write to you (by domain or address)?"
+default = []
+
+# A tag Mesh, like Money talk: it adds Career and decides nothing, so a
+# recruiter you have written to stays a Find under People and is under
+# Career as well.
+[[meshes]]
+band = "personal"
+rank = 32
+text = '''
+Mesh: Career talk
+Scope:
+All Digs
+
+ROUTES
+
+IF sender IN list:recruiters
+    → Stratum: Career
+
+ELSE IF NOT mailing_list AND NOT from_me AND recruiting@v1 > .80
+    → Stratum: Career
+'''
+
+# Ahead of Social and the promotion rules: a job board's alert is not a
+# social network's notice, and a recruiter's pitch is not a store's.
+[[meshes]]
+rank = 30
+text = '''
+Mesh: Job alerts and recruiters
+Scope:
+All Digs
+
+ROUTES
+
+IF sender IN list:job_boards
+    → Filed + Stratum: Career
+ELSE IF sender IN list:recruiters
+    → Filed + Stratum: Career
+ELSE IF NOT mailing_list AND NOT from_me AND recruiting@v1 > .80
+    → Filed + Stratum: Career
+'''

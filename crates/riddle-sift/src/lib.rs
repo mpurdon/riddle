@@ -222,6 +222,9 @@ pub trait EscalationBudget: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct SiftOutcome {
     pub classification: Classification,
+    /// What a Mesh in Shadow would have decided instead, recorded beside
+    /// the live decision for the Shadow review; never applied.
+    pub shadow_proposal: Option<Classification>,
     pub trace: DecisionTrace,
     pub find: Option<FindProposal>,
     pub thread_state_update: Option<ThreadStateUpdate>,

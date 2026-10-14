@@ -91,7 +91,7 @@ async fn stored_facts_of_older_mail_gain_the_message_fields_once_per_dig() {
 
     // Once per Dig: the boot-time pass sets the flag and does not run again,
     // even when a row has drifted.
-    let flag = format!("message_facts_v14:{}", dig.id);
+    let flag = format!("message_facts_v15:{}", dig.id);
     repo::kv::set(&index, &flag, "0").unwrap();
     app.refresh_all_message_facts();
     assert_eq!(repo::kv::get(&index, &flag).unwrap().as_deref(), Some("1"));

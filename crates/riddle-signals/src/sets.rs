@@ -66,10 +66,13 @@ impl SetId {
                 "transactional",
                 "marketing",
                 "travel_reservation",
+                "event_ticket",
+                "shipment_update",
                 "acknowledges_cancellation",
             ],
             SetId::HumanCorrespondence => &[
                 "finance_topic",
+                "recruiting",
                 "requires_response",
                 "requires_action",
                 "direct_request",
@@ -80,6 +83,7 @@ impl SetId {
             ],
             SetId::Calendar => &[
                 "meeting_related",
+                "event_ticket",
                 "acknowledges_cancellation",
                 "requires_response",
             ],

@@ -13,6 +13,13 @@
 //! reader, none said what it is about, so no rule could add Finance to a
 //! person's mail. It reads topic, not intent: `payment_related` is money
 //! owed or paid; this is any money matter, a question to an accountant included.
+//! `recruiting` came when recruiters' mail was scattered across Social,
+//! Promotions, Unresolved and once nearly Contamination: a recruiter who
+//! "saw your profile" claims prior contact by design. It reads topic (a job
+//! or hiring process for the reader), like `finance_topic`. `event_ticket`
+//! and `shipment_update` came from Unresolved concert entry passes, parking
+//! bookings and carrier delivery notices: `travel_reservation` is travel
+//! only and `transactional` says nothing about what happened.
 //! `donation_appeal` came with the Payments review: `marketing` plus
 //! `payment_related` read Patreon discounts, toll-road offers and concert
 //! tickets as fundraising, and no fact tells an appeal from an ad.
@@ -69,6 +76,9 @@ const DEFS: &[Def] = &[
     Def { name: "claims_prior_contact", definition: "The author says they already know the reader from an earlier interaction.", yes: "The author refers to meeting, speaking or writing before, or to something the reader did that the author saw, such as a comment, a post, a profile or an application.", no: "The author introduces themselves for the first time, or writes as a service, a list or a campaign.", thread: false, slices: &[] },
     Def { name: "donation_appeal", definition: "The author asks the reader to donate to a charity, cause or non-profit organisation.", yes: "The message asks for a donation, pledge or gift to a charity, fundraiser, foundation or non-profit.", no: "The message sells a product or subscription, bills the reader, or asks for nothing.", thread: false, slices: &[] },
     Def { name: "finance_topic", definition: "The message is about the recipient's money matters: taxes, accounting, payroll, benefits, banking, investments, insurance or a business's finances.", yes: "Taxes, accounts, bookkeeping, benefits, banking, investments, insurance or a company's finances are the subject.", no: "Money is not the subject, or comes up only in passing.", thread: true, slices: &[] },
+    Def { name: "recruiting", definition: "The message is about a job, a role or a hiring process for the recipient.", yes: "A job, role, contract, interview or application of the recipient's is the subject, from a recruiter, an employer or a job board.", no: "The recipient's employment is absent from the message, or the message sells a product or service.", thread: true, slices: &[] },
+    Def { name: "event_ticket", definition: "The message delivers or explains tickets or passes the recipient holds for an event, a venue or a parking spot.", yes: "Tickets, mobile entry, a pass or a parking booking the recipient already holds are issued, delivered or explained.", no: "The message sells or advertises an event, or is about something other than admission the recipient holds.", thread: false, slices: &[] },
+    Def { name: "shipment_update", definition: "The message reports where a package for the recipient is or when it will arrive.", yes: "A carrier or a store reports a shipment, a tracking number, a delivery window or a delivery for the recipient.", no: "The message is about an order's payment, a promotion, or something other than a package in transit.", thread: false, slices: &[] },
     Def { name: "travel_reservation", definition: "The message confirms or changes a travel booking such as a flight, hotel, train or car.", yes: "A travel booking is confirmed, changed or ticketed.", no: "The message is about something other than a travel booking.", thread: false, slices: &[] },
 ];
 
@@ -170,6 +180,9 @@ mod tests {
             "claims_prior_contact",
             "donation_appeal",
             "finance_topic",
+            "recruiting",
+            "event_ticket",
+            "shipment_update",
         ] {
             assert!(names.contains(&required), "missing {required}");
         }
