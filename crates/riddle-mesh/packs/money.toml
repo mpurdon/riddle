@@ -1,6 +1,6 @@
 id = "money"
 name = "Money"
-version = 4
+version = 5
 area = "Money"
 summary = "Bills, renewals and amounts due become Pay or Do Finds; transfers and credit alerts are Know Finds; receipts and charges are Filed; donation appeals are kept apart from bills."
 band = "general"
@@ -19,6 +19,15 @@ default = ["payments.interac.ca", "paypal.com", "wise.com"]
 name = "invoice_senders"
 description = "Senders whose invoices you pay yourself"
 question = "Who sends you invoices you pay by hand (a domain registrar, a contractor)?"
+default = []
+
+# v5: money talk. A person's mail about money (an accountant's advice, a
+# question about benefits) is tagged Finance whoever decides it, and your
+# accountant's firm counts as Finance even from someone new there.
+[[lists]]
+name = "financial_advisors"
+description = "Your accountant, bookkeeper, financial planner or bank adviser"
+question = "Who looks after your money (an accountant's or adviser's firm, by domain)?"
 default = []
 
 # v4: newsletters are not bills. A tech newsletter's issues scored .87 as
@@ -132,4 +141,27 @@ ELSE IF payment_related@v1 > .80 AND requires_action@v1 > .70 AND marketing@v1 <
     → Find: Pay + Stratum: Finance
 ELSE IF represents_charge@v1 > .80
     → Filed + Stratum: Finance
+'''
+
+# A tag Mesh: its routes add Finance and decide nothing, so the rule that
+# decides (Human correspondence, a bill, a receipt) keeps deciding and the
+# message is also under Finance; a tag route never stops the chain, so the
+# ELSE IF is checked too. It runs early, before the rules that decide. An
+# adviser's newsletter is Finance as well as Newsletters; only a person's
+# own mail is read for the topic, so bulk mail costs no judge call.
+[[meshes]]
+band = "personal"
+rank = 30
+text = '''
+Mesh: Money talk
+Scope:
+All Digs
+
+ROUTES
+
+IF sender IN list:financial_advisors
+    → Stratum: Finance
+
+ELSE IF NOT automated_sender AND NOT mailing_list AND NOT from_me AND finance_topic@v1 > .80
+    → Stratum: Finance
 '''

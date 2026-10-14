@@ -693,6 +693,10 @@ pub struct Derived<'a> {
     pub me: bool,
     /// The user's organisation domains, which a lookalike may imitate.
     pub organisation_domains: &'a [String],
+    /// The thread and the sender's domain are ones the user already knows
+    /// (`Facts::known_thread`, `Facts::known_domain`), from the stores.
+    pub known_thread: bool,
+    pub known_domain: bool,
 }
 
 /// The facts that come from the message, its language and its sender's
@@ -729,6 +733,8 @@ pub fn refresh_from_message(facts: &mut Facts, m: &Message, derived: Derived<'_>
         &mut changed,
     );
     set(&mut facts.subject, m.subject.clone(), &mut changed);
+    set(&mut facts.known_thread, derived.known_thread, &mut changed);
+    set(&mut facts.known_domain, derived.known_domain, &mut changed);
     set(&mut facts.headers, m.headers.extra.clone(), &mut changed);
     set(
         &mut facts.github_reason,
@@ -1267,6 +1273,8 @@ pub fn compute_facts(input: &SiftInput, now: DateTime<Utc>) -> Facts {
             on_schedule: input.people.on_schedule,
             me: profile.is_me(&sender),
             organisation_domains: &profile.organisation_domains,
+            known_thread: input.people.known_thread,
+            known_domain: input.people.known_domain,
         },
     );
     facts

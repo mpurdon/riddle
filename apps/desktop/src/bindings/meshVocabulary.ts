@@ -16,6 +16,8 @@ export const MESH_FACTS = [
   { name: 'subject', kind: 'text' },
   { name: 'sender_in_contacts', kind: 'bool' },
   { name: 'sender_replied_to_before', kind: 'bool' },
+  { name: 'known_thread', kind: 'bool' },
+  { name: 'known_domain', kind: 'bool' },
   { name: 'first_time_sender', kind: 'bool' },
   { name: 'same_organisation', kind: 'bool' },
   { name: 'mailing_list', kind: 'bool' },

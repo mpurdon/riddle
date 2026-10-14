@@ -200,6 +200,20 @@ pub struct MeshOutput {
     pub importance: Option<crate::importance::Importance>,
 }
 
+impl MeshOutput {
+    /// A route that only adds Strata (`→ Stratum: Finance`) is a tag: it
+    /// says what the message is about, decides nothing, and evaluation goes
+    /// on to the route that does. Topic is not who sent it, so a tag can add
+    /// Finance to mail Human correspondence files under People.
+    pub fn is_tag(&self) -> bool {
+        self.disposition.is_none()
+            && !self.escalate
+            && !self.notify
+            && self.importance.is_none()
+            && !self.strata.is_empty()
+    }
+}
+
 /// The local hour `Expires: next morning` means.
 pub const NEXT_MORNING_HOUR: u32 = 9;
 

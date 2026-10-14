@@ -41,6 +41,20 @@ isReply: boolean,
  */
 isDraft: boolean, 
 /**
+ * The thread already has mail from the user or from a sender the user
+ * knows. A CPA's reply in a thread the user's household was in was
+ * "unknown" because the user had never written to that address, so it
+ * skipped Human correspondence and ended Unresolved (13 Oct 2026).
+ */
+knownThread: boolean, 
+/**
+ * The user knows someone at the sender's domain (a contact, or someone
+ * they replied to), and the domain is one organisation's
+ * (`organisation_domain`): a new person at the user's accounting firm
+ * is not a stranger; a bell.net or zendesk.com sender still is.
+ */
+knownDomain: boolean, 
+/**
  * The sender uses a consumer mailbox anyone can open (`gmail.com`,
  * `outlook.com`, `icloud.com`…; `riddle_sift::facts::free_mail_domain`).
  * Authentication there proves the account sent it, not who owns it.

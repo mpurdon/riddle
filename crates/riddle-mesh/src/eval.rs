@@ -317,6 +317,10 @@ pub struct MeshDecision {
     /// Mesh decide: "Frequent promotions v2: IF … (margin 0.08 is below the 0.15 required)".
     #[serde(default)]
     pub passed_over: Vec<String>,
+    /// Strata from tag routes (`MeshOutput::is_tag`) that matched before the
+    /// deciding route, added to whatever is decided, Unresolved included.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 impl MeshDecision {
@@ -383,6 +387,7 @@ pub fn evaluate_with(
     // The route that decides, and the first thin match in case none does.
     let mut winner = None;
     let mut held = None;
+    let mut tags: Vec<String> = Vec::new();
     let order = ordered(meshes);
     'meshes: for m in &order {
         for r in &m.routes {
@@ -394,6 +399,14 @@ pub fn evaluate_with(
                 &mut unresolved_signal_refs,
             );
             match o.truth {
+                // A tag adds its Strata and lets evaluation go on.
+                Truth::True if r.output.is_tag() => {
+                    for s in &r.output.strata {
+                        if !tags.contains(s) {
+                            tags.push(s.clone());
+                        }
+                    }
+                }
                 Truth::True => {
                     let thin = policy
                         .zip(r.output.disposition.as_ref())
@@ -452,8 +465,15 @@ pub fn evaluate_with(
         passed_over,
         ..Default::default()
     };
+    decision.tags = tags.clone();
     if let Some((m, r, margin)) = chosen {
-        decision.output = Some(r.output.clone());
+        let mut output = r.output.clone();
+        for t in &tags {
+            if !output.strata.contains(t) {
+                output.strata.push(t.clone());
+            }
+        }
+        decision.output = Some(output);
         decision.matched_rule = Some(r.text.clone());
         decision.words = Some(crate::humanize::route_decision(
             r,
@@ -721,6 +741,44 @@ mod tests {
         evaluate(std::slice::from_ref(mesh), facts, evals, &NoLists)
             .output
             .and_then(|o| o.disposition)
+    }
+
+    /// A route that only adds Strata tags the message and lets evaluation
+    /// go on, so a topic (Finance) joins whatever later rule decides, and
+    /// stays on mail nothing decides.
+    #[test]
+    fn a_strata_only_route_tags_and_the_deciding_route_still_decides() {
+        let mut topics = crate::parse::parse("Mesh: Money talk\nPriority: -30\nROUTES\nIF finance_topic@v1 > .80\n    → Stratum: Finance").unwrap();
+        topics.id = MeshId("mesh_topics".into());
+        let mut people = crate::parse::parse("Mesh: Human correspondence\nPriority: -5\nROUTES\nIF known_thread\n    → Find: Know + Stratum: People").unwrap();
+        people.id = MeshId("mesh_people".into());
+        let meshes = [topics, people];
+        let money = [ev("finance_topic", 1, 0.95)];
+        let in_thread = Facts {
+            known_thread: true,
+            ..Default::default()
+        };
+        let d = evaluate(&meshes, &in_thread, &money, &NoLists);
+        let out = d.output.unwrap();
+        assert_eq!(
+            out.disposition,
+            Some(Disposition::Find {
+                find_type: FindType::Know
+            })
+        );
+        assert_eq!(
+            out.strata,
+            vec!["People".to_string(), "Finance".to_string()]
+        );
+        assert_eq!(
+            d.mesh_name.as_deref(),
+            Some("Human correspondence"),
+            "the tag decided nothing"
+        );
+        // Nothing decides: the tag is still there for Unresolved mail.
+        let d = evaluate(&meshes, &Facts::default(), &money, &NoLists);
+        assert!(d.output.is_none());
+        assert_eq!(d.tags, vec!["Finance".to_string()]);
     }
 
     #[test]

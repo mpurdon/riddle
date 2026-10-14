@@ -320,6 +320,11 @@ An account that is not syncing says so. The sync job treated `provider_auth` and
 
 Follow Up Finds are created by Temporal Sift (19), not by an arriving message.
 
+Topic is not who sent it (13 Oct 2026). A CPA's advice on a corporation's medical benefits was filed under People, or left Unresolved, because Signals said what mail wants from the reader and none said what it is about, and the only rule for a person's mail added People. Three changes:
+- A route whose output is only Strata (`→ Stratum: Finance`) is a tag (`MeshOutput::is_tag`): it adds its Strata and evaluation goes on, so the rule that decides keeps deciding and the message is also under the topic. Tags that match before the deciding route are added to its Strata, and Unresolved mail keeps them. A tag Mesh runs early (the money pack's Money talk, personal band).
+- `finance_topic@v1` reads a money matter (taxes, accounting, payroll, benefits, banking, investments, insurance, a business's finances), not money owed; it is in the human correspondence Signal set, so only a person's mail is scored for it. Money talk tags Finance on that, and on anything from `list:financial_advisors`, an adviser's newsletter included.
+- `known_thread` (the thread has earlier mail from the user or someone they know) and `known_domain` (the user knows someone at the sender's domain, where the domain is one organisation's, `organisation_domain`: not a consumer or ISP mailbox, not a shared help desk) widen Human correspondence: the CPA had replied in a thread the household was in, at a firm where the user knew a colleague, and ended Unresolved as a stranger.
+
 ## Spoil
 
 Legitimate but low-value mail.

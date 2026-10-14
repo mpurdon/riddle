@@ -50,3 +50,18 @@ pub fn search(store: &Store, q: &str, limit: u32) -> Result<Vec<Person>> {
         rows
     })
 }
+
+/// Whether the user knows anyone at this domain: a contact, or someone
+/// they replied to. For `Facts::known_domain`.
+pub fn known_at_domain(store: &Store, domain: &str) -> Result<bool> {
+    let people: Vec<Person> = store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT DISTINCT p.json FROM people p JOIN person_emails e ON e.person_id = p.id WHERE e.email LIKE ?1",
+        )?;
+        let rows = st
+            .query_map([format!("%@{}", domain.to_lowercase())], |r| from_json(r.get::<_, String>(0)?))?
+            .collect();
+        rows
+    })?;
+    Ok(people.iter().any(|p| p.replied_to_by_user || p.in_contacts))
+}

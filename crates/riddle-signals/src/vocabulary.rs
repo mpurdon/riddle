@@ -8,6 +8,11 @@
 //! later is seeded at boot where absent; `claims_prior_contact` came with
 //! cold outreach, where a stranger's invented shared past ("I noticed your
 //! comment on my channel") contradicts a history Riddle can check.
+//! `finance_topic` came when a CPA's advice on a corporation's medical
+//! benefits was filed under People: Signals said what mail wants from the
+//! reader, none said what it is about, so no rule could add Finance to a
+//! person's mail. It reads topic, not intent: `payment_related` is money
+//! owed or paid; this is any money matter, a question to an accountant included.
 //! `donation_appeal` came with the Payments review: `marketing` plus
 //! `payment_related` read Patreon discounts, toll-road offers and concert
 //! tickets as fundraising, and no fact tells an appeal from an ad.
@@ -63,6 +68,7 @@ const DEFS: &[Def] = &[
     Def { name: "invoice", definition: "The message presents an amount that is due to be paid.", yes: "An amount is presented as owed, with a due date or a request to pay.", no: "The message confirms a completed payment, or is about something other than an amount due.", thread: false, slices: &[] },
     Def { name: "claims_prior_contact", definition: "The author says they already know the reader from an earlier interaction.", yes: "The author refers to meeting, speaking or writing before, or to something the reader did that the author saw, such as a comment, a post, a profile or an application.", no: "The author introduces themselves for the first time, or writes as a service, a list or a campaign.", thread: false, slices: &[] },
     Def { name: "donation_appeal", definition: "The author asks the reader to donate to a charity, cause or non-profit organisation.", yes: "The message asks for a donation, pledge or gift to a charity, fundraiser, foundation or non-profit.", no: "The message sells a product or subscription, bills the reader, or asks for nothing.", thread: false, slices: &[] },
+    Def { name: "finance_topic", definition: "The message is about the recipient's money matters: taxes, accounting, payroll, benefits, banking, investments, insurance or a business's finances.", yes: "Taxes, accounts, bookkeeping, benefits, banking, investments, insurance or a company's finances are the subject.", no: "Money is not the subject, or comes up only in passing.", thread: true, slices: &[] },
     Def { name: "travel_reservation", definition: "The message confirms or changes a travel booking such as a flight, hotel, train or car.", yes: "A travel booking is confirmed, changed or ticketed.", no: "The message is about something other than a travel booking.", thread: false, slices: &[] },
 ];
 
@@ -163,6 +169,7 @@ mod tests {
             "travel_reservation",
             "claims_prior_contact",
             "donation_appeal",
+            "finance_topic",
         ] {
             assert!(names.contains(&required), "missing {required}");
         }

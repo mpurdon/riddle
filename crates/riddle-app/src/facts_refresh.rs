@@ -27,6 +27,8 @@
 //! `payment_failed` and `payment_recovered`, and recomputes
 //! `lookalike_domain`, which had flagged amazonaws.com as imitating Amazon
 //! and hidden genuine AWS past-due notices. v13 adds `community_platform`.
+//! v14 adds `known_thread` and `known_domain`, after an accountant's reply
+//! in a thread the household was in ended Unresolved as a stranger's.
 
 use crate::App;
 use riddle_core::DigId;
@@ -34,7 +36,7 @@ use riddle_errors::Result;
 use riddle_store::repo;
 
 /// The `once_per_dig` key. Renamed when the set of refreshed fields widens.
-const KEY: &str = "message_facts_v13";
+const KEY: &str = "message_facts_v14";
 
 impl App {
     /// Refresh the message-derived facts of every message in this Dig that
@@ -64,6 +66,8 @@ impl App {
                 _ => riddle_mail::normalize::normalize_message(&message).language,
             };
             let person = riddle_people::lookup(&index, &message.from.email)?;
+            let (known_thread, known_domain) =
+                crate::engine::known_context(&index, &store, &message, &profile)?;
             let dirty = riddle_sift::facts::refresh_from_message(
                 &mut facts,
                 &message,
@@ -73,6 +77,8 @@ impl App {
                     on_schedule: person.as_ref().is_some_and(|p| p.on_schedule),
                     me: profile.is_me(&message.from.email),
                     organisation_domains: &profile.organisation_domains,
+                    known_thread,
+                    known_domain,
                 },
             );
             if dirty {

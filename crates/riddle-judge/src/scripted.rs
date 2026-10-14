@@ -402,6 +402,27 @@ impl ScriptedJudge {
                     0.15
                 }
             }
+            "finance_topic" => {
+                if Self::any(
+                    &t,
+                    &[
+                        "tax",
+                        "accountant",
+                        "accounting",
+                        "bookkeep",
+                        "payroll",
+                        "benefits",
+                        "invest",
+                        "insurance",
+                        "corporation",
+                        "rrsp",
+                    ],
+                ) {
+                    0.9
+                } else {
+                    0.05
+                }
+            }
             "donation_appeal" => {
                 if Self::any(
                     &t,

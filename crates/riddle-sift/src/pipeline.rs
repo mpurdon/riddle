@@ -611,11 +611,12 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
         }
         _ => {
             draft.disposition = Disposition::Unresolved;
+            // Unresolved still says what it is about (tag routes).
             draft.strata = decision
                 .output
                 .as_ref()
                 .map(|o| o.strata.clone())
-                .unwrap_or_default();
+                .unwrap_or_else(|| decision.tags.clone());
             draft.mechanism = if draft.judge_unavailable {
                 DecisionMechanism::Deterministic
             } else if refined_by_llm {

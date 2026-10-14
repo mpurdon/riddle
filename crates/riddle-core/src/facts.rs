@@ -41,6 +41,18 @@ pub struct Facts {
     /// A Gmail draft; Sift files it without judging it.
     #[serde(default)]
     pub is_draft: bool,
+    /// The thread already has mail from the user or from a sender the user
+    /// knows. A CPA's reply in a thread the user's household was in was
+    /// "unknown" because the user had never written to that address, so it
+    /// skipped Human correspondence and ended Unresolved (13 Oct 2026).
+    #[serde(default)]
+    pub known_thread: bool,
+    /// The user knows someone at the sender's domain (a contact, or someone
+    /// they replied to), and the domain is one organisation's
+    /// (`organisation_domain`): a new person at the user's accounting firm
+    /// is not a stranger; a bell.net or zendesk.com sender still is.
+    #[serde(default)]
+    pub known_domain: bool,
     /// The sender uses a consumer mailbox anyone can open (`gmail.com`,
     /// `outlook.com`, `icloud.com`…; `riddle_sift::facts::free_mail_domain`).
     /// Authentication there proves the account sent it, not who owns it.
@@ -179,6 +191,8 @@ impl Facts {
             "subject" => Text(self.subject.clone()),
             "sender_in_contacts" => Bool(self.sender_in_contacts),
             "sender_replied_to_before" => Bool(self.sender_replied_to_before),
+            "known_thread" => Bool(self.known_thread),
+            "known_domain" => Bool(self.known_domain),
             "first_time_sender" => Bool(self.first_time_sender),
             "same_organisation" => Bool(self.same_organisation),
             "mailing_list" => Bool(self.mailing_list),
@@ -251,6 +265,8 @@ impl Facts {
         "subject",
         "sender_in_contacts",
         "sender_replied_to_before",
+        "known_thread",
+        "known_domain",
         "first_time_sender",
         "same_organisation",
         "mailing_list",
@@ -371,6 +387,47 @@ pub fn free_mail_domain(domain: &str) -> bool {
         && ending.split('.').all(|l| (2..=3).contains(&l.len()))
 }
 
+/// Domains many unrelated people or companies send from: ISP mailboxes,
+/// which are personal accounts though not free, and shared help desks,
+/// which send for thousands of companies (`moniker.zendesk.com`).
+const SHARED_DOMAINS: &[&str] = &[
+    "bell.net",
+    "sympatico.ca",
+    "rogers.com",
+    "shaw.ca",
+    "telus.net",
+    "videotron.ca",
+    "cogeco.ca",
+    "comcast.net",
+    "verizon.net",
+    "att.net",
+    "sbcglobal.net",
+    "btinternet.com",
+    "orange.fr",
+    "zendesk.com",
+    "freshdesk.com",
+    "helpscout.net",
+    "intercom-mail.com",
+    "intercom.io",
+    "zohodesk.com",
+    "salesforce.com",
+    "force.com",
+    "hubspot.com",
+    "mailchimp.com",
+];
+
+/// Whether knowing one person at this domain says anything about the next:
+/// not for a consumer mailbox, an ISP mailbox or a shared help desk
+/// (`Facts::known_domain`). Subdomains of a shared domain count as shared.
+pub fn organisation_domain(domain: &str) -> bool {
+    let d = domain.trim_end_matches('.').to_ascii_lowercase();
+    !d.is_empty()
+        && !free_mail_domain(&d)
+        && !SHARED_DOMAINS
+            .iter()
+            .any(|s| d == *s || d.ends_with(&format!(".{s}")))
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 #[ts(export)]
@@ -378,4 +435,23 @@ pub enum FactValue {
     Bool(bool),
     Number(f64),
     Text(String),
+}
+
+#[cfg(test)]
+mod organisation_domain_tests {
+    use super::organisation_domain;
+
+    #[test]
+    fn only_one_organisation_s_domain_makes_its_people_known() {
+        assert!(organisation_domain("delyaccounting.ca"));
+        for shared in [
+            "gmail.com",
+            "outlook.com",
+            "bell.net",
+            "moniker.zendesk.com",
+            "",
+        ] {
+            assert!(!organisation_domain(shared), "{shared}");
+        }
+    }
 }

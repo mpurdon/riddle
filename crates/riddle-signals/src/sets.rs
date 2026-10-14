@@ -69,6 +69,7 @@ impl SetId {
                 "acknowledges_cancellation",
             ],
             SetId::HumanCorrespondence => &[
+                "finance_topic",
                 "requires_response",
                 "requires_action",
                 "direct_request",

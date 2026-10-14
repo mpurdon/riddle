@@ -78,6 +78,10 @@ pub struct PeopleFacts {
     pub relationship_strength: f64,
     pub cadence: Option<riddle_core::Cadence>,
     pub on_schedule: bool,
+    /// The thread has mail from the user or someone they know.
+    pub known_thread: bool,
+    /// The user knows someone at the sender's (non-consumer) domain.
+    pub known_domain: bool,
 }
 
 impl PeopleFacts {
@@ -98,6 +102,8 @@ impl PeopleFacts {
                 relationship_strength: p.relationship_strength,
                 cadence: p.cadence,
                 on_schedule: p.on_schedule,
+                // Set by the caller, which has the stores (`known_context`).
+                ..Default::default()
             },
         }
     }

@@ -505,6 +505,14 @@ fn bool_words(fact: &str, holds: bool) -> String {
         "sender_is_vip" => ("the sender is a VIP", "the sender is not a VIP"),
         "automated_sender" => ("it was sent automatically", "it was not sent automatically"),
         "known_sender" => ("you know the sender", "you do not know the sender"),
+        "known_thread" => (
+            "you or someone you know already wrote in this thread",
+            "nobody you know has written in this thread",
+        ),
+        "known_domain" => (
+            "you know someone at the sender's organisation",
+            "you know nobody at the sender's organisation",
+        ),
         "government_sender" => (
             "it is from an official government sender",
             "it is not from an official government sender",

@@ -144,6 +144,39 @@ impl From<&SyncReport> for SyncSummary {
     }
 }
 
+/// Whether a message's thread and its sender's domain are ones the user
+/// already knows (`Facts::known_thread`, `Facts::known_domain`): the thread
+/// has earlier mail from the user or someone they know; someone at the
+/// sender's domain is a contact or was replied to, where the domain is one
+/// organisation's (`organisation_domain`: not a consumer or ISP mailbox,
+/// not a shared help desk).
+pub(crate) fn known_context(
+    index: &riddle_store::Store,
+    store: &riddle_store::Store,
+    message: &Message,
+    profile: &UserProfile,
+) -> Result<(bool, bool)> {
+    let known = |email: &str| -> Result<bool> {
+        Ok(profile.is_me(email)
+            || riddle_people::lookup(index, email)?
+                .is_some_and(|p| p.replied_to_by_user || p.in_contacts))
+    };
+    let mut known_thread = false;
+    for (from, sent) in
+        repo::messages::thread_senders_before(store, &message.thread_id, &message.date)?
+    {
+        if sent || known(&from)? {
+            known_thread = true;
+            break;
+        }
+    }
+    let domain = message.from.domain().to_ascii_lowercase();
+    let known_domain = organisation_domain(&domain)
+        && !profile.is_me(&message.from.email)
+        && repo::people::known_at_domain(index, &domain)?;
+    Ok((known_thread, known_domain))
+}
+
 impl App {
     fn domains(&self) -> Result<Arc<Domains>> {
         self.services.require::<Domains>()
@@ -160,7 +193,9 @@ impl App {
         }
         let normalized = riddle_mail::normalize::normalize_message(&message);
         let person = riddle_people::lookup(&index, &message.from.email)?;
-        let people = PeopleFacts::from_person(person.as_ref());
+        let mut people = PeopleFacts::from_person(person.as_ref());
+        (people.known_thread, people.known_domain) =
+            known_context(&index, &store, &message, &profile)?;
         let thread_state = repo::thread_state::get(&store, &message.thread_id)?;
         let has_calendar_part = riddle_mail::normalize::has_calendar_part(&message);
         let has_structured_receipt = riddle_mail::normalize::has_structured_receipt(&message);

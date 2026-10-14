@@ -785,6 +785,24 @@ pub fn summaries_for_ids(store: &Store, dig_id: &DigId, ids: &[MessageId]) -> Re
     Ok(out)
 }
 
+/// Who wrote in a thread before a moment: each earlier message's sender and
+/// whether the user sent it. For `Facts::known_thread`.
+pub fn thread_senders_before(
+    store: &Store,
+    thread_id: &ThreadId,
+    before: &chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<(String, bool)>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT from_email, is_sent FROM messages WHERE thread_id = ?1 AND date < ?2 AND deleted_at IS NULL",
+        )?;
+        let rows = st
+            .query_map(params![thread_id.as_str(), ts(before)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)))?
+            .collect();
+        rows
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

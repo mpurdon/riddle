@@ -55,7 +55,7 @@ pub const DEFAULTS: &[DefaultMesh] = &[
     },
     DefaultMesh {
         id: "mesh_human_correspondence",
-        text: "Mesh: Human correspondence v1\nScope:\nAll Digs\nPriority: -5\n\nROUTES\n\nWHEN (known_sender OR same_organisation) AND NOT automated_sender AND NOT from_me\n    IF requires_response@v1 > .70\n        → Find: Respond + Stratum: People\n    ELSE IF asks_question@v1 > .75\n        → Find: Respond + Stratum: People\n    ELSE IF requires_action@v1 > .75\n        → Find: Do + Stratum: People\n    ELSE\n        → Find: Know + Stratum: People\nEND\n",
+        text: "Mesh: Human correspondence v1\nScope:\nAll Digs\nPriority: -5\n\nROUTES\n\nWHEN (known_sender OR known_thread OR known_domain OR same_organisation) AND NOT automated_sender AND NOT from_me\n    IF requires_response@v1 > .70\n        → Find: Respond + Stratum: People\n    ELSE IF asks_question@v1 > .75\n        → Find: Respond + Stratum: People\n    ELSE IF requires_action@v1 > .75\n        → Find: Do + Stratum: People\n    ELSE\n        → Find: Know + Stratum: People\nEND\n",
         fallback: false,
     },
     DefaultMesh {
