@@ -17,3 +17,6 @@ serde_json.workspace = true
 log.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util"] }
 chrono.workspace = true
+
+[dev-dependencies]
+riddle-mail.workspace = true

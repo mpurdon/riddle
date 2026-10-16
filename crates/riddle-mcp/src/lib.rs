@@ -37,8 +37,8 @@ impl McpServer {
             tool("summary", "The morning summary: counts of Finds, Unresolved, Filed, Spoil and Contamination, and whether Riddle is caught up.", json!({"type": "object", "properties": {}})),
             tool("list_digs", "Connected accounts (Digs) with status.", json!({"type": "object", "properties": {}})),
             tool("list_messages", "Page through messages, newest first, optionally filtered.", json!({"type": "object", "properties": {"digId": {"type": "string"}, "disposition": {"type": "string", "enum": ["find", "filed", "spoil", "contamination", "unresolved"]}, "query": {"type": "string"}, "limit": {"type": "integer"}, "cursor": {"type": "string"}}})),
-            tool("get_message", "One message with its body.", json!({"type": "object", "required": ["digId", "messageId"], "properties": {"digId": {"type": "string"}, "messageId": {"type": "string"}}})),
-            tool("explain", "Why a message has its disposition: the Mesh, the Signals, the gate, the escalation.", json!({"type": "object", "required": ["digId", "messageId"], "properties": {"digId": {"type": "string"}, "messageId": {"type": "string"}}})),
+            tool("get_message", "One message with its body. Name it by digId and messageId, or pass a link copied from its page (riddle://message/<digId>/<messageId> …) whole as messageId.", json!({"type": "object", "required": ["messageId"], "properties": {"digId": {"type": "string"}, "messageId": {"type": "string"}}})),
+            tool("explain", "Why a message has its disposition: the Mesh, the Signals, the gate, the escalation. Name it by digId and messageId, or pass a copied riddle://message/… link whole as messageId.", json!({"type": "object", "required": ["messageId"], "properties": {"digId": {"type": "string"}, "messageId": {"type": "string"}}})),
             tool("list_finds", "Finds needing attention.", json!({"type": "object", "properties": {"status": {"type": "string", "enum": ["open", "snoozed", "resolved", "dismissed"]}, "limit": {"type": "integer"}}})),
             tool("list_activity", "The Activity ledger, newest first.", json!({"type": "object", "properties": {"limit": {"type": "integer"}}})),
             tool("list_meshes", "Meshes (policy) at their latest version.", json!({"type": "object", "properties": {}})),
@@ -88,23 +88,11 @@ impl McpServer {
                 )?)?
             }
             "get_message" => {
-                let dig = DigId::from(
-                    str_arg("digId").ok_or_else(|| RiddleError::invalid("digId required"))?,
-                );
-                let id = MessageId::from(
-                    str_arg("messageId")
-                        .ok_or_else(|| RiddleError::invalid("messageId required"))?,
-                );
+                let (dig, id) = message_args(&args)?;
                 serde_json::to_value(app.get_message(&dig, &id)?)?
             }
             "explain" => {
-                let dig = DigId::from(
-                    str_arg("digId").ok_or_else(|| RiddleError::invalid("digId required"))?,
-                );
-                let id = MessageId::from(
-                    str_arg("messageId")
-                        .ok_or_else(|| RiddleError::invalid("messageId required"))?,
-                );
+                let (dig, id) = message_args(&args)?;
                 serde_json::to_value(app.explain(&dig, &id)?)?
             }
             "list_finds" => {
@@ -278,6 +266,24 @@ fn tool(name: &str, description: &str, schema: Value) -> Value {
     json!({ "name": name, "description": description, "inputSchema": schema })
 }
 
+/// A message by `digId` and `messageId`, or by a link copied from its page
+/// (`riddle://message/<digId>/<messageId> …`) passed whole as `messageId`,
+/// which carries both; the same reading as the dev bridge.
+fn message_args(args: &Value) -> Result<(DigId, MessageId), RiddleError> {
+    let id = args
+        .get("messageId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RiddleError::invalid("messageId required"))?;
+    if let Some(pair) = parse_message_link(id) {
+        return Ok(pair);
+    }
+    let dig = args
+        .get("digId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RiddleError::invalid("digId required"))?;
+    Ok((DigId::from(dig), MessageId::from(id)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,5 +387,36 @@ mod tests {
             "Mesh: Payments"
         );
         assert_eq!(out["proposals"][0]["outcome"], "pending");
+    }
+
+    #[tokio::test]
+    async fn get_message_reads_a_message_from_its_copied_link() {
+        let s = server(false);
+        let dig = Dig {
+            id: DigId::from("dig_link"),
+            name: "Gmail".into(),
+            email: "me@example.com".into(),
+            provider: ProviderKind::Fixture,
+            group: None,
+            privacy: PrivacyMode::CloudJudgment,
+            projection: ProjectionMode::Full,
+            status: DigStatus::NotConnected,
+            shadow_started_at: None,
+            created_at: chrono::Utc::now(),
+            disabled: false,
+            mailbox: None,
+        };
+        riddle_store::repo::digs::upsert(&s.app.stores.index(), &dig).unwrap();
+        let mut m = riddle_mail::fixture::blank_message("dig_link", "19f6afff51bb60e6");
+        m.subject = "Checking In".into();
+        riddle_store::repo::messages::upsert(&s.app.stores.dig(&dig.id).unwrap(), &m).unwrap();
+        // The link as the message page copies it, pasted whole: no digId argument.
+        let link = format!("riddle://message/dig_link/{} (Brad · Checking In)", m.id);
+        let out = s
+            .call("get_message", json!({ "messageId": link }))
+            .await
+            .unwrap();
+        assert_eq!(out["id"], m.id.as_str());
+        assert_eq!(out["subject"], "Checking In");
     }
 }

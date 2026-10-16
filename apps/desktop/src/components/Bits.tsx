@@ -83,6 +83,40 @@ export function CopyCode({ code }: { code: string }) {
   )
 }
 
+/**
+ * A link to one message, to paste in a note or another chat. The message
+ * and Find pages showed the subject but never the id, so another session
+ * reading the store had to search by subject for the mail being discussed.
+ * The link is `riddle://message/<digId>/<messageId>`, the pair every read
+ * takes (`get_message`, `explain`) and the Inbox route carries, with the
+ * sender and subject so it reads on its own, like the Director's
+ * `conversationLink`. The chip shows the provider's part of the id, enough
+ * to tell two messages apart.
+ */
+export function messageLink(digId: string, messageId: string, about: string): string {
+  return `riddle://message/${digId}/${messageId} (${about})`
+}
+
+export function CopyMessageLink({ digId, messageId, about }: { digId: string; messageId: string; about: string }) {
+  const [copied, copy] = useCopy(messageLink(digId, messageId, about))
+  const shown = messageId.slice(messageId.lastIndexOf(':') + 1)
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        void copy()
+      }}
+      aria-label={copied ? 'Copied' : 'Copy message link'}
+      title="Copy a link to this message (its id), to paste in a note or another chat"
+      className="inline-flex items-center gap-1 rounded border border-line px-1.5 py-px text-2xs text-clay hover:bg-sand hover:text-ink"
+    >
+      <span className="mono">{shown}</span>
+      {copied ? <Check className="size-3 text-moss" aria-hidden /> : <Copy className="size-3" aria-hidden />}
+    </button>
+  )
+}
+
 /** A small separator dot between inline facts. */
 export function Sep() {
   return (

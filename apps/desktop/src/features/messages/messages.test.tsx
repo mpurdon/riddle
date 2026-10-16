@@ -5,7 +5,7 @@
  * list. The virtualiser renders nothing in a box of zero height; the
  * shared setup (`vitest.setup.ts`) gives every element a size.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { listMessages } from '@/lib/mocks/queries'
 import type { MockState } from '@/lib/mocks/state'
@@ -160,6 +160,18 @@ describe('the message page opened without a list', () => {
     await screen.findByLabelText('Back')
     expect(screen.queryByText(/^\d+ of \d+$/)).toBeNull()
     expect(screen.queryByLabelText(/^Next message/)).toBeNull()
+  })
+
+  it('copies a link to the message that carries its ids and says what it is about', async () => {
+    const state = mountApp('#/inbox')
+    const items = listMessages(state, { digId: null, filter: {}, page: firstPage }).items
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    window.location.hash = `#/inbox/${items[0].digId}/${items[0].id}`
+    await screen.findByLabelText('Back')
+    fireEvent.click(screen.getByRole('button', { name: 'Copy message link' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`riddle://message/${items[0].digId}/${items[0].id} (${items[0].from.name ?? items[0].from.email} · ${items[0].subject})`))
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeTruthy()
   })
 })
 

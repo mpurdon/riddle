@@ -314,7 +314,9 @@ pub struct MeshDecision {
     /// Meshes whose route chain was poisoned by an unknown condition.
     pub unknown_meshes: Vec<String>,
     /// Routes that matched on a Signal too close to call and so let a later
-    /// Mesh decide: "Frequent promotions v2: IF … (margin 0.08 is below the 0.15 required)".
+    /// Mesh decide, read against the message as `words` is: "Frequent
+    /// promotions v2: it appears marketing is likely, so it is set aside as
+    /// Spoil (margin 0.08 is below the 0.15 required)".
     #[serde(default)]
     pub passed_over: Vec<String>,
     /// Strata from tag routes (`MeshOutput::is_tag`) that matched before the
@@ -412,10 +414,17 @@ pub fn evaluate_with(
                         .zip(r.output.disposition.as_ref())
                         .and_then(|(p, d)| p.shortfall(d.kind(), o.margin));
                     if let Some((margin, needed)) = thin {
+                        // In words, as the decision is. The rule as written
+                        // ("IF marketing@v1 > .70 → Spoil") sat beside a
+                        // reason in sentences and read as the old numbers.
+                        let reading = crate::humanize::route_decision(
+                            r,
+                            &crate::humanize::Evidence { facts, evaluations },
+                        );
                         passed_over.push(format!(
                             "{}: {} (margin {})",
                             m.key(),
-                            r.text,
+                            lower_first(reading.trim_end_matches('.')),
                             crate::policy::shortfall_words(margin, needed)
                         ));
                         held.get_or_insert((*m, r, o.margin));
@@ -933,6 +942,15 @@ mod tests {
         assert_eq!(d.disposition(), Some(&Disposition::Filed));
         assert_eq!(d.mesh_name.as_deref(), Some("Newsletters"));
         assert_eq!(d.passed_over.len(), 1);
+        // The passed-over route is read against the message, as the decision
+        // is, not quoted as written.
+        assert!(
+            d.passed_over[0].starts_with("Promos v1: it appears marketing is ")
+                && d.passed_over[0].contains(", so it is set aside as Spoil (margin")
+                && !d.passed_over[0].contains("IF marketing"),
+            "{:?}",
+            d.passed_over
+        );
         assert!(
             d.passed_over[0].contains("margin 0.08 is below the 0.15 required"),
             "{:?}",

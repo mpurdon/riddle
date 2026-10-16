@@ -4,7 +4,7 @@
  * in the URL leaves j/k and the pane working, and that `f` in Unresolved
  * asks for the type instead of assuming Respond.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { mockState } from '@/lib/mocks'
 import type { MockState } from '@/lib/mocks/state'
@@ -43,6 +43,18 @@ describe('Finds', () => {
     fireEvent.click(within(again).getByRole('button', { name: 'Decide again' }))
     await waitFor(() => expect(mockState().finds.find((f) => f.id === 'find_review_412')?.status).toBe('superseded'))
     await waitFor(() => expect(within(list).queryByText('PR #412')).toBeNull())
+  })
+
+  it('copies a link to the message that raised the Find', async () => {
+    mountApp('#/finds/find_review_412')
+    // The pane follows the cursor, which starts where the last test left it; wait for this Find's mail.
+    const list = await screen.findByRole('listbox', { name: 'Finds' })
+    await waitFor(() => expect(selectedRow(list).textContent).toContain('PR #412'))
+    await waitFor(() => expect(screen.getByRole('article', { name: 'Message' }).textContent).toContain('Jamie Okafor'))
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Copy message link' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('riddle://message/dig_work/m_work_pr412 (Jamie Okafor · [northwind/platform] Review requested: Retry budget for the projection outbox (PR #412))'))
   })
 
   it('keeps j/k and the pane alive after the Find in the URL is resolved with e', async () => {

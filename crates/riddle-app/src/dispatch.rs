@@ -23,6 +23,16 @@ fn opt<T: serde::de::DeserializeOwned>(args: &Value, key: &str) -> Option<T> {
         .and_then(|v| serde_json::from_value(v).ok())
 }
 
+/// A message by `digId` and `messageId`, or by a link copied from its page
+/// (`riddle://message/<digId>/<messageId> …`) passed whole as `messageId`,
+/// which carries both.
+fn message_args(args: &Value) -> Result<(DigId, MessageId)> {
+    if let Some(pair) = opt::<String>(args, "messageId").and_then(|s| parse_message_link(&s)) {
+        return Ok(pair);
+    }
+    Ok((arg(args, "digId")?, arg(args, "messageId")?))
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageFilterArgs {
@@ -170,14 +180,16 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
                 &page,
             )?)?
         }
-        "get_message" => serde_json::to_value(
-            app.get_message(&arg(&args, "digId")?, &arg(&args, "messageId")?)?,
-        )?,
+        "get_message" => {
+            let (dig, id) = message_args(&args)?;
+            serde_json::to_value(app.get_message(&dig, &id)?)?
+        }
         "get_thread" => {
             serde_json::to_value(app.get_thread(&arg(&args, "digId")?, &arg(&args, "threadId")?)?)?
         }
         "explain" => {
-            serde_json::to_value(app.explain(&arg(&args, "digId")?, &arg(&args, "messageId")?)?)?
+            let (dig, id) = message_args(&args)?;
+            serde_json::to_value(app.explain(&dig, &id)?)?
         }
         "search" => {
             let filter = repo::messages::MessageFilter {

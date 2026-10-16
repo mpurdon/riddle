@@ -4767,6 +4767,7 @@ dependencies = [
  "riddle-app",
  "riddle-core",
  "riddle-errors",
+ "riddle-mail",
  "riddle-mesh",
  "riddle-observability",
  "riddle-store",

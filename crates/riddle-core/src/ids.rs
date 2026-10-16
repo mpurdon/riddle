@@ -88,3 +88,47 @@ impl ThreadId {
         self.0.rsplit_once(':').map(|(_, p)| p).unwrap_or(&self.0)
     }
 }
+
+/// The prefix of a link to one message as the message and Find pages copy
+/// it: `riddle://message/<digId>/<messageId> (Sender · Subject)`. The pair
+/// is what every read takes (`get_message`, `explain`) and what the Inbox
+/// route carries; the tail is for whoever reads the note it is pasted in.
+/// Before the link, naming a message to another session meant searching the
+/// store by its subject.
+pub const MESSAGE_LINK_PREFIX: &str = "riddle://message/";
+
+/// The ids in a copied message link, or `None` for anything else (a bare
+/// id, a Director link). Whitespace around the link and the "(…)" tail are
+/// ignored.
+pub fn parse_message_link(s: &str) -> Option<(DigId, MessageId)> {
+    let rest = s.trim().strip_prefix(MESSAGE_LINK_PREFIX)?;
+    let path = rest.split_whitespace().next()?;
+    let (dig, message) = path.split_once('/')?;
+    if dig.is_empty() || message.is_empty() {
+        return None;
+    }
+    Some((DigId::from(dig), MessageId::from(message)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_copied_message_link_parses_to_its_dig_and_message_ids() {
+        let dig = DigId::from("01a0cd10");
+        let id = MessageId::for_provider(&dig, "19f6afff51bb60e6");
+        let link = format!("  riddle://message/{dig}/{id} (Brad Vokins · Checking In)\n");
+        assert_eq!(parse_message_link(&link), Some((dig, id)));
+    }
+
+    #[test]
+    fn a_bare_id_or_a_director_link_is_not_a_message_link() {
+        assert_eq!(parse_message_link("01a0cd10:19f6afff51bb60e6"), None);
+        assert_eq!(
+            parse_message_link("riddle://director/conv_1 (Director: The Stack)"),
+            None
+        );
+        assert_eq!(parse_message_link("riddle://message/dig/"), None);
+    }
+}
