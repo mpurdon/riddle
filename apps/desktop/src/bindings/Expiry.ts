@@ -6,4 +6,4 @@
  * fixed span ("18h") ends at a different hour depending on when the
  * message came.
  */
-export type Expiry = { "kind": "after", hours: number, } | { "kind": "after_minutes", minutes: number, } | { "kind": "end_of_day" } | { "kind": "next_morning" };
+export type Expiry = { "kind": "after", hours: number, } | { "kind": "after_minutes", minutes: number, } | { "kind": "end_of_day" } | { "kind": "next_morning" } | { "kind": "after_dates" };

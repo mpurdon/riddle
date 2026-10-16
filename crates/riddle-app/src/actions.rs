@@ -36,6 +36,7 @@ impl Action for InstallPack {
         .risk(Risk::Medium)
         .confirm(ConfirmationPolicy::TwoStep)
         .autonomy(Autonomy::Trusted)
+        .changes_rules()
         .build()
     }
     async fn preview(&self, ctx: &ActionContext, args: &Value) -> Result<Preview> {
@@ -152,6 +153,7 @@ impl Action for RemovePack {
         .risk(Risk::Medium)
         .confirm(ConfirmationPolicy::TwoStep)
         .autonomy(Autonomy::Trusted)
+        .changes_rules()
         .build()
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
@@ -342,6 +344,7 @@ impl Action for RememberForSender {
         .reversible()
         .risk(Risk::Low)
         .autonomy(Autonomy::Trusted)
+        .changes_rules()
         .build()
     }
 
@@ -800,6 +803,7 @@ pub fn actions() -> Vec<Arc<dyn Action>> {
         Arc::new(DismissPending),
         Arc::new(Resift),
         Arc::new(DecideAgain),
+        Arc::new(AddToContacts),
         Arc::new(SetSecret),
         Arc::new(ClearSecret),
         Arc::new(ImportGmailClient),
@@ -1349,6 +1353,117 @@ impl Action for DecideAgain {
     }
 
     async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
+        put_back_result(ctx, &restore)
+    }
+}
+
+/// Add a sender to the user's contacts and decide all their mail again. A
+/// contact changes much of how mail is read: Human correspondence, the
+/// Never Hidden gate's "known sender", cold outreach and the Signals Sift
+/// asks for all turn on it. Contacts came only from VIPs and family, so a
+/// person the user had never replied to stayed a stranger; their mail was
+/// Unresolved or a promotion until the user wrote back (15 Oct 2026).
+/// Mail the user decided is left as it is. Undo takes them out of contacts
+/// and puts the previous decisions back.
+pub struct AddToContacts;
+
+#[async_trait]
+impl Action for AddToContacts {
+    fn meta(&self) -> ActionMeta {
+        meta(
+            "add_to_contacts",
+            "Add a sender to your contacts and decide their mail again",
+        )
+        .mutating()
+        .reversible()
+        .risk(Risk::Low)
+        .autonomy(Autonomy::Trusted)
+        .build()
+    }
+
+    async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
+        let email = args
+            .get("email")
+            .and_then(|v| v.as_str())
+            .map(|e| e.trim().to_ascii_lowercase())
+            .filter(|e| e.contains('@') && !e.contains(char::is_whitespace))
+            .ok_or_else(|| RiddleError::invalid("email is required: the sender's address"))?;
+        let index = ctx.services.stores.index();
+        let mut profile = repo::user_profile::get(&index)?;
+        if profile.is_me(&email) {
+            return Err(RiddleError::invalid("that address is yours"));
+        }
+        let was_contact = profile
+            .contacts
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(&email));
+        if !was_contact {
+            profile.contacts.push(email.clone());
+            repo::user_profile::put(&index, &profile)?;
+        }
+        let person_was = match repo::people::by_email(&index, &email)? {
+            Some(mut p) => {
+                let was = p.in_contacts;
+                p.in_contacts = true;
+                repo::people::upsert(&index, &p)?;
+                Some(was)
+            }
+            None => None,
+        };
+        let mut items: Vec<(DigId, MessageId)> = Vec::new();
+        for dig in repo::digs::list_enabled(&index)? {
+            let store = ctx.services.stores.dig(&dig.id)?;
+            for id in repo::messages::ids_from_sender(&store, &email)? {
+                items.push((dig.id.clone(), id));
+            }
+        }
+        let asked = items.len();
+        let sent = send_back_to_sift(&ctx.services, items.into_iter())?;
+        let n = sent.restored.len();
+        rinfo!(
+            Category::Actions,
+            "add_to_contacts: {n} of {asked} messages returned to Sift"
+        );
+        let mut r = ActionResult::ok(
+            json!({ "count": n, "keptYours": asked - n, "alreadyContact": was_contact }),
+            format!(
+                "Added {email} to your contacts; deciding {} again{}",
+                plural(n, "message"),
+                if asked > n {
+                    format!(", leaving {} you decided yourself", asked - n)
+                } else {
+                    String::new()
+                }
+            ),
+        )
+        .with_inputs(json!({ "count": n }));
+        r.undo = UndoInfo::Undoable {
+            restore: json!({
+                "email": email,
+                "wasContact": was_contact,
+                "personWas": person_was,
+                "messages": sent.restored,
+                "finds": sent.finds,
+            }),
+            label: "Take them out of your contacts and put the decisions back".into(),
+        };
+        Ok(r)
+    }
+
+    async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
+        let email = pack_arg(&restore, "email")?.to_string();
+        let index = ctx.services.stores.index();
+        if !restore["wasContact"].as_bool().unwrap_or(false) {
+            let mut profile = repo::user_profile::get(&index)?;
+            profile.contacts.retain(|c| !c.eq_ignore_ascii_case(&email));
+            repo::user_profile::put(&index, &profile)?;
+        }
+        if let Some(was) = restore["personWas"].as_bool() {
+            if let Some(mut p) = repo::people::by_email(&index, &email)? {
+                p.in_contacts = was;
+                repo::people::upsert(&index, &p)?;
+            }
+        }
         put_back_result(ctx, &restore)
     }
 }

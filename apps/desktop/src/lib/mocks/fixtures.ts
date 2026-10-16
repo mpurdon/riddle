@@ -119,6 +119,7 @@ export function buildProfile(): UserProfile {
     family: ['mum@purdon-family.example', 'sarah@purdon-family.example'],
     neverHidden: ['@northwind.example', 'accountant@ledgerly.example', 'mum@purdon-family.example', 'sarah@purdon-family.example', 'security@github.example'],
     timezone: 'Europe/London',
+    contacts: [],
   }
 }
 
@@ -1417,6 +1418,8 @@ export function buildFacts(s: MessageSpec, from: Address): Facts {
     knownThread: false,
     knownDomain: false,
     noreplySender: false,
+    datesPassed: false,
+    optOutText: false,
     freeMailSender: false,
     glyphSubstitution: false,
     suspiciousDomain: false,

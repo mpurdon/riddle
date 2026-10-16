@@ -35,7 +35,7 @@ import { err, simulate, findTitleFor } from './queries'
 import type { Settings, SignalTestReport } from '../types'
 
 type Meta = Omit<ActionMeta, 'name' | 'description'> & { description: string }
-const base: Meta = { description: '', mutating: true, reversible: false, externalSideEffect: false, projected: false, risk: 'low', confirmation: 'none', minimumAutonomy: 'act', egress: false, readOnly: false, userOnly: false }
+const base: Meta = { description: '', mutating: true, reversible: false, externalSideEffect: false, projected: false, risk: 'low', confirmation: 'none', minimumAutonomy: 'act', egress: false, readOnly: false, userOnly: false, changesRules: false }
 const m = (description: string, o: Partial<Meta> = {}): Meta => ({ ...base, description, ...o })
 
 export const ACTIONS: Record<string, Meta> = {
@@ -99,6 +99,7 @@ export const ACTIONS: Record<string, Meta> = {
   delete_dig_group: m('Delete a Dig Group (its accounts stay)', { reversible: true }),
   apply_mesh_to_history: m('Re-decide recent mail under a Mesh\'s current version', { reversible: true, risk: 'medium', confirmation: 'two_step' }),
   decide_again: m('Decide messages again under the current rules', { reversible: true }),
+  add_to_contacts: m('Add a sender to your contacts and decide their mail again', { reversible: true, minimumAutonomy: 'trusted' }),
   check_model_access: m('Check which candidate models this account may call', { risk: 'low' }),
   run_model_benchmark: m('Compare models on messages you have decided', { risk: 'medium', minimumAutonomy: 'trusted' }),
   run_director_comparison: m('Replay past Director questions on each model', { risk: 'medium', minimumAutonomy: 'trusted' }),
@@ -1023,6 +1024,12 @@ function execute(state: MockState, action: string, args: Args): Exec {
       state.pending.delete(id)
       const reason = typeof args.reason === 'string' && args.reason.trim() ? args.reason.trim() : null
       return { result: { pendingId: id }, summary: `Declined: ${p.summary}`, why: reason, inputs: { pendingId: id, action: p.action }, undo: { state: 'not_undoable', reason: 'the Director can propose it again' } }
+    }
+    case 'add_to_contacts': {
+      const email = str(args, 'email').trim().toLowerCase()
+      if (!state.profile.contacts.includes(email)) state.profile.contacts.push(email)
+      emitMock({ type: 'settings_changed' })
+      return { result: { count: 0, keptYours: 0, alreadyContact: false }, summary: `Added ${email} to your contacts; deciding 0 messages again`, affected: [{ kind: 'person', id: email }], undo: { state: 'not_undoable', reason: 'The mock keeps no earlier decisions' } }
     }
     case 'add_never_hidden': {
       const entry = str(args, 'entry').trim().toLowerCase()

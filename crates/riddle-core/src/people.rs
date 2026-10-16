@@ -149,6 +149,10 @@ pub struct UserProfile {
     /// Addresses and domains (prefix `@`) that can never be Spoil or Contamination.
     pub never_hidden: Vec<String>,
     pub timezone: Option<String>,
+    /// Addresses the user added to their contacts in Riddle ("Add to
+    /// contacts" on a message), counted as contacts like VIPs and family.
+    #[serde(default)]
+    pub contacts: Vec<String>,
 }
 
 /// The user's zone for "their day": a profile timezone the tz database
@@ -176,6 +180,10 @@ impl UserProfile {
     }
     pub fn is_family(&self, email: &str) -> bool {
         Self::list_matches(&self.family, email)
+    }
+    /// A contact the user added, a VIP or family.
+    pub fn is_contact(&self, email: &str) -> bool {
+        Self::list_matches(&self.contacts, email) || self.is_vip(email) || self.is_family(email)
     }
     pub fn is_own_organisation(&self, email: &str) -> bool {
         let domain = email

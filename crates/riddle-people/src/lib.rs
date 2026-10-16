@@ -234,12 +234,7 @@ pub fn refresh_address(
         mailing_list,
         auth_failures: total.auth_failures as u32,
         spam_verdicts: total.spam_verdicts as u32,
-        in_contacts: existing.as_ref().is_some_and(|p| p.in_contacts)
-            || profile.vips.iter().any(|v| v.eq_ignore_ascii_case(&email))
-            || profile
-                .family
-                .iter()
-                .any(|f| f.eq_ignore_ascii_case(&email)),
+        in_contacts: existing.as_ref().is_some_and(|p| p.in_contacts) || profile.is_contact(&email),
         dig_ids,
         updated_at: now,
         cadence: cadence_of(&arrivals, profile.timezone.as_deref()),

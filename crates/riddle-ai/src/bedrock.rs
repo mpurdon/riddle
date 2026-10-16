@@ -11,6 +11,13 @@
 //! 5. a usage row for the call, success or failure, that never fails it;
 //! 6. `cost_usd` only when the catalog prices the model.
 //!
+//! The client reads the profile's credentials once, so credentials that a
+//! tool such as sleipnir rewrites in `~/.aws/credentials` were never seen:
+//! a Director call failed with ExpiredTokenException for as long as the app
+//! ran, while the same profile worked from the shell (14 Oct 2026). An
+//! expired or unrecognised credential now drops the client, and the retry
+//! builds a new one from what is on disk.
+//!
 //! Streaming uses `ConverseStream` and accumulates text and tool-use blocks
 //! by content-block index; the non-streaming path uses `Converse`. Both map
 //! to the same `LlmResponse`.
@@ -56,7 +63,7 @@ impl Default for BedrockConfig {
 
 pub struct BedrockLlm {
     config: BedrockConfig,
-    client: tokio::sync::OnceCell<aws_sdk_bedrockruntime::Client>,
+    client: std::sync::Mutex<Option<aws_sdk_bedrockruntime::Client>>,
     catalog: Arc<ModelCatalog>,
     breaker: Arc<Breaker>,
     recorder: Option<UsageRecorder>,
@@ -67,7 +74,7 @@ impl BedrockLlm {
         let breaker = Arc::new(Breaker::new(config.breaker));
         Self {
             config,
-            client: tokio::sync::OnceCell::new(),
+            client: std::sync::Mutex::new(None),
             catalog,
             breaker,
             recorder: None,
@@ -87,28 +94,49 @@ impl BedrockLlm {
         self.catalog.clone()
     }
 
-    async fn client(&self) -> Result<&aws_sdk_bedrockruntime::Client> {
-        self.client
-            .get_or_try_init(|| async {
-                let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
-                    .region(aws_config::Region::new(self.config.region.clone()));
-                if let Some(p) = &self.config.profile {
-                    loader = loader.profile_name(p);
-                }
-                let cfg = loader.load().await;
-                rinfo!(
-                    Category::Llm,
-                    "bedrock client ready in {} (profile {})",
-                    self.config.region,
-                    self.config
-                        .profile
-                        .as_deref()
-                        .map(|_| "named")
-                        .unwrap_or("default chain")
-                );
-                Ok::<_, RiddleError>(aws_sdk_bedrockruntime::Client::new(&cfg))
-            })
-            .await
+    fn cached_client(&self) -> std::sync::MutexGuard<'_, Option<aws_sdk_bedrockruntime::Client>> {
+        self.client.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The client, built from the credentials on disk the first time and
+    /// again after `forget_stale_client` dropped it. Two calls racing to
+    /// build both load the same files; the last one is kept.
+    async fn client(&self) -> Result<aws_sdk_bedrockruntime::Client> {
+        if let Some(c) = self.cached_client().as_ref() {
+            return Ok(c.clone());
+        }
+        let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new(self.config.region.clone()));
+        if let Some(p) = &self.config.profile {
+            loader = loader.profile_name(p);
+        }
+        let cfg = loader.load().await;
+        rinfo!(
+            Category::Llm,
+            "bedrock client ready in {} (profile {})",
+            self.config.region,
+            self.config
+                .profile
+                .as_deref()
+                .map(|_| "named")
+                .unwrap_or("default chain")
+        );
+        let client = aws_sdk_bedrockruntime::Client::new(&cfg);
+        *self.cached_client() = Some(client.clone());
+        Ok(client)
+    }
+
+    /// Drops the client when AWS refused its credentials, so the next
+    /// attempt reads them from disk again.
+    fn forget_stale_client(&self, e: RiddleError) -> RiddleError {
+        if is_stale_credential(&e) {
+            rwarn!(
+                Category::Llm,
+                "bedrock credentials were refused; reloading them for the next attempt"
+            );
+            *self.cached_client() = None;
+        }
+        e
     }
 
     fn model_for(&self, req: &LlmRequest) -> String {
@@ -233,7 +261,10 @@ impl BedrockLlm {
         if let Some(tc) = tool_config {
             call = call.tool_config(tc);
         }
-        let out = call.send().await.map_err(map_sdk_error)?;
+        let out = call
+            .send()
+            .await
+            .map_err(|e| self.forget_stale_client(map_sdk_error(e)))?;
         let latency = out
             .metrics()
             .map(|m| m.latency_ms().max(0) as u64)
@@ -265,7 +296,10 @@ impl BedrockLlm {
         if let Some(tc) = tool_config {
             call = call.tool_config(tc);
         }
-        let mut out = call.send().await.map_err(map_sdk_error)?;
+        let mut out = call
+            .send()
+            .await
+            .map_err(|e| self.forget_stale_client(map_sdk_error(e)))?;
 
         // Blocks by index: text accumulates; tool use accumulates its JSON.
         let mut blocks: Vec<(i32, Partial)> = Vec::new();
@@ -636,6 +670,23 @@ fn describe<E: std::error::Error + 'static>(e: &E) -> String {
     parts.join(": ")
 }
 
+/// Codes for credentials AWS no longer accepts: a session token past its
+/// expiry, or keys it does not recognise. A fresh read of the profile may
+/// hold new ones.
+const STALE_CREDENTIAL_CODES: [&str; 3] = [
+    "ExpiredTokenException",
+    "ExpiredToken",
+    "UnrecognizedClientException",
+];
+
+fn is_stale_credential(e: &RiddleError) -> bool {
+    e.detail
+        .as_ref()
+        .and_then(|d| d.get("staleCredential"))
+        .and_then(|v| v.as_bool())
+        == Some(true)
+}
+
 /// Map an SDK error to the taxonomy. Throttling and transient service
 /// errors are retryable; access, validation and unknown-model errors are not.
 pub fn map_sdk_error<E, R>(
@@ -655,6 +706,19 @@ where
         "bedrock error code {}",
         code.as_deref().unwrap_or("none")
     );
+    let stale = code
+        .as_deref()
+        .is_some_and(|c| STALE_CREDENTIAL_CODES.contains(&c));
+    if stale {
+        let advice = "Bedrock refused the AWS credentials as expired or unknown. Riddle reloads them from ~/.aws on the next try; if this persists, refresh the profile's credentials.";
+        return RiddleError::new(
+            ErrorKind::LlmUnavailable,
+            format!("bedrock: {advice} ({message})"),
+        )
+        .with_detail(
+            serde_json::json!({"retryable": true, "code": code, "staleCredential": true}),
+        );
+    }
     let (kind, retryable) = match code.as_deref() {
         Some("ThrottlingException") => (ErrorKind::ProviderRateLimited, true),
         Some("ServiceUnavailableException")
@@ -789,7 +853,34 @@ mod tests {
             LlmRequest::new("s", vec![LlmMessage::user("u")]).with_privacy(PrivacyMode::LocalOnly);
         let e = llm.complete(req).await.unwrap_err();
         assert_eq!(e.kind, ErrorKind::PolicyDenied);
-        assert!(llm.client.get().is_none());
+        assert!(llm.cached_client().is_none());
+    }
+
+    #[test]
+    fn refused_credentials_drop_the_client_so_the_retry_reads_them_again() {
+        let llm = BedrockLlm::new(BedrockConfig::default(), Arc::new(ModelCatalog::default()));
+        let offline = aws_sdk_bedrockruntime::Config::builder()
+            .behavior_version(aws_config::BehaviorVersion::latest())
+            .region(aws_config::Region::new("us-east-1"))
+            .build();
+        let keep = |llm: &BedrockLlm| {
+            *llm.cached_client() = Some(aws_sdk_bedrockruntime::Client::from_conf(offline.clone()))
+        };
+        keep(&llm);
+        let throttled = RiddleError::new(ErrorKind::ProviderRateLimited, "slow down")
+            .with_detail(json!({"retryable": true, "code": "ThrottlingException"}));
+        llm.forget_stale_client(throttled);
+        assert!(
+            llm.cached_client().is_some(),
+            "other failures keep the client"
+        );
+
+        let expired = RiddleError::new(ErrorKind::LlmUnavailable, "expired").with_detail(
+            json!({"retryable": true, "code": "ExpiredTokenException", "staleCredential": true}),
+        );
+        let e = llm.forget_stale_client(expired);
+        assert!(llm.cached_client().is_none());
+        assert!(crate::retry::is_retryable(&e), "the next attempt runs");
     }
 
     #[test]

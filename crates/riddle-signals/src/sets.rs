@@ -110,10 +110,7 @@ impl SetId {
     /// The Set's deterministic precondition: the facts that make it relevant.
     /// Baseline and Security are always relevant.
     pub fn relevant(self, facts: &Facts) -> bool {
-        let automated = facts.mailing_list
-            || facts.precedence_bulk
-            || facts.auto_submitted
-            || facts.list_unsubscribe;
+        let automated = facts.automated();
         let category = facts.gmail_category.as_deref().unwrap_or("");
         match self {
             SetId::GitHub => {

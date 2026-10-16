@@ -33,7 +33,8 @@
 
 use riddle_core::{
     CmpOp, Disposition, DispositionKind, Expiry, Expr, FactValue, Facts, FindType, Guard,
-    MeshOutput, NamedList, Route, SignalEvaluation, HEADER_PREFIX, NEXT_MORNING_HOUR,
+    MeshOutput, NamedList, Route, SignalEvaluation, DATED_DAY_HOUR, HEADER_PREFIX,
+    NEXT_MORNING_HOUR,
 };
 
 /// Calibrated words for a probability. See the module header for the bands.
@@ -185,6 +186,9 @@ pub fn output_words(o: &MeshOutput) -> String {
         Some(Expiry::NextMorning) => s.push_str(&format!(
             "; it expires at {NEXT_MORNING_HOUR} am the next morning"
         )),
+        Some(Expiry::AfterDates) => s.push_str(&format!(
+            "; it waits until {DATED_DAY_HOUR} am on the first day the message is about and expires after its last"
+        )),
         None => {}
     }
     s
@@ -214,7 +218,9 @@ pub fn expr_words(e: &Expr, evidence: Option<&Evidence>) -> String {
         Expr::InList { subject, list } => {
             format!("{} is {}", subject_words(subject), list_words(*list))
         }
-        Expr::InNamedList { list, .. } => format!("the sender is on your list {list:?}"),
+        Expr::InNamedList { subject, list } => {
+            format!("{} is on your list {list:?}", list_subject_words(subject))
+        }
         Expr::And { items } => join(
             &distinct(items.iter().map(|i| expr_words(i, evidence)).collect()),
             "and",
@@ -266,7 +272,12 @@ fn not_words(inner: &Expr, evidence: Option<&Evidence>) -> String {
         Expr::InList { subject, list } => {
             format!("{} is not {}", subject_words(subject), list_words(*list))
         }
-        Expr::InNamedList { list, .. } => format!("the sender is not on your list {list:?}"),
+        Expr::InNamedList { subject, list } => {
+            format!(
+                "{} is not on your list {list:?}",
+                list_subject_words(subject)
+            )
+        }
         Expr::And { items } => {
             let parts: Vec<String> = items.iter().map(|i| expr_words(i, evidence)).collect();
             if parts.len() == 2 {
@@ -567,6 +578,15 @@ fn bool_words(fact: &str, holds: bool) -> String {
 }
 
 /// The thing a text or number fact is about: "the sender's domain".
+/// A sender list matches the address and its domain alike, so both read as
+/// "the sender".
+fn list_subject_words(subject: &str) -> String {
+    match subject {
+        "sender" | "sender_domain" => "the sender".into(),
+        other => subject_words(other),
+    }
+}
+
 fn subject_words(fact: &str) -> String {
     if let Some(h) = fact.strip_prefix(HEADER_PREFIX) {
         return format!("the {h} header");

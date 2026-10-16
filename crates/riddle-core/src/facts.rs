@@ -47,6 +47,13 @@ pub struct Facts {
     /// counted as not automated, so the Updates rule never caught them.
     #[serde(default)]
     pub noreply_sender: bool,
+    /// The body ends the way bulk mail does: "If you no longer wish to
+    /// receive these e-mails from me", "click here to unsubscribe", "manage
+    /// your email preferences" (`riddle_sift::facts::opt_out_text`). A
+    /// person's own mass mailing has no list headers, only the wording, and
+    /// counted as correspondence (15 Oct 2026).
+    #[serde(default)]
+    pub opt_out_text: bool,
     /// The thread already has mail from the user or from a sender the user
     /// knows. A CPA's reply in a thread the user's household was in was
     /// "unknown" because the user had never written to that address, so it
@@ -154,6 +161,30 @@ pub struct Facts {
     /// (`riddle_sift::facts::community_platform`).
     #[serde(default)]
     pub community_platform: String,
+    /// The days the message is about, read from it
+    /// (`riddle_sift::dated::dated_span`): a hotel stay's check-in and
+    /// check-out, a parking booking's start and end, an event's day.
+    /// `None` when the message names no such dates.
+    #[serde(default)]
+    #[ts(optional)]
+    pub dated: Option<DateSpan>,
+    /// The dates the message is about are behind the user: its days ended
+    /// before today where the user is or, when it names only deadlines,
+    /// every one has passed. What it was about no longer applies, whatever
+    /// it was (a stay, an event, a sale, a bill). Set when Sift decides,
+    /// like `deadlines`.
+    #[serde(default)]
+    pub dates_passed: bool,
+}
+
+/// The first and last day a message is about, as calendar days where it
+/// happens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DateSpan {
+    pub start: chrono::NaiveDate,
+    pub end: chrono::NaiveDate,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -245,15 +276,12 @@ impl Facts {
             "from_community" => {
                 Bool(!self.community_platform.is_empty() && self.community_platform != "creator")
             }
-            "automated_sender" => Bool(
-                self.mailing_list
-                    || self.precedence_bulk
-                    || self.auto_submitted
-                    || self.list_unsubscribe
-                    || self.noreply_sender,
-            ),
+            "automated_sender" => Bool(self.automated()),
             "noreply_sender" => Bool(self.noreply_sender),
+            "opt_out_text" => Bool(self.opt_out_text),
             "known_sender" => Bool(self.known()),
+            "has_dates" => Bool(self.dated.is_some()),
+            "dates_passed" => Bool(self.dates_passed),
             _ => return None,
         })
     }
@@ -314,10 +342,26 @@ impl Facts {
         "from_community",
         "automated_sender",
         "noreply_sender",
+        "opt_out_text",
         "known_sender",
+        "has_dates",
+        "dates_passed",
     ];
 
     /// The user has a relationship with the sender, or is the sender.
+    /// Sent by a system, not a person: a list, bulk or auto-submitted
+    /// mail, an unsubscribe link, or an address that takes no replies. The
+    /// one definition the rules (`automated_sender`), the Signal Sets and
+    /// cold outreach all read.
+    pub fn automated(&self) -> bool {
+        self.mailing_list
+            || self.precedence_bulk
+            || self.auto_submitted
+            || self.list_unsubscribe
+            || self.noreply_sender
+            || self.opt_out_text
+    }
+
     pub fn known(&self) -> bool {
         self.sender_in_contacts || self.sender_replied_to_before || self.from_me
     }
@@ -335,10 +379,7 @@ impl Facts {
             && !self.same_organisation
             && !self.sender_in_never_hidden
             && !self.sender_is_vip
-            && !self.mailing_list
-            && !self.list_unsubscribe
-            && !self.precedence_bulk
-            && !self.auto_submitted
+            && !self.automated()
             && !self.is_reply
             && self.my_last_reply_at.is_none()
             && self.thread_length <= 1
@@ -400,7 +441,10 @@ pub fn free_mail_domain(domain: &str) -> bool {
 /// `no-reply`, `donotreply` anywhere in the local part
 /// (`account-noreply@`, `jobs-noreply@`), or a bare `notifications@`.
 pub fn noreply_address(email: &str) -> bool {
-    let local = email.split('@').next().unwrap_or("").to_ascii_lowercase();
+    let local = email
+        .split_once('@')
+        .map_or(email, |(l, _)| l)
+        .to_ascii_lowercase();
     let squashed: String = local
         .chars()
         .filter(|c| c.is_ascii_alphanumeric())
@@ -461,7 +505,7 @@ pub enum FactValue {
 }
 
 #[cfg(test)]
-mod organisation_domain_tests {
+mod domain_and_address_tests {
     use super::organisation_domain;
 
     #[test]

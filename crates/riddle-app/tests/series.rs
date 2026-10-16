@@ -189,11 +189,12 @@ async fn end_of_day_expiry_is_midnight_in_the_recorded_timezone() {
     app.sift_pass(&dig, 100, None).await.unwrap();
     assert_eq!(
         find_for(&app, &dig, "tz").expires_at,
-        Some(riddle_sift::expiry::expires_at(
+        riddle_sift::expiry::expires_at(
             Expiry::EndOfDay,
             message.date,
+            None,
             Some("America/Toronto")
-        ))
+        )
     );
 }
 

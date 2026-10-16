@@ -666,6 +666,7 @@ fn find_for_user_decision(
             .or_else(|| m.headers.message_id.clone())
             .unwrap_or_else(|| m.thread_id.provider_id().to_string()),
         due_at,
+        snoozed_until: None,
         source: FindSource {
             message_id: id.clone(),
             thread_id: m.thread_id.clone(),

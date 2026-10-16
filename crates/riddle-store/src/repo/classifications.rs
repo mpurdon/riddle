@@ -1,7 +1,7 @@
 //! Current and historical classifications in a Dig store.
 
 use crate::{from_json, now_ts, to_json, ts, Store};
-use riddle_core::{Classification, Disposition, DispositionKind, MessageId};
+use riddle_core::{Classification, Disposition, DispositionKind, MessageId, ThreadId};
 use riddle_errors::Result;
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
@@ -313,6 +313,54 @@ pub fn recent_hard(store: &Store, limit: u32) -> Result<Vec<MessageId>> {
         rows
     })
 }
+/// Adds Strata to the user's own replies in a thread, when a message in it
+/// is decided with Strata they lack. A reply copies its thread's Strata
+/// when it is decided, but Sift decides newest first, so a reply was often
+/// decided before the message it answers and kept none.
+pub fn spread_to_replies(store: &Store, thread: &ThreadId, strata: &[String]) -> Result<()> {
+    if strata.is_empty() {
+        return Ok(());
+    }
+    store.write(|c| {
+        let rows: Vec<(String, String)> = {
+            let mut st = c.prepare(
+                "SELECT k.id, k.json FROM classifications k JOIN messages m ON m.id = k.message_id
+                 WHERE m.thread_id = ?1 AND m.is_sent = 1 AND k.shadow = 0 AND k.superseded_at IS NULL",
+            )?;
+            let rows = st.query_map([thread.as_str()], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+            rows
+        };
+        for (id, json) in rows {
+            let mut k: Classification = from_json(json)?;
+            let missing: Vec<&String> = strata.iter().filter(|s| !k.strata.contains(s)).collect();
+            if missing.is_empty() {
+                continue;
+            }
+            for s in missing {
+                k.strata.push(s.clone());
+                c.execute(
+                    "INSERT OR IGNORE INTO message_strata (message_id, stratum) VALUES (?1, ?2)",
+                    params![k.message_id.as_str(), s],
+                )?;
+            }
+            c.execute("UPDATE classifications SET json = ?2 WHERE id = ?1", params![id, to_json(&k)?])?;
+        }
+        Ok(())
+    })
+}
+
+/// Retires a message's Shadow proposal: the live decision was made again
+/// and nothing in Shadow would decide it differently any more.
+pub fn retire_shadow(store: &Store, id: &MessageId) -> Result<()> {
+    store.write(|c| {
+        c.execute(
+            "UPDATE classifications SET superseded_at = ?2 WHERE message_id = ?1 AND shadow = 1 AND superseded_at IS NULL",
+            params![id.as_str(), now_ts()],
+        )?;
+        Ok(())
+    })
+}
+
 /// Unresolved messages Riddle decided (not the user) under rules older than
 /// `rules_changed_at`, or that ran out of escalation budget before
 /// `budget_reset_at`: worth deciding again. Oldest first.
@@ -327,12 +375,12 @@ pub fn stale_unresolved(
             "SELECT message_id FROM classifications
              WHERE superseded_at IS NULL AND shadow = 0 AND disposition_kind = 'unresolved'
                AND coalesce(json_extract(json, '$.mechanism'), '') <> 'user'
-               AND (created_at < ?1 OR (json_extract(json, '$.reason') LIKE '%budget%' AND created_at < ?2))
+               AND (created_at < ?1 OR (instr(json_extract(json, '$.reason'), ?4) > 0 AND created_at < ?2))
              ORDER BY created_at LIMIT ?3",
         )?;
         let rows = st
             .query_map(
-                params![rules_changed_at.map(ts).unwrap_or(0), ts(budget_reset_at), limit],
+                params![rules_changed_at.map(ts).unwrap_or(0), ts(budget_reset_at), limit, riddle_core::BUDGET_EXHAUSTED],
                 |r| Ok(MessageId::from(r.get::<_, String>(0)?)),
             )?
             .collect();

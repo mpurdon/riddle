@@ -119,6 +119,7 @@ const DEFAULT_INVALIDATIONS: Record<string, QueryKey[]> = {
   discard_held_changes: [qk.mailboxWrites],
   resift: [qk.digs, qk.finds, qk.summary],
   decide_again: [qk.finds, qk.summary],
+  add_to_contacts: [qk.profile, qk.finds, qk.summary, qk.messages],
   apply_mesh_to_history: [qk.finds, qk.summary, qk.meshes],
   refresh_now: [qk.taskCentre],
   cancel_job: [qk.taskCentre],

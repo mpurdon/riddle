@@ -965,6 +965,94 @@ mod tests {
         }
     }
 
+    /// A parking booking was a Pay Find and a hotel stay's reminder was
+    /// Filed with the updates; with its dates a booking waits for its day,
+    /// and one already over is Filed under Bookings.
+    #[test]
+    fn a_dated_booking_waits_for_its_day_and_a_past_one_is_filed() {
+        let dates = riddle_core::DateSpan {
+            start: "2026-10-07".parse().unwrap(),
+            end: "2026-10-08".parse().unwrap(),
+        };
+        let booking = |over: bool| riddle_core::Facts {
+            sender_domain: "telpark.com".into(),
+            dated: Some(dates),
+            dates_passed: over,
+            ..Default::default()
+        };
+        // A parking booking scores as an invoice and as marketing, too.
+        let evals = [
+            ev("event_ticket", 0.94),
+            ev("invoice", 0.87),
+            ev("requires_action", 0.70),
+            ev("marketing", 0.71),
+        ];
+        let packs = ["travel", "money", "reading-social", "core"];
+        let o = decide(&packs, &booking(false), &evals, &[]).output.unwrap();
+        assert_eq!(
+            o.disposition,
+            Some(riddle_core::Disposition::Find {
+                find_type: riddle_core::FindType::Attend
+            })
+        );
+        assert_eq!(o.expires, Some(riddle_core::Expiry::AfterDates));
+        assert_eq!(o.importance, Some(riddle_core::Importance::High));
+        assert!(o.strata.contains(&"Bookings".to_string()), "{:?}", o.strata);
+
+        let past = decide(&packs, &booking(true), &evals, &[]).output.unwrap();
+        assert_eq!(past.disposition, Some(riddle_core::Disposition::Filed));
+
+        let undated = riddle_core::Facts {
+            dated: None,
+            ..booking(false)
+        };
+        // Without dates the Bookings Mesh passes; what decides it then is
+        // another Mesh's business.
+        let o = decide(&packs, &undated, &evals, &[]).output;
+        assert!(o.is_none_or(|o| o.expires != Some(riddle_core::Expiry::AfterDates)));
+    }
+
+    /// Dependabot's review requests were as urgent as a colleague's; with
+    /// the pack's own list they are Low, and an emptied list puts them back.
+    #[test]
+    fn a_review_a_bot_requested_is_low_importance_unless_its_list_is_emptied() {
+        let pack = builtin_packs()
+            .into_iter()
+            .find(|p| p.id == "developer-github")
+            .unwrap();
+        let bots = pack.lists.iter().find(|l| l.name == "github_bots").unwrap();
+        let review = |from: &str, entries: &[String]| {
+            let facts = riddle_core::Facts {
+                sender: "notifications@github.com".into(),
+                sender_name: from.into(),
+                sender_domain: "github.com".into(),
+                github_event: Some("review_requested_you".into()),
+                ..Default::default()
+            };
+            let named = riddle_core::NamedLists::from_defs([riddle_core::NamedListDef {
+                name: "github_bots".into(),
+                description: String::new(),
+                entries: riddle_core::NamedListDef::normalise(entries),
+                pack: None,
+            }]);
+            let lists = crate::simulate::FactsLists(&facts, &named);
+            let d = crate::eval::evaluate(&running(&["developer-github"]), &facts, &[], &lists);
+            let o = d.output.unwrap();
+            (o.disposition.unwrap().kind(), o.importance, o.strata)
+        };
+        let find = riddle_core::DispositionKind::Find;
+        let eng = vec!["Engineering".to_string()];
+        assert_eq!(
+            review("dependabot[bot]", &bots.default),
+            (find, Some(riddle_core::Importance::Low), eng.clone())
+        );
+        assert_eq!(
+            review("Ada Lovelace", &bots.default),
+            (find, None, eng.clone())
+        );
+        assert_eq!(review("dependabot[bot]", &[]), (find, None, eng));
+    }
+
     #[test]
     fn every_built_in_pack_installs_on_a_fresh_store_with_the_signals_it_names() {
         let index = index();

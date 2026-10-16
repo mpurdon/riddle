@@ -34,4 +34,11 @@ readOnly: boolean,
  * and are refused before a pending confirmation could store its
  * arguments. For Actions whose arguments are secrets.
  */
-userOnly: boolean, };
+userOnly: boolean, 
+/**
+ * Changes how mail is decided: rules, lists, Signals, an account's or
+ * the app's settings, or an undo of any of those. The runtime records
+ * when one last succeeded, and Unresolved decided before then is sent
+ * back to Sift.
+ */
+changesRules: boolean, };

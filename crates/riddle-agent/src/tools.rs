@@ -426,6 +426,7 @@ mod tests {
                 .build(),
             riddle_actions::meta("create_mesh", "create a Mesh")
                 .mutating()
+                .changes_rules()
                 .build(),
             riddle_actions::meta("list_strata", "list").build(),
         ];

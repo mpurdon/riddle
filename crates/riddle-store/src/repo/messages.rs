@@ -590,6 +590,15 @@ pub fn ids_since(
     })
 }
 
+/// Every message received from one address, newest first.
+pub fn ids_from_sender(store: &Store, email: &str) -> Result<Vec<MessageId>> {
+    store.read(|c| {
+        let mut st = c.prepare("SELECT id FROM messages WHERE lower(from_email) = lower(?1) AND deleted_at IS NULL AND is_sent = 0 ORDER BY date DESC")?;
+        let rows = st.query_map([email], |r| Ok(MessageId(r.get(0)?)))?.collect();
+        rows
+    })
+}
+
 /// Full rows without bodies, newest first, for aggregation passes (People,
 /// resync reconciliation) that must not load 100k bodies.
 pub fn page_headers(

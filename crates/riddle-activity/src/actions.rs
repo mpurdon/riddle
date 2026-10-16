@@ -48,6 +48,7 @@ impl Action for UndoActivity {
             .risk(Risk::Medium)
             .confirm(ConfirmationPolicy::InPlaceUndo)
             .autonomy(Autonomy::Act)
+            .changes_rules()
             .build()
     }
 

@@ -104,9 +104,13 @@ impl FindService {
             },
             summary: p.summary.clone(),
             priority: p.priority,
-            status: FindStatus::Open,
+            status: if p.snoozed_until.is_some_and(|u| u > now) {
+                FindStatus::Snoozed
+            } else {
+                FindStatus::Open
+            },
             due_at: p.due_at,
-            snoozed_until: None,
+            snoozed_until: p.snoozed_until.filter(|u| *u > now),
             created_at: now,
             updated_at: now,
             resolved_at: None,
@@ -427,6 +431,7 @@ mod tests {
             reason: "r".into(),
             identity_key: key.into(),
             due_at: None,
+            snoozed_until: None,
             source: FindSource {
                 message_id: MessageId::for_provider(&dig, pid),
                 thread_id: ThreadId::for_provider(&dig, "t"),
@@ -656,5 +661,24 @@ mod tests {
         assert_eq!(third.closed.len(), 1, "only the unkept older one closes");
         assert_eq!(third.closed[0].id, second.find.id);
         assert_eq!(svc.get(&first.find.id).unwrap().status, FindStatus::Open);
+    }
+
+    /// A booking's Find is raised asleep until its first day.
+    #[test]
+    fn a_proposal_with_a_future_wake_time_is_raised_snoozed() {
+        let svc = service();
+        let mut p = proposal("d", "b1", "booking:telpark.com:2026-10-07", 60);
+        let wake = svc.clock.now() + chrono::Duration::days(3);
+        p.snoozed_until = Some(wake);
+        let f = svc.apply_proposal(&p).unwrap().find;
+        assert_eq!(
+            (f.status, f.snoozed_until),
+            (FindStatus::Snoozed, Some(wake))
+        );
+
+        let mut late = proposal("d", "b2", "k-late", 60);
+        late.snoozed_until = Some(svc.clock.now() - chrono::Duration::hours(1));
+        let f = svc.apply_proposal(&late).unwrap().find;
+        assert_eq!((f.status, f.snoozed_until), (FindStatus::Open, None));
     }
 }

@@ -289,6 +289,7 @@ mod tests {
             reason: "r".into(),
             identity_key: format!("k-{pid}"),
             due_at,
+            snoozed_until: None,
             source: FindSource {
                 message_id: MessageId::for_provider(dig, pid),
                 thread_id: ThreadId::for_provider(dig, &format!("th-{pid}")),

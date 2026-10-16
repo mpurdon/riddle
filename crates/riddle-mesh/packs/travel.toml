@@ -1,12 +1,12 @@
 id = "travel"
 name = "Travel"
-version = 2
+version = 3
 area = "Travel"
-summary = "Bookings, tickets and changes to a trip become a Find you can see before you go; travel deals are left to the promotion rules."
+summary = "A booking with its dates (a hotel, a flight, a rental, parking, tickets) waits until its first day, comes up then as an important Find, and is put away after its last; a past booking is Filed. Other trip changes become a Find; travel deals are left to the promotion rules."
 band = "general"
 
 [detect]
-sender_domains = ["expedia.com", "booking.com", "airbnb.com", "aircanada.ca", "westjet.com", "vrbo.com", "hotels.com"]
+sender_domains = ["expedia.com", "booking.com", "airbnb.com", "aircanada.ca", "westjet.com", "vrbo.com", "hotels.com", "hilton.com", "marriott.com", "telpark.com"]
 min_messages = 2
 
 # v2: a hotel's check-in and stay confirmation scored .88 as a reservation
@@ -24,3 +24,32 @@ ROUTES
 IF marketing@v1 < .50 AND travel_reservation@v1 > .75
     → Find: Know + Stratum: Travel
 '''
+
+# v3: a booking is about its days. A Telpark parking booking made in June
+# was a Pay Find for months, a Hampton Inn confirmation stayed open a week
+# after the stay, and its "upcoming stay" reminder was Filed with the
+# updates (15 Oct 2026). With the dates the message gives, the Find waits
+# snoozed for the first day, comes up then as High, and expires after the
+# last; a booking already over is Filed under Bookings to find later.
+# Confirmations carry offers in their footers (.71 and .89 as marketing),
+# so the dates, not a marketing score, keep deals out: an offer names no
+# booking's days. Ahead of Receipts, Payments and Event tickets, which
+# took these before.
+[[meshes]]
+band = "specific"
+rank = 28
+text = '''
+Mesh: Bookings
+Scope:
+All Digs
+
+ROUTES
+
+WHEN has_dates AND (travel_reservation@v1 > .75 OR event_ticket@v1 > .85)
+    IF dates_passed
+        → Filed + Stratum: Bookings
+    ELSE
+        → Find: Attend + Stratum: Bookings + Importance: High + Expires: after its dates
+END
+'''
+

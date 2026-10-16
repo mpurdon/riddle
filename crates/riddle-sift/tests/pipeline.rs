@@ -22,6 +22,7 @@ fn profile() -> UserProfile {
         family: vec![],
         never_hidden: vec!["weekly@rustnews.example".into()],
         timezone: None,
+        contacts: vec![],
     }
 }
 

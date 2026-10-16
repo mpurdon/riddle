@@ -579,6 +579,9 @@ fn parse_expiry(text: &str, line: usize) -> Result<Expiry> {
     match t.as_str() {
         "end of day" | "end of the day" => return Ok(Expiry::EndOfDay),
         "next morning" | "tomorrow morning" => return Ok(Expiry::NextMorning),
+        "after its dates" | "after the dates" | "after booking" | "after the booking" => {
+            return Ok(Expiry::AfterDates)
+        }
         _ => {}
     }
     let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
@@ -599,7 +602,7 @@ fn parse_expiry(text: &str, line: usize) -> Result<Expiry> {
         _ => {
             return Err(err(
                 line,
-                format!("Expires needs minutes, hours, days, end of day or next morning, e.g. Expires: 18h or Expires: end of day, not {text:?}"),
+                format!("Expires needs minutes, hours, days, end of day, next morning or after its dates, e.g. Expires: 18h or Expires: end of day, not {text:?}"),
             ))
         }
     };

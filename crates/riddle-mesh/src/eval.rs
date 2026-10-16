@@ -29,6 +29,11 @@ pub trait ListMembership {
     fn in_named_list(&self, _list: &str) -> bool {
         false
     }
+    /// Whether another fact's value is on a named list
+    /// (`sender_name IN list:github_bots`).
+    fn value_in_named_list(&self, _list: &str, _value: &str) -> bool {
+        false
+    }
 }
 
 /// Lists from the User Profile plus the People facts already computed.
@@ -57,6 +62,9 @@ impl ListMembership for ProfileLists<'_> {
     }
     fn in_named_list(&self, list: &str) -> bool {
         self.named.contains(list, self.sender)
+    }
+    fn value_in_named_list(&self, list: &str, value: &str) -> bool {
+        self.named.contains_value(list, value)
     }
 }
 
@@ -209,14 +217,19 @@ fn eval_expr(
                 margin: None,
             },
         },
-        Expr::InNamedList { list, .. } => Outcome {
-            truth: if lists.in_named_list(list) {
-                Truth::True
-            } else {
-                Truth::False
-            },
-            margin: None,
-        },
+        Expr::InNamedList { subject, list } => {
+            let on = match subject.as_str() {
+                "sender" | "sender_domain" => lists.in_named_list(list),
+                fact => match facts.get(fact) {
+                    Some(FactValue::Text(v)) => lists.value_in_named_list(list, &v),
+                    _ => false,
+                },
+            };
+            Outcome {
+                truth: if on { Truth::True } else { Truth::False },
+                margin: None,
+            }
+        }
         Expr::InList { list, .. } => Outcome {
             truth: if lists.is_member(*list) {
                 Truth::True

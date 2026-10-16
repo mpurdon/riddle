@@ -103,10 +103,7 @@ async fn unresolved_decided_before_a_rule_change_is_decided_again_and_yours_is_k
     assert!(!acts.items.is_empty(), "the ledger says Sift did it");
 
     // Decided again after the change, it is not picked up a second time.
-    let before = repo::classifications::current(&store, &stale)
-        .unwrap()
-        .unwrap()
-        .id;
+    let before = again.id;
     app.full_pass(&dig.id, 500, &CancelFlag::new())
         .await
         .unwrap();

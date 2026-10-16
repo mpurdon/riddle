@@ -57,7 +57,10 @@ export const MESH_FACTS = [
   { name: 'from_community', kind: 'bool' },
   { name: 'automated_sender', kind: 'bool' },
   { name: 'noreply_sender', kind: 'bool' },
+  { name: 'opt_out_text', kind: 'bool' },
   { name: 'known_sender', kind: 'bool' },
+  { name: 'has_dates', kind: 'bool' },
+  { name: 'dates_passed', kind: 'bool' },
 ] as const;
 
 /** The extra mail headers Sift keeps; any other `header <Name>` reads as empty text. */

@@ -83,6 +83,47 @@ const BRANDS: &[&str] = &[
     "binance",
 ];
 
+/// What bulk mail says at its foot so it may be stopped. Phrases, not the
+/// bare word: "please unsubscribe me" is a person writing.
+const OPT_OUT: &[&str] = &[
+    "no longer wish to receive",
+    "no longer want to receive",
+    "to stop receiving",
+    "click here to unsubscribe",
+    "unsubscribe here",
+    "unsubscribe from this list",
+    "unsubscribe from these emails",
+    "unsubscribe from this newsletter",
+    "you can unsubscribe",
+    "opt out of these",
+    "opt-out of these",
+    "manage your email preferences",
+    "manage your preferences",
+    "update your email preferences",
+    "update your preferences",
+    "manage subscriptions",
+    "you are receiving this email because",
+    "you received this email because",
+    "you're receiving this email because",
+];
+
+/// How much of a body's end counts as its footer.
+const FOOTER_BYTES: usize = 1_500;
+
+/// Whether the body's footer asks to be stopped the way bulk mail does,
+/// leaving out quoted lines, so a reply that quotes a newsletter is not one.
+pub fn opt_out_text(body: &str) -> bool {
+    let own: String = body
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('>'))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase()
+        .replace('\u{2019}', "'");
+    let from = riddle_core::floor_char_boundary(&own, own.len().saturating_sub(FOOTER_BYTES));
+    contains_any(&own[from..], OPT_OUT)
+}
+
 pub fn contains_any(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|n| text.contains(n))
 }
@@ -739,6 +780,11 @@ pub fn refresh_from_message(facts: &mut Facts, m: &Message, derived: Derived<'_>
         riddle_core::noreply_address(&m.from.email),
         &mut changed,
     );
+    set(
+        &mut facts.opt_out_text,
+        !m.is_sent && opt_out_text(body),
+        &mut changed,
+    );
     set(&mut facts.known_domain, derived.known_domain, &mut changed);
     set(&mut facts.headers, m.headers.extra.clone(), &mut changed);
     set(
@@ -752,6 +798,11 @@ pub fn refresh_from_message(facts: &mut Facts, m: &Message, derived: Derived<'_>
         &mut changed,
     );
     set(&mut facts.list_id, list_id(&m.headers), &mut changed);
+    set(
+        &mut facts.dated,
+        crate::dated::dated_span(&m.subject, body, m.date),
+        &mut changed,
+    );
     set(
         &mut facts.verification_code,
         verification_code(&m.subject, body),
@@ -1225,7 +1276,7 @@ pub fn compute_facts(input: &SiftInput, now: DateTime<Utc>) -> Facts {
         .unwrap_or(false);
     let labels_upper: Vec<String> = m.labels.iter().map(|l| l.to_ascii_uppercase()).collect();
     let mut facts = Facts {
-        sender_in_contacts: input.people.in_contacts,
+        sender_in_contacts: input.people.in_contacts || profile.is_contact(&sender),
         sender_replied_to_before: input.people.replied_to_before,
         first_time_sender: input.people.first_time_sender,
         same_organisation: profile.is_own_organisation(&sender),
@@ -1282,7 +1333,25 @@ pub fn compute_facts(input: &SiftInput, now: DateTime<Utc>) -> Facts {
             known_domain: input.people.known_domain,
         },
     );
+    let today = now
+        .with_timezone(&riddle_core::user_zone(profile.timezone.as_deref()))
+        .date_naive();
+    facts.dates_passed = dates_passed(facts.dated.as_ref(), &facts.deadlines, today);
     facts
+}
+
+/// Whether what a message was about is behind the user: the days it is
+/// about ended before `today`, or it names only deadlines and all have
+/// passed. A message with no dates at all is never past them.
+pub fn dates_passed(
+    dated: Option<&riddle_core::DateSpan>,
+    deadlines: &[riddle_core::Deadline],
+    today: chrono::NaiveDate,
+) -> bool {
+    match dated {
+        Some(span) => span.end < today,
+        None => !deadlines.is_empty() && deadlines.iter().all(|d| d.past),
+    }
 }
 
 /// Gmail category names from provider labels: `CATEGORY_PROMOTIONS` → `promotions`.
@@ -1588,6 +1657,54 @@ mod tests {
             Some("assign"),
             "the header wins"
         );
+    }
+
+    #[test]
+    fn a_message_is_past_its_dates_when_its_days_or_all_its_deadlines_have_gone() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 15).unwrap();
+        let span = |end: &str| riddle_core::DateSpan {
+            start: "2026-10-07".parse().unwrap(),
+            end: end.parse().unwrap(),
+        };
+        let now = Utc.with_ymd_and_hms(2026, 10, 15, 12, 0, 0).unwrap();
+        let past = parse_deadlines("payment was due 2026-09-01", now);
+        let ahead = parse_deadlines("payment is due 2026-11-01", now);
+        assert!(dates_passed(Some(&span("2026-10-08")), &[], today));
+        assert!(
+            !dates_passed(Some(&span("2026-10-15")), &past, today),
+            "its last day is today"
+        );
+        assert!(
+            dates_passed(None, &past, today),
+            "a bill whose due date has gone"
+        );
+        assert!(!dates_passed(None, &[past.clone(), ahead].concat(), today));
+        assert!(
+            !dates_passed(None, &[], today),
+            "no dates, nothing to be past"
+        );
+    }
+
+    #[test]
+    fn a_footer_that_offers_to_stop_the_mail_is_bulk_and_a_person_asking_is_not() {
+        assert!(opt_out_text(
+            "Thanks for reading!\n\nIf you no longer wish to receive these e-mails from me, reply STOP."
+        ));
+        assert!(opt_out_text(
+            "Our news.\n\nManage your email preferences | Privacy"
+        ));
+        assert!(!opt_out_text(
+            "Hi, please unsubscribe me from your list. Thanks, Ana"
+        ));
+        assert!(
+            !opt_out_text("Sounds good, see you then.\n\n> Click here to unsubscribe"),
+            "a quoted footer is the other message's"
+        );
+        let long = format!(
+            "Manage your preferences at the top.\n{}",
+            "A long letter. ".repeat(200)
+        );
+        assert!(!opt_out_text(&long), "only the footer counts");
     }
 
     #[test]

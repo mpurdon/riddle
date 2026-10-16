@@ -80,9 +80,13 @@ fn check_expr(e: &Expr, resolver: &dyn SignalResolver, problems: &mut Vec<String
             }
         }
         Expr::InNamedList { subject, list } => {
-            if subject != "sender" && subject != "sender_domain" {
+            let text_fact = matches!(
+                Facts::default().get(subject),
+                Some(riddle_core::FactValue::Text(_))
+            );
+            if subject != "sender" && subject != "sender_domain" && !text_fact {
                 problems.push(format!(
-                    "IN list:{list} applies to sender or sender_domain, not {subject}"
+                    "IN list:{list} applies to the sender or a text fact such as sender_name, not {subject}"
                 ));
             }
             if !riddle_core::NamedListDef::valid_name(list) {

@@ -193,3 +193,9 @@ pub struct DecisionTrace {
     pub shadow: bool,
     pub created_at: DateTime<Utc>,
 }
+
+/// The reason an Unresolved decision gives when the Dig's escalation budget
+/// ran out. Unresolved mail with it is decided again once the budget resets
+/// (`repo::classifications::stale_unresolved` matches on it), so the
+/// wording lives in one place.
+pub const BUDGET_EXHAUSTED: &str = "escalation budget exhausted for this Dig";

@@ -177,23 +177,6 @@ pub(crate) fn known_context(
     Ok((known_thread, known_domain))
 }
 
-/// The Actions that change how mail is decided: rules, lists, an
-/// account's settings (its privacy among them), and the app's settings.
-const RULE_ACTIONS: &[&str] = &[
-    "create_mesh",
-    "update_mesh",
-    "set_mesh_status",
-    "delete_mesh",
-    "restore_mesh",
-    "set_mesh_fallback",
-    "install_pack",
-    "remove_pack",
-    "save_list",
-    "delete_list",
-    "update_dig",
-    "save_settings",
-];
-
 /// Stale Unresolved sent back to Sift in one pass, so a rule change costs a
 /// few escalations a pass rather than all at once.
 const STALE_PER_PASS: u32 = 25;
@@ -206,12 +189,12 @@ impl App {
     /// nothing ever looked at them again (13 Oct 2026).
     fn retry_stale_unresolved(&self, dig: &Dig, store: &riddle_store::Store) -> Result<usize> {
         let index = self.stores.index();
-        let rules_changed = repo::activities::last_of(&index, RULE_ACTIONS)?;
-        let today = chrono::Utc::now()
+        let rules_changed = repo::kv::rules_changed_at(&index)?;
+        let now = self.services.clock.now();
+        let today = now
             .date_naive()
             .and_hms_opt(0, 0, 0)
-            .map(|d| d.and_utc())
-            .unwrap_or_else(chrono::Utc::now);
+            .map_or(now, |d| d.and_utc());
         let ids = repo::classifications::stale_unresolved(
             store,
             rules_changed.as_ref(),
@@ -230,13 +213,13 @@ impl App {
             Actor::Sift,
             "decide_again",
             format!(
-                "Sift is deciding {n} Unresolved message{} again under the current rules",
-                if n == 1 { "" } else { "s" }
+                "Sift is deciding {} again under the current rules",
+                riddle_core::plural(n, "Unresolved message")
             ),
             serde_json::json!({ "digId": dig.id, "count": n }),
             "they were Unresolved; deciding them again hides nothing",
             None,
-            self.services.clock.now(),
+            now,
         );
         note.dig_id = Some(dig.id.clone());
         self.runtime.record_activity(note);

@@ -91,6 +91,7 @@ impl Action for SaveSettings {
             .reversible()
             .risk(Risk::Medium)
             .autonomy(Autonomy::Trusted)
+            .changes_rules()
             .build()
     }
 
@@ -302,6 +303,7 @@ impl Action for AddNeverHidden {
             .risk(Risk::Medium)
             .autonomy(Autonomy::Trusted)
             .egress()
+            .changes_rules()
             .build()
     }
 
@@ -405,6 +407,7 @@ impl Action for RemoveNeverHidden {
         .reversible()
         .risk(Risk::High)
         .autonomy(Autonomy::Trusted)
+        .changes_rules()
         .build()
     }
 

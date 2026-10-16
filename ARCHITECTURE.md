@@ -334,7 +334,7 @@ Unresolved mail that had a home (14 Oct 2026). Of 91 Unresolved messages in a re
 Four engine changes came from the same review of 91 Unresolved (14 Oct 2026):
 - A Mesh changed while it runs keeps deciding with its last Active version until the new version is made Active (`repo::meshes::list_live`); the new version, in Shadow, is evaluated beside it and, where it would decide differently, records a Shadow proposal next to the live decision. Changing Payments had put the whole Mesh in Shadow and an "access turned off" notice went a day with no decision at all. A message with only a Shadow proposal is undecided again, except in an account's Shadow Period, where proposals are all it records.
 - `noreply_sender` (`noreply@`, `account-noreply@`, `donotreply@`, a bare `notifications@`) counts as `automated_sender`: 33 of the 91 came from such addresses without bulk headers, so the Updates rule never caught them.
-- Unresolved mail Riddle decided under rules that have changed since (the newest Activity of a rules Action: Meshes, packs, lists, an account's or the app's settings), or that ran out of escalation budget before today, goes back to Sift, 25 a pass, recorded in Activity under Sift; the user's own decisions never do.
+- Unresolved mail Riddle decided under rules that have changed since (the runtime records when an Action marked `changes_rules` last succeeded: Meshes, packs, lists, Never Hidden, Signals, an account's or the app's settings, an undo), or that ran out of escalation budget before today, goes back to Sift, 25 a pass, recorded in Activity under Sift; the user's own decisions never do.
 - A reply the user sent takes its thread's Strata.
 
 ## Spoil

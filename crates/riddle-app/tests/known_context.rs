@@ -167,3 +167,42 @@ async fn a_sent_reply_takes_its_thread_s_strata() {
     assert_eq!(k.disposition, Disposition::Filed);
     assert_eq!(k.strata, vec!["Finance".to_string(), "People".to_string()]);
 }
+
+/// The other order: Sift decides newest first, so the reply is often
+/// decided before the message it answers, and takes the Strata then.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_reply_decided_first_takes_the_strata_its_thread_is_given_later() {
+    let (app, ops) = common::boot_scripted(false, |_| {}).await;
+    app.runtime.arm(true);
+    let dig =
+        common::fixture_dig_synced(&app, &ops, "Personal", "me@gmail.com", 3, 1, json!({})).await;
+    let store = app.stores.dig(&dig.id).unwrap();
+    let mine = message(&dig.id, "r2", "tr", "me@gmail.com", 30, true);
+    repo::messages::upsert(&store, &mine).unwrap();
+    app.full_pass(&dig.id, 500, &riddle_sync::engine::CancelFlag::new())
+        .await
+        .unwrap();
+    let before = repo::classifications::current(&store, &mine.id)
+        .unwrap()
+        .unwrap();
+    assert!(before.strata.is_empty(), "{:?}", before.strata);
+
+    repo::classifications::spread_to_replies(
+        &store,
+        &mine.thread_id,
+        &["People".into(), "Finance".into()],
+    )
+    .unwrap();
+    let after = repo::classifications::current(&store, &mine.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (after.id, after.disposition, after.strata),
+        (
+            before.id,
+            Disposition::Filed,
+            vec!["People".to_string(), "Finance".to_string()]
+        ),
+        "the same decision, with its thread's Strata"
+    );
+}

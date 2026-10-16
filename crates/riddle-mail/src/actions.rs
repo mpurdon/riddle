@@ -537,6 +537,7 @@ impl Action for UpdateDig {
             .reversible()
             .risk(Risk::Medium)
             .autonomy(Autonomy::Trusted)
+            .changes_rules()
             .build()
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
@@ -585,6 +586,7 @@ impl Action for SetDigEnabled {
         .reversible()
         .risk(Risk::Low)
         .autonomy(Autonomy::Trusted)
+        .changes_rules()
         .build()
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {

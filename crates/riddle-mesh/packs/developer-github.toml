@@ -1,13 +1,23 @@
 id = "developer-github"
 name = "GitHub"
-version = 1
+version = 2
 area = "Developer"
-summary = "Reviews you were asked for personally, failed Actions runs, assignments and admin requests become Finds; team review requests and new pull requests are Filed; approvals, merges, bot comments and pushes are set aside."
+summary = "Reviews you were asked for personally (at low importance when a bot such as Dependabot asked), failed Actions runs, assignments and admin requests become Finds; team review requests and new pull requests are Filed; approvals, merges, bot comments and pushes are set aside."
 band = "specific"
 
 [detect]
 sender_domains = ["github.com"]
 min_messages = 10
+
+# v2: a review Dependabot requested was as urgent as a colleague's. The
+# account that acted is the From name (notifications@github.com sends them
+# all), so the list names accounts, not addresses. Empty it to treat bot
+# reviews like anyone's.
+[[lists]]
+name = "github_bots"
+description = "GitHub accounts whose review requests can wait"
+question = "Which GitHub accounts' review requests are low priority for you (dependabot[bot], renovate[bot])? Leave it empty to treat them like anyone's."
+default = ["dependabot[bot]", "renovate[bot]"]
 
 [[meshes]]
 rank = 10
@@ -25,6 +35,8 @@ WHEN sender_domain CONTAINS "github.com"
         → Find: Know + Stratum: Engineering
     ELSE IF sender != "notifications@github.com"
         → Spoil
+    ELSE IF github_event = review_requested_you AND sender_name IN list:github_bots
+        → Find: Review + Stratum: Engineering + Importance: Low
     ELSE IF github_event = review_requested_you
         → Find: Review + Stratum: Engineering
     ELSE IF github_event = run_failed

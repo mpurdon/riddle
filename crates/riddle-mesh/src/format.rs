@@ -233,6 +233,7 @@ pub fn fmt_expiry(e: Expiry) -> String {
         Expiry::AfterMinutes { minutes } => format!("{minutes}m"),
         Expiry::EndOfDay => "end of day".into(),
         Expiry::NextMorning => "next morning".into(),
+        Expiry::AfterDates => "after its dates".into(),
     }
 }
 

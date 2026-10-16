@@ -42,6 +42,9 @@ impl ListMembership for FactsLists<'_> {
     fn in_named_list(&self, list: &str) -> bool {
         self.1.contains(list, &self.0.sender)
     }
+    fn value_in_named_list(&self, list: &str, value: &str) -> bool {
+        self.1.contains_value(list, value)
+    }
 }
 
 pub struct SimulationInput<'a> {

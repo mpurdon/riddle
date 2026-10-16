@@ -190,6 +190,7 @@ pub fn meta(name: &str, description: &str) -> ActionMetaBuilder {
         egress: false,
         read_only: true,
         user_only: false,
+        changes_rules: false,
     })
 }
 
@@ -228,6 +229,10 @@ impl ActionMetaBuilder {
     /// Refused for every principal but the user and the CLI; see `ActionMeta::user_only`.
     pub fn user_only(mut self) -> Self {
         self.0.user_only = true;
+        self
+    }
+    pub fn changes_rules(mut self) -> Self {
+        self.0.changes_rules = true;
         self
     }
     pub fn egress(mut self) -> Self {

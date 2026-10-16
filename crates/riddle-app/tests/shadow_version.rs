@@ -50,22 +50,20 @@ async fn a_changed_mesh_keeps_deciding_while_its_new_version_is_in_shadow() {
         .unwrap();
 
     let store = app.stores.dig(&dig.id).unwrap();
-    let id = repo::messages::ids_since(
+    let (id, live) = repo::messages::ids_since(
         &store,
         &(chrono::Utc::now() - chrono::Duration::days(3650)),
         10_000,
     )
     .unwrap()
     .into_iter()
-    .find(|id| {
-        repo::classifications::current(&store, id)
+    .find_map(|id| {
+        repo::classifications::current(&store, &id)
             .unwrap()
-            .is_some_and(|k| k.mesh_id.as_ref() == Some(&mesh.id))
+            .filter(|k| k.mesh_id.as_ref() == Some(&mesh.id))
+            .map(|k| (id, k))
     })
     .expect("the live version decided the list mail");
-    let live = repo::classifications::current(&store, &id)
-        .unwrap()
-        .unwrap();
     assert_eq!(
         (live.disposition, live.mesh_version, live.shadow),
         (Disposition::Filed, Some(1), false)

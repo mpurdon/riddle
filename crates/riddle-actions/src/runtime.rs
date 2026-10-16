@@ -396,6 +396,15 @@ impl Runtime {
             }
         };
 
+        if meta.changes_rules {
+            // Bookkeeping: Unresolved decided before now goes back to Sift.
+            if let Err(e) = repo::kv::mark_rules_changed(&index, &self.services.clock.now()) {
+                rerror!(
+                    Category::Actions,
+                    "could not record that the rules changed: {e}"
+                );
+            }
+        }
         let mut activity_id_out = None;
         if meta.mutating {
             // Bookkeeping never fails the work (invariant 39).

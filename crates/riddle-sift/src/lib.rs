@@ -20,6 +20,7 @@
 //! structured telemetry (§92).
 
 pub mod actions;
+pub mod dated;
 pub mod expiry;
 pub mod explain;
 pub mod facts;
@@ -225,6 +226,8 @@ pub struct SiftOutcome {
     /// What a Mesh in Shadow would have decided instead, recorded beside
     /// the live decision for the Shadow review; never applied.
     pub shadow_proposal: Option<Classification>,
+    /// The message's thread, for what its decision gives the user's replies.
+    pub thread_id: ThreadId,
     pub trace: DecisionTrace,
     pub find: Option<FindProposal>,
     pub thread_state_update: Option<ThreadStateUpdate>,
@@ -255,6 +258,9 @@ pub struct Sift {
     pub opts: SiftOptions,
     pub budget: Option<Arc<dyn EscalationBudget>>,
     pub projection: Option<Arc<dyn ProjectionHook>>,
+    /// The running and live Meshes (`repo::meshes::running_and_live`), read
+    /// once for the pass a `Sift` is built for, not once per message.
+    meshes: std::sync::OnceLock<(Vec<riddle_core::Mesh>, Vec<riddle_core::Mesh>)>,
 }
 
 impl Sift {
@@ -274,7 +280,31 @@ impl Sift {
             opts: SiftOptions::default(),
             budget: None,
             projection: None,
+            meshes: std::sync::OnceLock::new(),
         }
+    }
+
+    /// The running Meshes (Shadow versions included) and the live versions
+    /// that decide, for one Dig's scope.
+    pub fn meshes_in_scope(
+        &self,
+        dig: &DigId,
+        group: Option<&str>,
+    ) -> riddle_errors::Result<(Vec<riddle_core::Mesh>, Vec<riddle_core::Mesh>)> {
+        let all = match self.meshes.get() {
+            Some(m) => m,
+            None => {
+                let read = riddle_store::repo::meshes::running_and_live(&self.stores.index())?;
+                self.meshes.get_or_init(|| read)
+            }
+        };
+        let scoped = |l: &Vec<riddle_core::Mesh>| {
+            l.iter()
+                .filter(|m| m.scope.applies_to(dig, group))
+                .cloned()
+                .collect()
+        };
+        Ok((scoped(&all.0), scoped(&all.1)))
     }
 
     /// Wire from the Action layer's services.

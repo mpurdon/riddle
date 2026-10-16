@@ -14,7 +14,11 @@ export type FindProposal = { findType: FindType, title: string, summary: string,
  * Cross-Dig deduplication key: the RFC Message-ID root of the thread when
  * present, else the provider thread id.
  */
-identityKey: string, dueAt: string | null, source: FindSource, confidence: number | null, classificationId: ClassificationId | null, traceId: TraceId | null, series: FindSeries | null, expiresAt: string | null, 
+identityKey: string, dueAt: string | null, 
+/**
+ * Raised snoozed until then: a booking's Find waits for its first day.
+ */
+snoozedUntil: string | null, source: FindSource, confidence: number | null, classificationId: ClassificationId | null, traceId: TraceId | null, series: FindSeries | null, expiresAt: string | null, 
 /**
  * The route said `+ Notify`.
  */

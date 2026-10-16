@@ -77,6 +77,7 @@ impl Action for CreateMesh {
             .egress()
             .risk(Risk::Medium)
             .autonomy(Autonomy::Suggest)
+            .changes_rules()
             .build()
     }
     /// A new Mesh is known by its name, as the parser reads it (a `v2`
@@ -143,6 +144,7 @@ impl Action for UpdateMesh {
         .egress()
         .risk(Risk::Medium)
         .autonomy(Autonomy::Suggest)
+        .changes_rules()
         .build()
     }
     fn proposal_subject(&self, args: &Value) -> Option<String> {
@@ -251,6 +253,7 @@ impl Action for SetMeshStatus {
         .reversible()
         .risk(Risk::Medium)
         .autonomy(Autonomy::Trusted)
+        .changes_rules()
         .build()
     }
     fn proposal_subject(&self, args: &Value) -> Option<String> {
@@ -304,6 +307,7 @@ impl Action for SetMeshFallback {
         .reversible()
         .risk(Risk::Low)
         .autonomy(Autonomy::Trusted)
+        .changes_rules()
         .build()
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
@@ -355,6 +359,7 @@ impl Action for SaveList {
         .reversible()
         .risk(Risk::Low)
         .autonomy(Autonomy::Trusted)
+        .changes_rules()
         .build()
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
@@ -421,6 +426,7 @@ impl Action for DeleteList {
             .reversible()
             .risk(Risk::Low)
             .autonomy(Autonomy::Trusted)
+            .changes_rules()
             .build()
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
@@ -479,6 +485,7 @@ impl Action for DeleteMesh {
             .risk(Risk::Medium)
             .confirm(ConfirmationPolicy::InPlaceUndo)
             .autonomy(Autonomy::Trusted)
+            .changes_rules()
             .build()
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
@@ -513,6 +520,7 @@ impl Action for RestoreMesh {
             .reversible()
             .risk(Risk::Low)
             .autonomy(Autonomy::Trusted)
+            .changes_rules()
             .build()
     }
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {

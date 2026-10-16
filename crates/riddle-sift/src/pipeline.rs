@@ -7,8 +7,7 @@ use crate::{Sift, SiftInput, SiftOutcome};
 use riddle_core::*;
 use riddle_errors::{ErrorKind, Result};
 use riddle_mesh::{
-    deterministic_projection, evaluate_with, ConfidencePolicy, MeshDecision, MeshService,
-    ProfileLists,
+    deterministic_projection, evaluate_with, ConfidencePolicy, MeshDecision, ProfileLists,
 };
 use riddle_observability::{rdebug, rinfo, rwarn, Category};
 use riddle_signals::{
@@ -45,9 +44,10 @@ struct Draft {
     fresh: usize,
     truncated: Vec<String>,
     decision: Option<MeshDecision>,
-    /// What the running set, Shadow versions included, decides, when a
-    /// Mesh in Shadow decides it differently from the live versions.
-    shadow_trial: Option<MeshDecision>,
+    /// What the running set, Shadow versions included, decides (after the
+    /// confidence policy) and its Strata, when it differs from the live
+    /// decision because of a Mesh in Shadow.
+    shadow_trial: Option<(MeshDecision, Disposition, Vec<String>)>,
     thread_state_update: Option<ThreadStateUpdate>,
 }
 
@@ -131,6 +131,20 @@ fn identity_key(m: &Message) -> String {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| m.thread_id.provider_id().to_string())
+}
+
+/// The sender's site, so `h6.hilton.com` and `noreply@hilton.com` are one
+/// company: the last two labels, or three under a country's second level
+/// (`booking.co.uk`).
+fn site_domain(domain: &str) -> String {
+    let labels: Vec<&str> = domain.trim_end_matches('.').split('.').collect();
+    let n = labels.len();
+    let keep = if n >= 3 && labels[n - 1].len() == 2 && labels[n - 2].len() <= 3 {
+        3
+    } else {
+        2
+    };
+    labels[n.saturating_sub(keep)..].join(".")
 }
 
 /// The least priority a Find from a `+ Notify` route has.
@@ -272,9 +286,18 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
     let registry = Registry::new(index.clone());
     // Live versions decide; the running set (Shadow included) picks the
     // Signals and measures what a Mesh in Shadow would do instead.
-    let svc = MeshService::new(index.clone());
-    let trial = svc.in_scope(&dig_id, input.dig.group.as_deref())?;
-    let meshes = svc.live_in_scope(&dig_id, input.dig.group.as_deref())?;
+    let (trial, meshes) = sift.meshes_in_scope(&dig_id, input.dig.group.as_deref())?;
+    let has_shadow = trial.iter().any(|m| m.status == MeshStatus::Shadow);
+    // Signals for both: the live versions decide, the Shadow versions propose.
+    let mut scored = trial.clone();
+    for m in &meshes {
+        if !scored
+            .iter()
+            .any(|t| t.id == m.id && t.version == m.version)
+        {
+            scored.push(m.clone());
+        }
+    }
     // The user's named lists (`sender IN list:banks`), read once per message.
     let named = repo::lists::named(&index)?;
     let judge = sift
@@ -291,7 +314,7 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
             facts: &facts,
             named: &named,
         };
-        select_signals(&registry, &trial, &facts, &lists)
+        select_signals(&registry, &scored, &facts, &lists)
     };
     let mut judge_reason: Option<String> = None;
     if judge.is_none() {
@@ -408,11 +431,8 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
         // A reply is about what its thread is about: the user's own answers
         // to an accountant were Filed with no Stratum beside a thread under
         // People and Finance.
-        draft.strata = repo::messages::thread_strata(
-            &*sift.stores.dig(&dig_id)?,
-            &input.message.thread_id,
-            &message_id,
-        )?;
+        draft.strata =
+            repo::messages::thread_strata(&dig_store, &input.message.thread_id, &message_id)?;
         draft.mechanism = DecisionMechanism::Deterministic;
         draft.matched_rule =
             Some("sent mail is Filed; its asks and commitments update Thread State".into());
@@ -473,9 +493,7 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
             let allowed = match (&sift.refiner, input.dig.privacy) {
                 (None, _) => Err("no escalation model configured".to_string()),
                 (Some(_), PrivacyMode::CloudReasoning) => match &sift.budget {
-                    Some(b) if !b.allows(&dig_id) => {
-                        Err("escalation budget exhausted for this Dig".to_string())
-                    }
+                    Some(b) if !b.allows(&dig_id) => Err(riddle_core::BUDGET_EXHAUSTED.to_string()),
                     _ => Ok(()),
                 },
                 (Some(_), _) => {
@@ -683,7 +701,7 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
 
     // A Mesh in Shadow records what it would do, beside the live decision.
     // (A Dig in its Shadow Period records its decisions as proposals already.)
-    if !draft.shadow && trial.iter().any(|m| m.status == MeshStatus::Shadow) {
+    if !draft.shadow && has_shadow {
         let t = evaluate_with(
             &trial,
             &facts,
@@ -691,11 +709,29 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
             &lists,
             Some(&sift.opts.policy),
         );
-        let differs = t.mesh_status == Some(MeshStatus::Shadow)
-            && (t.disposition() != Some(&draft.disposition)
-                || t.output.as_ref().is_some_and(|o| o.strata != draft.strata));
-        if differs {
-            draft.shadow_trial = Some(t);
+        // The trial stands or is held exactly as the live decision would be.
+        let proposed = match assess(&sift.opts.policy, &t, &facts.language) {
+            Confidence::Confident => t.disposition().cloned().unwrap_or(Disposition::Unresolved),
+            Confidence::Uncertain(_) => Disposition::Unresolved,
+        };
+        let strata = t
+            .output
+            .as_ref()
+            .map(|o| o.strata.clone())
+            .unwrap_or_default();
+        // A Mesh in Shadow is in play when it wins the trial, or when its live
+        // version decided and the new one would let the mail go elsewhere.
+        let shadowed = |id: &Option<MeshId>| {
+            id.as_ref().is_some_and(|id| {
+                trial
+                    .iter()
+                    .any(|m| &m.id == id && m.status == MeshStatus::Shadow)
+            })
+        };
+        if (shadowed(&t.mesh_id) || shadowed(&draft.mesh_id))
+            && (proposed != draft.disposition || strata != draft.strata)
+        {
+            draft.shadow_trial = Some((t, proposed, strata));
         }
     }
     draft.decision = Some(decision);
@@ -784,6 +820,20 @@ fn finish(
         .filter(|r| r.disposition.as_ref() == Some(&draft.disposition))
         .and_then(|r| r.importance)
         .unwrap_or_else(|| derived_importance(&draft.disposition, score, draft.notify));
+    let expiry = draft.route.as_ref().and_then(|r| r.expires);
+    let timezone = input.profile.timezone.as_deref();
+    // A dated Find (a booking, an event) waits for its first day and closes
+    // after its last; a booking's confirmation, reminders and notices are
+    // one Find, whichever thread each came in.
+    let dated = facts
+        .dated
+        .as_ref()
+        .filter(|_| expiry == Some(Expiry::AfterDates));
+    // From the message's own date, so a reminder sifted late (or re-decided
+    // from history) expires when it would have anyway, in the user's
+    // timezone for "end of day" and "next morning".
+    let expires_at =
+        expiry.and_then(|e| crate::expiry::expires_at(e, input.message.date, dated, timezone));
     let find = match &draft.disposition {
         Disposition::Find { find_type } if !input.message.is_sent => Some(FindProposal {
             code: Some(facts.verification_code.clone()).filter(|c| !c.is_empty()),
@@ -801,13 +851,24 @@ fn finish(
                 importance.clamp_priority(score)
             },
             reason: draft.reason.clone(),
-            identity_key: identity_key(&input.message),
-            due_at: facts
-                .deadlines
-                .iter()
-                .filter(|d| !d.past)
-                .map(|d| d.at)
-                .min(),
+            identity_key: match dated {
+                Some(span) => format!("dated:{}:{}", site_domain(&facts.sender_domain), span.start),
+                None => identity_key(&input.message),
+            },
+            // Due when its days end: a "cancel by" date in a booking's
+            // text is not when the stay stops mattering.
+            due_at: match dated {
+                Some(_) => expires_at,
+                None => facts
+                    .deadlines
+                    .iter()
+                    .filter(|d| !d.past)
+                    .map(|d| d.at)
+                    .min(),
+            },
+            snoozed_until: expiry
+                .and_then(|e| crate::expiry::wakes_at(e, dated, timezone))
+                .filter(|at| *at > now),
             source: FindSource {
                 message_id: input.message.id.clone(),
                 thread_id: input.message.thread_id.clone(),
@@ -820,12 +881,7 @@ fn finish(
                 key,
                 message_at: input.message.date,
             }),
-            // From the message's own date, so a reminder sifted late (or
-            // re-decided from history) expires when it would have anyway,
-            // in the user's timezone for "end of day" and "next morning".
-            expires_at: draft.route.as_ref().and_then(|r| r.expires).map(|e| {
-                crate::expiry::expires_at(e, input.message.date, input.profile.timezone.as_deref())
-            }),
+            expires_at,
             notify: draft.notify,
         }),
         _ => None,
@@ -904,28 +960,30 @@ fn finish(
         note
     );
     // A Shadow proposal: the same message as a Mesh in Shadow would decide it.
-    let shadow_proposal = draft.shadow_trial.as_ref().map(|t| Classification {
-        id: ClassificationId::new(),
-        disposition: t.disposition().cloned().unwrap_or(Disposition::Unresolved),
-        strata: t
-            .output
+    let shadow_proposal =
+        draft
+            .shadow_trial
             .as_ref()
-            .map(|o| o.strata.clone())
-            .unwrap_or_default(),
-        notify: t.output.as_ref().is_some_and(|o| o.notify),
-        mesh_id: t.mesh_id.clone(),
-        mesh_version: t.mesh_version,
-        matched_rule: t.matched_rule.clone(),
-        reason: t
-            .words
-            .clone()
-            .unwrap_or_else(|| "What a Mesh in Shadow would do.".into()),
-        shadow: true,
-        series: None,
-        ..classification.clone()
-    });
+            .map(|(t, disposition, strata)| Classification {
+                id: ClassificationId::new(),
+                disposition: disposition.clone(),
+                strata: strata.clone(),
+                notify: t.output.as_ref().is_some_and(|o| o.notify),
+                confidence: confidence_from(t),
+                mesh_id: t.mesh_id.clone(),
+                mesh_version: t.mesh_version,
+                matched_rule: t.matched_rule.clone(),
+                reason: t
+                    .words
+                    .clone()
+                    .unwrap_or_else(|| "What a Mesh in Shadow would do.".into()),
+                shadow: true,
+                series: None,
+                ..classification.clone()
+            });
     SiftOutcome {
         shadow_proposal,
+        thread_id: input.message.thread_id.clone(),
         classification,
         trace,
         find,
@@ -951,8 +1009,22 @@ pub fn persist(sift: &Sift, outcome: &mut SiftOutcome) -> Result<Option<FindProp
     let id = outcome.classification.message_id.clone();
     repo::facts::put(&store, &id, &outcome.facts)?;
     repo::classifications::record(&store, &outcome.classification)?;
-    if let Some(p) = &outcome.shadow_proposal {
-        repo::classifications::record(&store, p)?;
+    match &outcome.shadow_proposal {
+        Some(p) => repo::classifications::record(&store, p)?,
+        // A proposal that no longer differs, or whose Mesh was made
+        // Active, is retired when the message is decided again.
+        None if !outcome.classification.shadow => {
+            repo::classifications::retire_shadow(&store, &id)?
+        }
+        None => {}
+    }
+    // The user's replies in the thread are about what it is about.
+    if !outcome.facts.is_sent && !outcome.classification.shadow {
+        repo::classifications::spread_to_replies(
+            &store,
+            &outcome.thread_id,
+            &outcome.classification.strata,
+        )?;
     }
     outcome.timing.persist_ms = t.elapsed().as_millis() as u64;
     outcome.timing.total_ms += outcome.timing.persist_ms;

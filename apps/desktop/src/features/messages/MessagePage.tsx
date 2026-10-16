@@ -19,7 +19,7 @@ import { buildThreadTree } from '@/lib/threadTree'
 import { AttachmentChips } from '@/components/AttachmentChips'
 import { ThreadRow, senderOf } from '@/components/ThreadRow'
 import { cx, fmtAddresses, fmtDateTime, fmtTime } from '@/lib/format'
-import { useDigContext, useLabelName } from '@/lib/queries'
+import { useDigContext, useLabelName, useProfile } from '@/lib/queries'
 import { dispositionLabel, findTypeLabel, FIND_TYPES, followUpArgs, IMPORTANCES, importanceLabel, sameDisposition } from '@/lib/selectors'
 import { keyHint } from '@/lib/shortcuts'
 import { useAction, useLastUndoable } from '@/lib/useAction'
@@ -49,6 +49,7 @@ export default function MessagePage() {
   const lastUndoable = useLastUndoable((s) => s.lastActivityId)
   const { reply, forward } = useComposerActions()
   const msg = useQuery({ queryKey: qk.message(digId, messageId), queryFn: () => getMessage(digId, messageId), enabled: !!digId && !!messageId })
+  const profile = useProfile()
   const thread = useQuery({ queryKey: msg.data ? qk.thread(digId, msg.data.threadId) : ['thread', 'none'], queryFn: () => getThread(digId, msg.data!.threadId), enabled: !!msg.data })
   const ex = useQuery({ queryKey: qk.explain(digId, messageId), queryFn: () => explain(digId, messageId), enabled: !!msg.data, retry: false })
   const rows = useQuery({
@@ -112,7 +113,13 @@ export default function MessagePage() {
   const domain = m.from.email.includes('@') ? m.from.email.slice(m.from.email.lastIndexOf('@') + 1).toLowerCase() : ''
   const undecided = !disposition || disposition.kind === 'unresolved' ? 'Decide the message first (Correct…); an Unresolved message has nothing to remember' : null
   const remember = (scope: 'sender' | 'domain') => run('remember_for_sender', { digId, messageId, scope }, { digId })
-  const rememberItems: MenuItem[] = [
+  // A contact's mail reads differently (correspondence, never a stranger's), so adding one decides their mail again.
+  const sender = m.from.email.toLowerCase()
+  const listed = (list: string[] | undefined) => (list ?? []).some((e) => e.toLowerCase() === sender || (e.startsWith('@') && sender.endsWith(e.toLowerCase())))
+  const isContact = listed(profile.data?.contacts) || listed(profile.data?.vips) || listed(profile.data?.family)
+  const rememberItems: (MenuItem | 'separator')[] = [
+    { label: `Add ${sender} to your contacts`, onSelect: () => void run('add_to_contacts', { email: sender }, { digId }), disabledReason: isContact ? 'Already in your contacts' : null },
+    'separator',
     { label: `For ${m.from.email.toLowerCase()}`, onSelect: () => void remember('sender'), disabledReason: undecided },
     ...(domain ? [{ label: `For everything from ${domain}`, onSelect: () => void remember('domain'), disabledReason: undecided }] : []),
   ]
@@ -176,7 +183,7 @@ export default function MessagePage() {
               Forward
             </Button>
             <Menu label="Correct the disposition" items={correctItems} trigger={<Button size="sm" title="Change what Riddle decided; the current one is marked">Correct…</Button>} />
-            <Menu label="Always decide this sender's mail this way" items={rememberItems} trigger={<Button size="sm" title="Make this message's decision, Strata and the importance you set a rule for the sender or domain (Your corrections), so their next message is decided the same way">Always…</Button>} />
+            <Menu label="This sender" items={rememberItems} trigger={<Button size="sm" title="Add the sender to your contacts (their mail is decided again), or make this message's decision, Strata and the importance you set a rule for the sender or domain (Your corrections)">Sender…</Button>} />
             <Menu label="How much this message matters" items={importanceItems} trigger={<Button size="sm" title={importanceYours ? 'Importance you set; a rule deciding the message again keeps it' : "Importance from the rule that decided it; set your own"}>{importanceLabel(importance)}{importanceYours ? ' (yours)' : ''}</Button>} />
             <FollowUpMenu onPick={(dueAt) => void followUp(dueAt)} trigger={<Button size="sm" icon={<Flag />} title={`Follow up by a date: a Find until a reply arrives (${keyHint('follow_up')})`}>Follow up</Button>} />
             <SnoozeMenu onPick={(until) => void run('snooze_messages', { digId, messageIds: [messageId], until }, { digId })} trigger={<Button size="sm" icon={<Clock />} title={`Snooze (${keyHint('snooze_message')})`}>Snooze</Button>} />

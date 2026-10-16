@@ -8,6 +8,12 @@
 //! Any other entry (`uber.com`, `@uber.com`) is a domain and matches it and
 //! its subdomains (`email.uber.com`), by whole labels, so `uber.com` does
 //! not match `notuber.com`.
+//!
+//! A list can also hold values of another text fact, matched whole:
+//! `sender_name IN list:github_bots` with `dependabot[bot]`. Every GitHub
+//! notification comes from notifications@github.com, so the account that
+//! acted is only in the From name; a sender list could not tell
+//! Dependabot's review requests from a colleague's (14 Oct 2026).
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -83,6 +89,13 @@ impl NamedLists {
                         .is_some_and(|rest| rest.ends_with('.'))
             }
         })
+    }
+
+    /// Whether a fact's text value is on the list, whole and ignoring case
+    /// and a leading `@`, as entries are stored.
+    pub fn contains_value(&self, list: &str, value: &str) -> bool {
+        let value = value.trim().trim_start_matches('@').to_ascii_lowercase();
+        !value.is_empty() && self.0.get(list).is_some_and(|e| e.contains(&value))
     }
 }
 

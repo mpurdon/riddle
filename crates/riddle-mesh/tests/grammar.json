@@ -135,6 +135,17 @@
    "error": "Expires closes Finds, so it needs a Find"
   },
   {
+   "name": "a dated Find waits for its days and expires after them",
+   "text": "ROUTES\nIF has_dates → Find: Attend + Expires: After its dates",
+   "outputs": [
+    {
+     "expires": {
+      "kind": "after_dates"
+     }
+    }
+   ]
+  },
+  {
    "name": "expires at the end of the day or the next morning, where the user is",
    "text": "ROUTES\nIF mailing_list → Find: Do + Replaces + Expires: end of day\nELSE IF has_attachments → Find: Do + Expires: Next  Morning",
    "outputs": [
@@ -153,12 +164,12 @@
   {
    "name": "Expires is not a vague time",
    "text": "ROUTES\nIF mailing_list → Find: Do + Expires: later",
-   "error": "Expires needs minutes, hours, days, end of day or next morning"
+   "error": "Expires needs minutes, hours, days, end of day, next morning or after its dates"
   },
   {
    "name": "Expires without a value",
    "text": "ROUTES\nIF mailing_list → Find: Do + Expires",
-   "error": "Expires needs minutes, hours, days, end of day or next morning"
+   "error": "Expires needs minutes, hours, days, end of day, next morning or after its dates"
   },
   {
    "name": "Expires of zero",
@@ -173,7 +184,7 @@
   {
    "name": "a fraction of a day",
    "text": "ROUTES\nIF mailing_list → Find: Do + Expires: 1.5d",
-   "error": "Expires needs minutes, hours, days, end of day or next morning"
+   "error": "Expires needs minutes, hours, days, end of day, next morning or after its dates"
   },
   {
    "name": "Find without a type",
@@ -189,6 +200,17 @@
    "name": "an unknown output",
    "text": "ROUTES\nIF mailing_list → Archive",
    "error": "unknown output"
+  },
+  {
+   "name": "a named list of another text fact",
+   "text": "ROUTES\nIF sender_name IN list:github_bots → Filed",
+   "outputs": [
+    {
+     "disposition": {
+      "kind": "filed"
+     }
+    }
+   ]
   },
   {
    "name": "a named list",

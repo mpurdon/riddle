@@ -124,6 +124,12 @@ pub struct ActionMeta {
     /// arguments. For Actions whose arguments are secrets.
     #[serde(default)]
     pub user_only: bool,
+    /// Changes how mail is decided: rules, lists, Signals, an account's or
+    /// the app's settings, or an undo of any of those. The runtime records
+    /// when one last succeeded, and Unresolved decided before then is sent
+    /// back to Sift.
+    #[serde(default)]
+    pub changes_rules: bool,
 }
 
 /// What a dev build may write to the connected mailbox (§59). Hold: nothing

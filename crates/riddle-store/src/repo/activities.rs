@@ -190,20 +190,3 @@ pub fn undone_count_since(
         Ok(n as u64)
     })
 }
-
-/// When any of these Actions last ran: the latest change to the rules,
-/// read back from the ledger every such change already goes through.
-pub fn last_of(store: &Store, actions: &[&str]) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
-    if actions.is_empty() {
-        return Ok(None);
-    }
-    let marks = vec!["?"; actions.len()].join(",");
-    store.read(|c| {
-        c.query_row(
-            &format!("SELECT max(created_at) FROM activities WHERE action IN ({marks})"),
-            rusqlite::params_from_iter(actions.iter()),
-            |r| r.get::<_, Option<i64>>(0),
-        )
-        .map(|t| t.map(from_ts))
-    })
-}

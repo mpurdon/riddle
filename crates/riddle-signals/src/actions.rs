@@ -175,6 +175,7 @@ impl Action for PromoteSignal {
             .risk(Risk::Medium)
             .confirm(ConfirmationPolicy::Approval)
             .autonomy(Autonomy::Trusted)
+            .changes_rules()
             .build()
     }
     async fn preview(&self, ctx: &ActionContext, args: &Value) -> Result<Preview> {

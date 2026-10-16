@@ -235,7 +235,18 @@ pub enum Expiry {
     /// `Expires: next morning`: `NEXT_MORNING_HOUR` on the day after it
     /// arrived, so one that comes late in the evening still gets a morning.
     NextMorning,
+    /// `Expires: after its dates`: the Find waits, snoozed, until
+    /// `DATED_DAY_HOUR` on the first day the message is about and expires
+    /// at the end of its last (`Facts::dated`). A parking booking made in June was a
+    /// Pay Find among the open ones for months, and a hotel confirmation
+    /// was still open a week after the stay (15 Oct 2026). Without booking
+    /// dates the Find neither waits nor expires.
+    AfterDates,
 }
+
+/// The local hour a dated Find wakes on its first day: early enough
+/// for a morning flight's check-in, late enough not to arrive overnight.
+pub const DATED_DAY_HOUR: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

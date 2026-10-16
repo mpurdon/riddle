@@ -25,7 +25,7 @@ pub const DEFAULTS: &[DefaultMesh] = &[
     },
     DefaultMesh {
         id: "mesh_security_alerts",
-        text: "Mesh: Security and account alerts v1\nScope:\nAll Digs\nPriority: 0\n\nROUTES\n\nIF security_alert@v1 > .80\n    → Find: Know + Stratum: Notifications\n\nELSE IF account_notification@v1 > .85 AND routine@v1 > .80\n    → Filed + Stratum: Notifications\n\nGUARDS\n\nNEVER Spoil IF security_alert@v1 > .80\n",
+        text: "Mesh: Security and account alerts v1\nScope:\nAll Digs\nPriority: 0\n\nROUTES\n\nIF security_alert@v1 > .80 AND marketing@v1 < .70\n    → Find: Know + Stratum: Notifications\n\nGUARDS\n\nNEVER Spoil IF security_alert@v1 > .80 AND marketing@v1 < .70 AND newsletter@v1 < .80\n",
         fallback: false,
     },
     DefaultMesh {
@@ -129,5 +129,36 @@ mod tests {
         }
         let ids: std::collections::HashSet<_> = meshes.iter().map(|m| m.id.clone()).collect();
         assert_eq!(ids.len(), meshes.len());
+    }
+
+    /// A default Mesh reads the same rules as the core pack's Mesh of the
+    /// same name. Both are seeded (defaults on every boot, core on install)
+    /// and the copies drifted: core v2 narrowed the Security guard while the
+    /// default kept the old one. Core declares no lists, so its Meshes are
+    /// safe to seed without the pack; other packs' copies read their lists.
+    #[test]
+    fn a_default_mesh_reads_the_same_rules_as_its_core_pack_mesh() {
+        let core = crate::packs::builtin_packs()
+            .into_iter()
+            .find(|p| p.id == "core")
+            .unwrap();
+        let mut compared = 0;
+        for d in default_meshes() {
+            let Some(p) = core
+                .meshes
+                .iter()
+                .filter_map(|pm| parse(&pm.text).ok())
+                .find(|m| m.name == d.name)
+            else {
+                continue;
+            };
+            assert_eq!(d.routes, p.routes, "routes of {}", d.name);
+            assert_eq!(d.guards, p.guards, "guards of {}", d.name);
+            compared += 1;
+        }
+        assert!(
+            compared >= 5,
+            "the core Meshes the defaults share: {compared}"
+        );
     }
 }

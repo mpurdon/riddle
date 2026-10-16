@@ -92,3 +92,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 33 | feat: topic tags, finance_topic, and known threads and firms | 2801 | 68010 | 65196485 | 120 | 1 |
 | 34 | feat: Shadow versions keep deciding; no-reply, stale Unresolved, career, tickets and deliveries | 165 | 60301 | 54963241 | 102 | 1 |
 | 35 | feat: copy a message link from its page; passed-over routes read in words | 46 | 0 | 0 | 0 | 0 |
+| 36 | feat: bookings wait for their days; lists of fact values; add to contacts; rules-changed resift; Bedrock credentials reread | 3067 | 311431 | 107501752 | 498 | 4 |

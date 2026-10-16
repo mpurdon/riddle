@@ -86,11 +86,12 @@ interface DigLookup {
   digIdByName: (name: string) => string | null
 }
 
-/** `end of day`, `next morning`, or a span (`18h`, `2 days`); a string is the error. Mirrors riddle-mesh `parse_expiry`. */
+/** `end of day`, `next morning`, `after its dates`, or a span (`18h`, `2 days`); a string is the error. Mirrors riddle-mesh `parse_expiry`. */
 function parseExpiry(raw: string): Expiry | string {
   const t = raw.trim().toLowerCase().split(/\s+/).join(' ')
   if (t === 'end of day' || t === 'end of the day') return { kind: 'end_of_day' }
   if (t === 'next morning' || t === 'tomorrow morning') return { kind: 'next_morning' }
+  if (['after its dates', 'after the dates', 'after booking', 'after the booking'].includes(t)) return { kind: 'after_dates' }
   const mins = /^(\d+)\s*(m|min|mins|minutes?)$/.exec(t)
   if (mins) {
     const n = Number(mins[1])
@@ -99,7 +100,7 @@ function parseExpiry(raw: string): Expiry | string {
     return 'Expires in minutes is between 1 and 59, e.g. Expires: 15m'
   }
   const m = /^(\d+)\s*(h|hr|hrs|hours?|d|days?)$/.exec(t)
-  if (!m) return `Expires needs minutes, hours, days, end of day or next morning, e.g. Expires: 18h or Expires: end of day, not "${raw.trim()}"`
+  if (!m) return `Expires needs minutes, hours, days, end of day, next morning or after its dates, e.g. Expires: 18h or Expires: end of day, not "${raw.trim()}"`
   const hours = Number(m[1]) * (m[2].startsWith('d') ? 24 : 1)
   if (hours < 1 || hours > 90 * 24) return 'Expires is between 1 hour and 90 days'
   return { kind: 'after', hours }
@@ -133,7 +134,7 @@ export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: (
   }
   const parseCond = (s: string, line: number): Expr | null => {
     const src = s.trim()
-    let m = /^(sender|sender_domain)\s+IN\s+list:([a-z0-9_]+)$/i.exec(src)
+    let m = /^([a-z_]+)\s+IN\s+list:([a-z0-9_]+)$/i.exec(src)
     if (m) return { kind: 'in_named_list', subject: m[1].toLowerCase(), list: m[2].toLowerCase() }
     m = /^sender\s+IN\s+([a-z_]+)$/i.exec(src)
     if (m) {

@@ -4,4 +4,9 @@ export type UserProfile = { addresses: Array<string>, aliases: Array<string>, gr
 /**
  * Addresses and domains (prefix `@`) that can never be Spoil or Contamination.
  */
-neverHidden: Array<string>, timezone: string | null, };
+neverHidden: Array<string>, timezone: string | null, 
+/**
+ * Addresses the user added to their contacts in Riddle ("Add to
+ * contacts" on a message), counted as contacts like VIPs and family.
+ */
+contacts: Array<string>, };

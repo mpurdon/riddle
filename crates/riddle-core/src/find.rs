@@ -209,6 +209,9 @@ pub struct FindProposal {
     /// present, else the provider thread id.
     pub identity_key: String,
     pub due_at: Option<DateTime<Utc>>,
+    /// Raised snoozed until then: a booking's Find waits for its first day.
+    #[serde(default)]
+    pub snoozed_until: Option<DateTime<Utc>>,
     pub source: FindSource,
     pub confidence: Option<f64>,
     pub classification_id: Option<ClassificationId>,

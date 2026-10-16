@@ -52,3 +52,17 @@ pub fn list_prefix(store: &Store, prefix: &str) -> Result<Vec<(String, String)>>
         rows
     })
 }
+
+/// When an Action that changes how mail is decided last succeeded
+/// (`ActionMeta::changes_rules`), recorded by the runtime.
+const RULES_CHANGED_AT: &str = "rules_changed_at";
+
+pub fn mark_rules_changed(store: &Store, at: &chrono::DateTime<chrono::Utc>) -> Result<()> {
+    set(store, RULES_CHANGED_AT, &crate::ts(at).to_string())
+}
+
+pub fn rules_changed_at(store: &Store) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+    Ok(get(store, RULES_CHANGED_AT)?
+        .and_then(|s| s.parse::<i64>().ok())
+        .map(crate::from_ts))
+}
