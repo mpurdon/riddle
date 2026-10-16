@@ -30,7 +30,7 @@ import { Menu, type MenuItem } from '@/components/ui/Menu'
 import { Note } from '@/components/ui/Note'
 import { ErrorCard } from '@/components/ErrorCard'
 import { MessageBody } from '@/components/MessageBody'
-import { AuthChip, CopyCode, CopyMessageLink, DevOverlay, DispositionChip, ExplanationCard, FollowUpMenu, ImportanceChip, PageHeader, SnoozeMenu, StrataChips, StrataPicker } from '@/components/Bits'
+import { AuthChip, CopyCode, CopyMessageLink, CopySubject, DevOverlay, DispositionChip, ExplanationCard, FollowUpMenu, ImportanceChip, PageHeader, SnoozeMenu, StrataChips, StrataPicker } from '@/components/Bits'
 import { useComposerActions } from './composer'
 import { ActionHelpButton } from '@/components/ActionHelp'
 import { FollowUpOverlay, SnoozeOverlay } from '@/components/OverlayList'
@@ -155,6 +155,7 @@ export default function MessagePage() {
             <span>{digName(digId)}</span>
             <span>· thread of {messages.length}</span>
             <CopyMessageLink digId={digId} messageId={messageId} about={`${senderOf(m)} · ${m.subject || '(no subject)'}`} />
+            <CopySubject subject={m.subject || '(no subject)'} />
             {ex.isPending ? <Chip tone="neutral" title="Loading the decision">…</Chip> : <DispositionChip d={disposition} shadow={ex.data?.shadow} />}
             <StrataChips strata={row?.strata ?? []} />
             <ImportanceChip level={importance} yours={importanceYours} />

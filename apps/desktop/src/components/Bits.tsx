@@ -117,6 +117,20 @@ export function CopyMessageLink({ digId, messageId, about }: { digId: string; me
   )
 }
 
+/**
+ * One click copies the subject, beside the link: the link names the message
+ * to a tool, the subject names it to a person, and a note wants one or the
+ * other.
+ */
+export function CopySubject({ subject }: { subject: string }) {
+  const [copied, copy] = useCopy(subject)
+  return (
+    <Button size="sm" variant="ghost" icon={copied ? <Check /> : <Copy />} onClick={() => void copy()} title="Copy the subject, to paste in a note or another chat">
+      {copied ? 'Copied' : 'Copy subject'}
+    </Button>
+  )
+}
+
 /** A small separator dot between inline facts. */
 export function Sep() {
   return (

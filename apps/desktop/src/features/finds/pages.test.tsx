@@ -55,6 +55,9 @@ describe('Finds', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     fireEvent.click(screen.getByRole('button', { name: 'Copy message link' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('riddle://message/dig_work/m_work_pr412 (Jamie Okafor · [northwind/platform] Review requested: Retry budget for the projection outbox (PR #412))'))
+    // The subject of the message that raised it, not the Find's title.
+    fireEvent.click(screen.getByRole('button', { name: 'Copy subject' }))
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('[northwind/platform] Review requested: Retry budget for the projection outbox (PR #412)'))
   })
 
   it('keeps j/k and the pane alive after the Find in the URL is resolved with e', async () => {

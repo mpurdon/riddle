@@ -35,7 +35,7 @@ import { ActionHelpButton } from '@/components/ActionHelp'
 import { ErrorCard } from '@/components/ErrorCard'
 import { ThreadRow, senderOf } from '@/components/ThreadRow'
 import { buildThreadTree } from '@/lib/threadTree'
-import { CopyCode, CopyMessageLink, DevOverlay, ExplanationCard, ImportanceChip, PageHeader, RetypeMenu, SnoozeMenu } from '@/components/Bits'
+import { CopyCode, CopyMessageLink, CopySubject, DevOverlay, ExplanationCard, ImportanceChip, PageHeader, RetypeMenu, SnoozeMenu } from '@/components/Bits'
 import { MessageBody } from '@/components/MessageBody'
 import { useComposerActions } from '@/features/messages/composer'
 import { messagePath, type MessageQueue } from '@/features/messages/queue'
@@ -309,6 +309,7 @@ function FindDetail({ find, selectedCount, selectedOpen, whyOpen, onWhy, onResol
             <span>{find.digIds.map(digName).join(', ')}</span>
             <span>· {fmtRelative(find.createdAt)}</span>
             {first ? <CopyMessageLink digId={first.digId} messageId={first.messageId} about={source ? `${senderOf(source)} · ${source.subject}` : find.title} /> : null}
+            {lead ? <CopySubject subject={lead.subject} /> : null}
             {due ? <span className="text-ochre">· {due}</span> : null}
             {status ? <Chip tone={find.status === 'resolved' ? 'ok' : 'neutral'}>{status}</Chip> : null}
             <DevOverlay digId={find.digIds[0] ?? ''} traceId={find.traceId} confidence={find.confidence} totalMs={null} />

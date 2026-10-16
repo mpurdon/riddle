@@ -1,6 +1,6 @@
 id = "money"
 name = "Money"
-version = 5
+version = 6
 area = "Money"
 summary = "Bills, renewals and amounts due become Pay or Do Finds; transfers and credit alerts are Know Finds; receipts and charges are Filed; donation appeals are kept apart from bills."
 band = "general"
@@ -20,6 +20,11 @@ name = "invoice_senders"
 description = "Senders whose invoices you pay yourself"
 question = "Who sends you invoices you pay by hand (a domain registrar, a contractor)?"
 default = []
+
+# v6: money that arrived matters more than a notice. An Interac e-Transfer
+# saying someone sent you money was a Know Find at P65, level with any
+# account notice, when it is often the transfer you were waiting for: it
+# is still something to know under Finance, now High (16 Oct 2026).
 
 # v5: money talk. A person's mail about money (an accountant's advice, a
 # question about benefits) is tagged Finance whoever decides it, and your
@@ -81,7 +86,7 @@ All Digs
 ROUTES
 
 IF sender_domain IN list:money_transfers
-    → Find: Know + Stratum: Finance
+    → Find: Know + Stratum: Finance + Importance: High
 ELSE IF sender_domain IN list:invoice_senders AND subject CONTAINS "Invoice"
     → Find: Pay + Stratum: Finance
 ELSE IF sender_domain IN list:credit_bureaus

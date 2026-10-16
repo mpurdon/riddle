@@ -172,6 +172,9 @@ describe('the message page opened without a list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy message link' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(`riddle://message/${items[0].digId}/${items[0].id} (${items[0].from.name ?? items[0].from.email} · ${items[0].subject})`))
     expect(await screen.findByRole('button', { name: 'Copied' })).toBeTruthy()
+    // The subject on its own, for a note to a person.
+    fireEvent.click(screen.getByRole('button', { name: 'Copy subject' }))
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(items[0].subject))
   })
 })
 
