@@ -103,3 +103,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 44 | feat: sender suggestions: a new vendor is judged once and offered its list | 44 | 0 | 0 | 0 | 0 |
 | 45 | fix: sender suggestions merge sibling subdomains and judge a frequent sender twice | 6 | 0 | 0 | 0 | 0 |
 | 46 | refactor: suggestions cost nothing idle, keep honest verdicts, and read kinds from the lists | -33 | 0 | 0 | 0 | 0 |
+| 47 | fix: invoice senders count the newest six again; a pack-recognised domain is no vendor offer | 8 | 0 | 0 | 0 | 0 |

@@ -658,6 +658,33 @@ pub fn sender_counts_since(
     })
 }
 
+/// Each sender's newest messages in the window, up to `per_sender`, from
+/// one query: what the invoice count reads, so a sender with years of
+/// promotions and a few invoices among them is not an invoice sender.
+pub fn sender_recent_ids(
+    store: &Store,
+    since: &chrono::DateTime<chrono::Utc>,
+    per_sender: usize,
+) -> Result<std::collections::HashMap<String, Vec<MessageId>>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT lower(from_email), id FROM messages WHERE deleted_at IS NULL AND is_sent = 0 AND date >= ?1 ORDER BY date DESC",
+        )?;
+        let mut out: std::collections::HashMap<String, Vec<MessageId>> =
+            std::collections::HashMap::new();
+        for row in st.query_map([ts(since)], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })? {
+            let (sender, id) = row?;
+            let ids = out.entry(sender).or_default();
+            if ids.len() < per_sender {
+                ids.push(MessageId::from(id.as_str()));
+            }
+        }
+        Ok(out)
+    })
+}
+
 /// Sender addresses in a set of threads, plus recipients of the user's sent
 /// mail in them, for incremental People updates.
 pub fn addresses_in_threads(

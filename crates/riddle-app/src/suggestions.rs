@@ -25,7 +25,7 @@ use riddle_errors::Result;
 use riddle_observability::{rinfo, Category};
 use riddle_privacy::{allowed, Purpose};
 use riddle_store::{repo, Store};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Senders judged per Sift pass: one or two judge calls each.
 pub const SENDERS_PER_PASS: usize = 8;
@@ -35,6 +35,8 @@ const SENDER_WINDOW_DAYS: i64 = 120;
 const SECOND_SAMPLE_AT: u64 = 6;
 /// Invoice evaluations read per account when looking for invoice senders.
 const INVOICE_EVALUATIONS: u32 = 5_000;
+/// A sender's newest messages that count towards being an invoice sender.
+const RECENT_PER_SENDER: usize = 6;
 /// Characters of a message the judge reads to say what kind of sender it is.
 const JUDGE_CHARS: usize = 8_000;
 
@@ -55,6 +57,17 @@ impl App {
             .collect())
     }
 
+    /// Domains an installed pack already recognises (`[detect]`): GitHub's
+    /// mail is the GitHub pack's business, not a vendor waiting for a list.
+    fn recognised_domains(&self) -> Result<Vec<String>> {
+        Ok(riddle_mesh::packs::catalogue(&self.stores.index())?
+            .into_iter()
+            .filter(|p| p.installed.is_some())
+            .flat_map(|p| p.pack.detect.sender_domains)
+            .map(|d| d.to_ascii_lowercase())
+            .collect())
+    }
+
     /// Senders with mail in the window and what the store knows of each,
     /// with the lists that exist; `only` narrows to some accounts (empty:
     /// all). A handful of reads per account, none per sender.
@@ -63,6 +76,7 @@ impl App {
         let lists = repo::lists::all(&index)?;
         let named = NamedLists::from_defs(lists.iter().cloned());
         let verdicts = self.sender_verdicts()?;
+        let recognised = self.recognised_domains()?;
         let since = self.services.clock.now() - chrono::Duration::days(SENDER_WINDOW_DAYS);
         let invoice_signal = repo::signals::latest(&index, "invoice", &[SignalStatus::Active])?;
         let mut rows = Vec::new();
@@ -71,11 +85,13 @@ impl App {
                 continue;
             }
             let store = self.stores.dig(&dig.id)?;
-            // Recent messages scored as an invoice, by sender: the Signal's
-            // evaluations in one read, their senders in one more.
+            // Each sender's newest few messages scored as an invoice: the
+            // Signal's evaluations in one read, the newest ids in one more. A
+            // sender with years of promotions and a few invoices among them
+            // is not an invoice sender.
             let mut invoices: HashMap<String, u32> = HashMap::new();
             if let Some(sig) = &invoice_signal {
-                let ids: Vec<MessageId> = repo::signals::evaluations_of_signal(
+                let scored: HashSet<String> = repo::signals::evaluations_of_signal(
                     &store,
                     "invoice",
                     sig.version,
@@ -83,12 +99,15 @@ impl App {
                 )?
                 .into_iter()
                 .filter(|e| e.distribution.get("YES").copied().unwrap_or(0.0) >= 0.8)
-                .map(|e| e.message_id)
+                .map(|e| e.message_id.as_str().to_string())
                 .collect();
-                for m in repo::messages::summaries_for_ids(&store, &dig.id, &ids)? {
-                    *invoices
-                        .entry(m.from.email.trim().to_ascii_lowercase())
-                        .or_default() += 1;
+                for (sender, ids) in
+                    repo::messages::sender_recent_ids(&store, &since, RECENT_PER_SENDER)?
+                {
+                    let n = ids.iter().filter(|id| scored.contains(id.as_str())).count();
+                    if n > 0 {
+                        invoices.insert(sender, n as u32);
+                    }
                 }
             }
             // Promotions the user restored from Spoil, by sender domain.
@@ -124,6 +143,7 @@ impl App {
                         .map(|l| l.name.clone())
                         .collect(),
                     messages: messages as u32,
+                    recognised: recognised_by_a_pack(&recognised, &domain),
                     sender,
                     domain,
                 });
@@ -149,6 +169,7 @@ impl App {
         let store = self.stores.dig(&dig.id)?;
         let named = repo::lists::named(&index)?;
         let verdicts = self.sender_verdicts()?;
+        let recognised = self.recognised_domains()?;
         let since = self.services.clock.now() - chrono::Duration::days(SENDER_WINDOW_DAYS);
         let question = sender_kind_question();
         let engine = judge.identity().key();
@@ -163,6 +184,7 @@ impl App {
                 || !organisation_domain(&domain)
                 || verdicts.contains_key(&domain)
                 || on_a_list
+                || recognised_by_a_pack(&recognised, &domain)
             {
                 continue;
             }
@@ -326,6 +348,13 @@ impl App {
         }
         Ok(suggest_series(&rows))
     }
+}
+
+/// Whether a pack's `[detect]` names the domain or one above it.
+fn recognised_by_a_pack(recognised: &[String], domain: &str) -> bool {
+    recognised
+        .iter()
+        .any(|d| domain == d || domain.ends_with(&format!(".{d}")))
 }
 
 /// The latest Mesh's route for a decision's rule as written, matched by the

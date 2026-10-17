@@ -55,6 +55,9 @@ pub struct SenderRow {
     pub restored_promotions: u32,
     /// Lists the sender is already on.
     pub lists: Vec<String>,
+    /// Whether an installed pack already recognises the sender's domain
+    /// (`[detect]`), so its mail is that pack's business, not a vendor's.
+    pub recognised: bool,
 }
 
 impl SenderRow {
@@ -81,7 +84,10 @@ struct Candidate<'a> {
 /// disagree (a retailer's app store beside its shop), each is offered on
 /// its own.
 pub fn suggest_lists(rows: &[SenderRow], lists: &[NamedListDef]) -> Vec<SenderSuggestion> {
-    let active: Vec<&SenderRow> = rows.iter().filter(|r| r.messages >= SUGGEST_AT).collect();
+    let active: Vec<&SenderRow> = rows
+        .iter()
+        .filter(|r| r.messages >= SUGGEST_AT && !r.recognised)
+        .collect();
     // Judged kinds under each registrable domain: do its subdomains speak as one?
     let mut kinds_by_root: BTreeMap<String, BTreeSet<SenderKind>> = BTreeMap::new();
     for r in &active {
@@ -201,6 +207,7 @@ mod tests {
             invoices: 0,
             restored_promotions: 0,
             lists: vec![],
+            recognised: false,
         }
     }
 
@@ -276,7 +283,10 @@ mod tests {
         on.lists = vec!["engineering_vendors".into()];
         assert!(suggest_lists(&[on.clone()], &lists()).is_empty());
         on.lists.clear();
-        assert!(suggest_lists(&[on], &[list("keep_promotions", &[])]).is_empty());
+        assert!(suggest_lists(&[on.clone()], &[list("keep_promotions", &[])]).is_empty());
+        // A pack already recognises it: its mail is the pack's business.
+        on.recognised = true;
+        assert!(suggest_lists(&[on], &lists()).is_empty());
     }
 
     #[test]
