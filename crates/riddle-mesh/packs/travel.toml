@@ -1,6 +1,6 @@
 id = "travel"
 name = "Travel"
-version = 3
+version = 4
 area = "Travel"
 summary = "A booking with its dates (a hotel, a flight, a rental, parking, tickets) waits until its first day, comes up then as an important Find, and is put away after its last; a past booking is Filed. Other trip changes become a Find; travel deals are left to the promotion rules."
 band = "general"
@@ -35,6 +35,14 @@ IF marketing@v1 < .50 AND travel_reservation@v1 > .75
 # so the dates, not a marketing score, keep deals out: an offer names no
 # booking's days. Ahead of Receipts, Payments and Event tickets, which
 # took these before.
+#
+# v4: the two Telpark parking bookings that v3 was written for scored .82
+# and .84 as event tickets, under its .85 floor, so the rule only ever
+# filed them when escalation happened to re-score the reservation Signal,
+# and every apply to history sent them back (16 Oct 2026). The Signal's
+# own definition names a parking booking; .75 takes a booking as the
+# reservation clause does. Of 134 dated messages only those two sit
+# between .75 and .85.
 [[meshes]]
 band = "specific"
 rank = 28
@@ -45,7 +53,7 @@ All Digs
 
 ROUTES
 
-WHEN has_dates AND (travel_reservation@v1 > .75 OR event_ticket@v1 > .85)
+WHEN has_dates AND (travel_reservation@v1 > .75 OR event_ticket@v1 > .75)
     IF dates_passed
         → Filed + Stratum: Bookings
     ELSE

@@ -1002,6 +1002,21 @@ mod tests {
         let past = decide(&packs, &booking(true), &evals, &[]).output.unwrap();
         assert_eq!(past.disposition, Some(riddle_core::Disposition::Filed));
 
+        // The real Telpark bookings scored .82 and .84 as event tickets and
+        // .41 as a reservation; a floor of .85 left both Unresolved.
+        let real = [
+            ev("event_ticket", 0.82),
+            ev("travel_reservation", 0.41),
+            ev("marketing", 0.50),
+        ];
+        let past = decide(&packs, &booking(true), &real, &[]).output.unwrap();
+        assert_eq!(past.disposition, Some(riddle_core::Disposition::Filed));
+        assert!(
+            past.strata.contains(&"Bookings".to_string()),
+            "{:?}",
+            past.strata
+        );
+
         let undated = riddle_core::Facts {
             dated: None,
             ..booking(false)

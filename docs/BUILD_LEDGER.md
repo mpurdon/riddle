@@ -95,3 +95,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 36 | feat: bookings wait for their days; lists of fact values; add to contacts; rules-changed resift; Bedrock credentials reread | 3067 | 311431 | 107501752 | 498 | 4 |
 | 37 | feat: transfers that arrived are High; Copy subject beside the message link | 31 | 0 | 0 | 0 | 0 |
 | 38 | feat: Bank and transfers decides before Security alerts; a passed-over route reads as what nearly happened | 69 | 0 | 0 | 0 | 0 |
+| 39 | feat: Bookings takes a parking booking at .82; travel pack v4 | 21 | 0 | 0 | 0 | 0 |
