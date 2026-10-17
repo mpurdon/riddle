@@ -99,3 +99,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 40 | feat: a repeated account notice is one Find; core pack v3 | 6 | 0 | 0 | 0 | 0 |
 | 41 | feat: Replaces: same subject, a series per thing renewing; core v4, money v8 | 48 | 0 | 0 | 0 | 0 |
 | 42 | feat: series suggestions: the app notices Finds that pile up on one subject | 43 | 0 | 0 | 0 | 0 |
+| 43 | feat: an engineering vendor's bill carries Engineering too; GitHub pack v3 | 5 | 0 | 0 | 0 | 0 |

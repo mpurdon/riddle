@@ -1157,6 +1157,47 @@ mod tests {
         assert_eq!(d.mesh_name.as_deref(), Some("Account notices"));
     }
 
+    /// A registrar's invoice is a bill and engineering at once: the money
+    /// rules decide it (Pay under Finance) and the vendor tag adds
+    /// Engineering, so one Find carries both Strata.
+    #[test]
+    fn an_engineering_vendor_s_bill_is_pay_under_finance_and_engineering() {
+        let mut facts = riddle_core::Facts {
+            sender_domain: "moniker.com".into(),
+            ..Default::default()
+        };
+        facts.subject = "Moniker Invoice 92885590".into();
+        let packs = ["developer-github", "money", "core"];
+        let d = decide(
+            &packs,
+            &facts,
+            &[],
+            &["engineering_vendors", "invoice_senders"],
+        );
+        let o = d.output.clone().unwrap();
+        assert_eq!(
+            o.disposition,
+            Some(riddle_core::Disposition::Find {
+                find_type: riddle_core::FindType::Pay
+            })
+        );
+        assert_eq!(d.mesh_name.as_deref(), Some("Bank and transfers"));
+        assert!(o.strata.contains(&"Finance".to_string()), "{:?}", o.strata);
+        assert!(
+            o.strata.contains(&"Engineering".to_string()),
+            "{:?}",
+            o.strata
+        );
+        // Not on the list: Finance alone.
+        let d = decide(&packs, &facts, &[], &["invoice_senders"]);
+        let o = d.output.unwrap();
+        assert!(
+            !o.strata.contains(&"Engineering".to_string()),
+            "{:?}",
+            o.strata
+        );
+    }
+
     /// A recruiter "came across your profile": a claim of prior contact
     /// that, from a stranger's free mailbox, used to read as a scam.
     #[test]
