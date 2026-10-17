@@ -106,6 +106,7 @@ export function registerMocks(): void {
   })
   mock('list_strata', () => state.strata.filter((s) => !s.deletedAt).sort((x, y) => Number(y.messageCount) - Number(x.messageCount)))
   mock('list_conversations', () => state.conversations.map((c) => ({ ...c, turns: [] })))
+  mock('list_suggestions', () => q.seriesSuggestions(state))
   mock('get_conversation', (a) => {
     const c = state.conversations.find((x) => x.id === a.conversationId)
     if (!c) throw { kind: 'not_found', message: 'conversation not found', detail: null }

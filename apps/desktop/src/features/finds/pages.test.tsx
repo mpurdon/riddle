@@ -84,7 +84,8 @@ describe('Finds', () => {
 
   it('shows who closed a Find in plain words on the Done tab', async () => {
     mountApp('#/finds')
-    await screen.findByText('7 need you')
+    // Seven, plus the three lock-battery notices the series suggestion is about.
+    await screen.findByText('10 need you')
     // Radix tabs activate on pointer down, not click.
     const done = screen.getByRole('tab', { name: 'Done' })
     fireEvent.mouseDown(done, { button: 0 })

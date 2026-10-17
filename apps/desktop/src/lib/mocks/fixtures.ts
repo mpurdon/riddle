@@ -404,6 +404,27 @@ export function messageSpecs(): MessageSpec[] {
       reason: 'Adam is waiting on your answer by tomorrow noon.',
       mechanism: 'jev',
     },
+    // --- Personal: a notice that repeats (three Do Finds on one subject) ---
+    ...[1, 2, 3].map((n) => ({
+      id: `m_pers_lock_${n}`,
+      dig: DIG_PERSONAL,
+      from: { email: 'noreply@august.example', name: 'August' },
+      to: [ME[DIG_PERSONAL]],
+      subject: 'Your August Smart Lock batteries are critically low',
+      snippet: 'The batteries in Front Door are critically low. Replace them soon to keep the lock working.',
+      text: 'The batteries in Front Door are critically low.\n\nReplace them soon to keep the lock working.',
+      hoursAgo: (7 - 2 * n) * 24,
+      labels: ['INBOX', 'CATEGORY_UPDATES'],
+      disposition: { kind: 'find', find_type: 'do' } as const,
+      strata: ['Notifications'],
+      findId: `find_lock_${n}`,
+      facts: { senderDomain: 'august.example', autoSubmitted: true, gmailCategory: 'updates' },
+      signals: { account_notification: 0.93, requires_action: 0.88, routine: 0.6, marketing: 0.1 },
+      meshId: 'mesh_aws',
+      matchedRule: 'ELSE IF account_notification@v1 > .85 AND requires_action@v1 > .75 AND marketing@v1 < .70 → Find: Do + Stratum: Notifications',
+      reason: 'It appears account notification is extremely likely, requires action is almost certain and marketing is very unlikely, so it is something to do under Notifications.',
+      mechanism: 'jev' as const,
+    })),
     // --- Personal: Attend (dentist) ---
     {
       id: 'm_pers_dentist',
@@ -1316,6 +1337,10 @@ interface FindSpec {
 }
 
 const FIND_SPECS: FindSpec[] = [
+  // A notice that repeats, three Do Finds on one subject: what the Director page's series suggestion is about.
+  { id: 'find_lock_1', type: 'do', title: 'Your August Smart Lock batteries are critically low', summary: 'Replace the batteries in the front door lock soon.', priority: 55, status: 'open', createdAt: ago(5 * 24), reason: 'An account notice that wants something done.', confidence: 0.9 },
+  { id: 'find_lock_2', type: 'do', title: 'Your August Smart Lock batteries are critically low', summary: 'Replace the batteries in the front door lock soon.', priority: 55, status: 'open', createdAt: ago(3 * 24), reason: 'An account notice that wants something done.', confidence: 0.9 },
+  { id: 'find_lock_3', type: 'do', title: 'Your August Smart Lock batteries are critically low', summary: 'Replace the batteries in the front door lock soon.', priority: 55, status: 'open', createdAt: ago(1 * 24), reason: 'An account notice that wants something done.', confidence: 0.9 },
   { id: 'find_review_412', type: 'review', title: 'Review requested on PR #412: retry budget for the projection outbox', summary: 'Jamie needs your eyes on the pause-reason enum before merging.', priority: 82, status: 'open', createdAt: ago(1.4), reason: 'Jamie requested your review directly; a follow-up says it is blocking the merge.', confidence: 0.96 },
   { id: 'find_respond_jeep', type: 'respond', title: 'Adam is waiting on you about the Jeep brakes', summary: 'Choose between the £310 rebuild and the £540 replacement; parts must be ordered by tomorrow noon.', priority: 74, status: 'open', dueAt: ahead(20), createdAt: ago(30), reason: 'Adam asked twice and gave a deadline; your last reply was a question back to him.', confidence: 0.97 },
   { id: 'find_pay_invoice', type: 'pay', title: 'Invoice #2024-117 from Ledgerly, £1,240, due Friday', summary: 'Q3 bookkeeping. Bank details unchanged.', priority: 76, status: 'open', dueAt: ahead(3 * 24), createdAt: ago(15), reason: 'An invoice with a due date from Dana, who is on your Never Hidden list.', confidence: 0.96 },

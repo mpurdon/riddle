@@ -144,6 +144,7 @@ pub const COMMANDS: &[&str] = &[
     "mesh_order",
     "list_named_lists",
     "list_packs",
+    "list_suggestions",
     "rule_check",
     "rule_samples",
     "ui_log",
@@ -357,6 +358,9 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             serde_json::to_value(app.list_labels(dig.as_ref())?)?
         }
         "list_conversations" => serde_json::to_value(repo::conversations::list(&index, 100)?)?,
+        // What Riddle noticed about its own rules: senders whose open Finds
+        // pile up on one subject. Read by the Director page's empty state.
+        "list_suggestions" => serde_json::to_value(app.series_suggestions(&[])?)?,
         "director_audit" => {
             serde_json::to_value(app.director_audit(&arg::<String>(&args, "conversationId")?)?)?
         }

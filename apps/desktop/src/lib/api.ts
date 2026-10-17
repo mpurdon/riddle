@@ -10,6 +10,7 @@ import type { BenchOverview } from '@/bindings/BenchOverview'
 import type { BenchRow } from '@/bindings/BenchRow'
 import type { DirectorComparison } from '@/bindings/DirectorComparison'
 import type { MailPlaces } from '@/bindings/MailPlaces'
+import type { SeriesSuggestion } from '@/bindings/SeriesSuggestion'
 import type { LabelSummary } from '@/bindings/LabelSummary'
 import type { MailboxWritesState } from '@/bindings/MailboxWritesState'
 import type { ActionInvocation } from '@/bindings/ActionInvocation'
@@ -168,6 +169,8 @@ export const signalEvaluations = (digId: string, messageId: string) => call<Sign
 export const listStrata = () => call<Stratum[]>('list_strata')
 
 export const listConversations = () => call<Conversation[]>('list_conversations')
+/** What Riddle noticed about its rules: senders whose open Finds pile up on one subject. */
+export const listSuggestions = () => call<SeriesSuggestion[]>('list_suggestions')
 export const getConversation = (conversationId: string) => call<Conversation>('get_conversation', { conversationId })
 export const directorSend = (args: { conversationId?: string | null; message: string; digIds?: string[] | null; title?: string | null }) =>
   call<DirectorSendResult>('director_send', { conversationId: args.conversationId ?? null, message: args.message, digIds: args.digIds ?? null, title: args.title ?? null })
@@ -248,6 +251,7 @@ export const qk = {
   strata: ['strata'] as const,
   conversations: ['conversations'] as const,
   conversation: (id: string) => ['conversation', id] as const,
+  suggestions: ['suggestions'] as const,
   expeditions: ['expeditions'] as const,
   expedition: (id: string) => ['expedition', id] as const,
   drafts: (digId: string) => ['drafts', digId] as const,

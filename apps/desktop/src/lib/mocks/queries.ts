@@ -17,6 +17,7 @@ import type { RouteCheck } from '@/bindings/RouteCheck'
 import type { Find } from '@/bindings/Find'
 import type { Dig } from '@/bindings/Dig'
 import type { Mesh } from '@/bindings/Mesh'
+import type { SeriesSuggestion } from '@/bindings/SeriesSuggestion'
 import type { MeshOrder } from '@/bindings/MeshOrder'
 import type { Pack } from '@/bindings/Pack'
 import type { PackInfo } from '@/bindings/PackInfo'
@@ -737,4 +738,68 @@ export function trustStats(state: MockState, digId: string | null, sinceDays: nu
     })
     .sort((a, b) => Number(b.decisions) - Number(a.decisions) || a.name.localeCompare(b.name))
   return { since: since.toISOString(), digCount: digs.length, decisions: u64(decisions), corrected: u64(corrected), undone: u64(undone), wouldArchive: u64(wouldArchive), rules, offer }
+}
+
+/**
+ * What Riddle noticed about its rules, mirroring `riddle_agent::series`: a
+ * sender whose open Finds repeat one subject (numbers and reply prefixes
+ * aside) under a route that keeps no series, three or more to a run.
+ */
+export function seriesSuggestions(state: MockState): SeriesSuggestion[] {
+  const norm = (s: string) =>
+    s
+      .trim()
+      .toLowerCase()
+      .replace(/^((re|fwd?|fw):\s*)+/, '')
+      .replace(/\d+/g, '#')
+      .replace(/\s+/g, ' ')
+      .trim()
+  const head = (t: string) => t.split('→')[0].trim()
+  const meshes = latestMeshes(state, false)
+  type Group = { meshId: string; meshName: string | null; route: string | null; sender: string; runs: Map<string, { finds: string[]; sample: string }> }
+  const groups = new Map<string, Group>()
+  for (const f of state.finds) {
+    if (f.status !== 'open') continue
+    const src = f.sources[0]
+    if (!src) continue
+    const m = state.messages.find((x) => x.id === src.messageId)
+    // The mock keeps a message's deciding Mesh and rule on its trace.
+    const t = m ? state.traces.get(`tr_${m.id}`) : undefined
+    if (!m || !t?.meshId) continue
+    const meshId = t.meshId
+    const mesh = meshes.find((x) => x.id === meshId)
+    const rule = t.matchedRule
+    const route = mesh && rule ? mesh.routes.find((r) => head(r.text) === head(rule)) : undefined
+    if (route?.output.replaces) continue
+    const sender = m.from.email.trim().toLowerCase()
+    const routeText = route?.text ?? rule ?? null
+    const key = `${meshId}|${routeText ?? ''}|${sender}`
+    const g = groups.get(key) ?? { meshId, meshName: mesh?.name ?? null, route: routeText, sender, runs: new Map() }
+    const run = g.runs.get(norm(m.subject)) ?? { finds: [], sample: m.subject.trim() }
+    run.finds.push(f.id)
+    g.runs.set(norm(m.subject), run)
+    groups.set(key, g)
+  }
+  const out: SeriesSuggestion[] = []
+  for (const g of groups.values()) {
+    const runs = [...g.runs.values()].filter((r) => r.finds.length >= 3).sort((a, b) => b.finds.length - a.finds.length)
+    if (!runs.length) continue
+    const count = runs.reduce((n, r) => n + r.finds.length, 0)
+    const what = g.meshName ? `the ${g.meshName} Mesh` : 'this Mesh'
+    const side = runs.length > 1 ? `, in ${runs.length} runs side by side` : ''
+    const route = g.route ? ` route \`${g.route}\`` : ''
+    out.push({
+      meshId: g.meshId,
+      meshVersion: null,
+      meshName: g.meshName,
+      route: g.route,
+      sender: g.sender,
+      count,
+      runs: runs.length,
+      sample: runs[0].sample,
+      text: `${count} open Finds from ${g.sender} say the same thing, numbers aside ("${runs[0].sample}")${side}, under ${what}'s${route}. I can propose \`+ Replaces: same subject\` on that route: the newest of each run stays open and the rest close as Superseded; you would see the rule text and a simulation before anything changes.`,
+      findIds: runs.flatMap((r) => r.finds),
+    })
+  }
+  return out.sort((a, b) => b.count - a.count)
 }

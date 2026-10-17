@@ -249,6 +249,14 @@ impl DirectorReads for AppReads {
                 .map(|m| m.name)
         });
         corrections.sort_by_key(|c| std::cmp::Reverse(c.created_at));
+        // Piles, not corrections: a sender whose open Finds repeat one
+        // subject under a route that keeps no series.
+        let series: Vec<_> = self
+            .0
+            .series_suggestions(&scope.dig_ids)?
+            .into_iter()
+            .filter(|s| only.is_none() || Some(s.mesh_id.as_str()) == only.as_deref())
+            .collect();
         Ok(json!({
             "suggestions": suggestions.iter().map(|s| json!({
                 "meshId": s.mesh_id,
@@ -258,6 +266,7 @@ impl DirectorReads for AppReads {
                 "pattern": s.pattern,
                 "text": s.text,
             })).collect::<Vec<_>>(),
+            "seriesSuggestions": series,
             // Identifiers and dispositions only; the Director reads a message
             // with get_message when its content matters.
             "corrections": corrections.iter().take(50).map(|c| json!({

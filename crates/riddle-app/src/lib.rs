@@ -23,6 +23,7 @@ pub mod ops;
 pub mod paths;
 pub mod places;
 pub mod reads;
+pub mod suggestions;
 pub mod words;
 
 use riddle_actions::{Runtime, Services};

@@ -57,6 +57,19 @@ function renderDirector() {
 }
 
 describe('the Director page', () => {
+  it('voices a pile of same-subject Finds as a suggestion that prefills the composer', async () => {
+    resetMockState()
+    registerMocks()
+    mockState().conversations.splice(0)
+    renderDirector()
+    // Three "batteries are critically low" Do Finds from one sender in the fixtures.
+    const hint = await screen.findByRole('button', { name: /3 Finds from noreply@august\.example say the same thing/ })
+    fireEvent.click(hint)
+    const box = (await screen.findByLabelText('Message to the Director')) as HTMLTextAreaElement
+    await waitFor(() => expect(box.value).toContain('Replaces: same subject'))
+    expect(box.value).toContain('noreply@august.example')
+  })
+
   it('titles a conversation by what the prefilled draft is about, and copies a link to it', async () => {
     resetMockState()
     registerMocks()

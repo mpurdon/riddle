@@ -32,12 +32,14 @@ pub mod corrections;
 pub mod director;
 pub mod fit;
 pub mod reads;
+pub mod series;
 pub mod tool_loop;
 pub mod tools;
 
 pub use corrections::{suggest_mesh_updates, Suggestion};
 pub use director::{Director, DirectorConfig, SendRequest};
 pub use reads::{DirectorReads, DirectorReadsHandle, ReadScope, ScriptedReads};
+pub use series::{suggest_series, OpenFindRow};
 pub use tool_loop::{
     LoopBudget, LoopEvent, LoopOutcome, LoopPrincipal, LoopRequest, LoopStop, ToolLoop,
 };

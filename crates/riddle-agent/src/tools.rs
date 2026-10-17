@@ -140,7 +140,7 @@ impl ReadTool {
             ),
             ReadTool::MeshCorrections => ToolSpec::new(
                 self.name(),
-                "The user's recent corrections (dismissed Finds, retypes, moves) grouped by the Mesh that made the corrected decision, with a suggestion where three or more point the same way. Evidence for proposing a Mesh change; never a reason to change one without the user's yes.",
+                "The user's recent corrections (dismissed Finds, retypes, moves) grouped by the Mesh that made the corrected decision, with a suggestion where three or more point the same way; and seriesSuggestions, senders whose open Finds repeat one subject (numbers aside) under a route without Replaces, each naming the Mesh, the route and the count, for proposing `+ Replaces: same subject` on that route. Evidence for proposing a Mesh change; never a reason to change one without the user's yes.",
                 json!({"type":"object","properties":{"meshId":{"type":"string"}}}),
             ),
         }

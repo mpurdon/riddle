@@ -19,7 +19,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Bot, Check, Link2, Plus, RefreshCw, Send, ShieldAlert, X } from 'lucide-react'
 import type { ToolCall } from '@/bindings/ToolCall'
 import type { Turn } from '@/bindings/Turn'
-import { directorRetry, directorSend, getConversation, listConversations, qk } from '@/lib/api'
+import type { SeriesSuggestion } from '@/bindings/SeriesSuggestion'
+import { directorRetry, directorSend, getConversation, listConversations, listSuggestions, qk } from '@/lib/api'
 import { cx, fmtMs, fmtRelative, fmtUsd, num } from '@/lib/format'
 import { useDigContext } from '@/lib/queries'
 import { keysLabel } from '@/lib/shortcuts'
@@ -35,6 +36,16 @@ import { ErrorCard } from '@/components/ErrorCard'
 import { PageHeader, useCopy } from '@/components/Bits'
 import { ProposalsPanel } from './ProposalsPanel'
 import { Resizable } from '@/components/Resizable'
+
+/**
+ * What Riddle noticed on its own, as a question to the Director: a sender
+ * whose open Finds pile up on one subject. The Director proposes the rule
+ * change and simulates it; nothing is sent until the user presses send.
+ */
+function seriesPrompt(h: SeriesSuggestion): string {
+  const where = h.meshName ? ` under the ${h.meshName} Mesh` : ''
+  return `${h.count} open Finds from ${h.sender} say the same thing ("${h.sample}")${where}. Propose "+ Replaces: same subject" on the route that raises them, and show me what it would do to recent mail before anything is applied.`
+}
 
 const SUGGESTIONS = [
   'What actually needs my attention this morning?',
@@ -122,6 +133,7 @@ export default function DirectorPage() {
   const qc = useQueryClient()
   const { digId, digs } = useDigContext()
   const convs = useQuery({ queryKey: qk.conversations, queryFn: listConversations })
+  const hints = useQuery({ queryKey: qk.suggestions, queryFn: listSuggestions })
   const conv = useQuery({ queryKey: conversationId ? qk.conversation(conversationId) : ['conversation', 'none'], queryFn: () => getConversation(conversationId!), enabled: !!conversationId })
   const live = useDirector((s) => (conversationId ? s.live[conversationId] : undefined))
   const prefill = useDirector((s) => s.prefill)
@@ -242,6 +254,13 @@ export default function DirectorPage() {
                   <p>It works with the same accounts, Finds, Strata, Meshes and drafts you do, through the same Actions. Before anything leaves the machine it shows you the real recipients and asks.</p>
                   <p className="mt-2 text-xs text-clay">Pick a question to start with; edit it, then press Enter to send.</p>
                   <ul className="mt-3 flex flex-col gap-1 text-left">
+                    {(hints.data ?? []).map((h) => (
+                      <li key={`${h.meshId}:${h.sender}`}>
+                        <button type="button" className="rounded px-2 py-1 text-left text-sm text-ochre hover:bg-sand" onClick={() => suggest(seriesPrompt(h))} title="Riddle noticed this. Put a question about it in the composer; nothing is sent until you press send">
+                          {h.count} Finds from {h.sender} say the same thing. Collapse them to one?
+                        </button>
+                      </li>
+                    ))}
                     {SUGGESTIONS.map((s) => (
                       <li key={s}>
                         <button type="button" className="rounded px-2 py-1 text-left text-sm text-ochre hover:bg-sand" onClick={() => suggest(s)} title="Put this in the composer; nothing is sent until you press send">
