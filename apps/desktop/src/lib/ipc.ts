@@ -58,7 +58,7 @@ async function bridgeCall<T>(command: string, args: Record<string, unknown>): Pr
 }
 
 /** Commands that must not be logged: logging them would log the act of reading the log. */
-const UNLOGGED = new Set(['ui_log', 'read_app_logs', 'log_categories', 'dev_info', 'in_flight_calls', 'task_centre', 'ui_snapshot'])
+const UNLOGGED = new Set(['ui_log', 'read_app_logs', 'log_categories', 'dev_info', 'task_centre', 'ui_snapshot'])
 
 const SLOW_CALL_MS = 2_000
 const TIMEOUT_MS = 60_000

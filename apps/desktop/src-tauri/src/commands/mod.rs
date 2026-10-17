@@ -13,7 +13,6 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         dev::ui_log,
         dev::read_app_logs,
         dev::log_categories,
-        dev::in_flight_calls,
         dev::export_diagnostics,
         dev::clear_caches,
         actions::invoke_action,

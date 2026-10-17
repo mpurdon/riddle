@@ -1,4 +1,9 @@
 //! Current and historical classifications in a Dig store.
+//!
+//! `messages.sifted_at` and `messages.shadow_sifted_at` mirror a message's
+//! current classification through triggers on this table (migration 0008):
+//! every insert, supersede or delete here updates them in the same
+//! transaction, so the writers below carry no bookkeeping for the backlog.
 
 use crate::{from_json, now_ts, to_json, ts, Store};
 use riddle_core::{Classification, Disposition, DispositionKind, MessageId, ThreadId};
@@ -386,4 +391,55 @@ pub fn stale_unresolved(
             .collect();
         rows
     })
+}
+
+/// `retire_shadow` inside a caller's transaction: Sift persists a decision
+/// (facts, classification, trace, series) as one write, where it was five
+/// to seven (17 Oct 2026).
+pub fn retire_shadow_in(c: &rusqlite::Connection, id: &MessageId) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE classifications SET superseded_at = ?2 WHERE message_id = ?1 AND shadow = 1 AND superseded_at IS NULL",
+        params![id.as_str(), now_ts()],
+    )?;
+    Ok(())
+}
+
+/// `spread_to_replies` inside a caller's transaction (see `retire_shadow_in`).
+pub fn spread_to_replies_in(
+    c: &rusqlite::Connection,
+    thread: &ThreadId,
+    strata: &[String],
+) -> rusqlite::Result<()> {
+    if strata.is_empty() {
+        return Ok(());
+    }
+    let rows: Vec<(String, String)> = {
+        let mut st = c.prepare(
+            "SELECT k.id, k.json FROM classifications k JOIN messages m ON m.id = k.message_id
+             WHERE m.thread_id = ?1 AND m.is_sent = 1 AND k.shadow = 0 AND k.superseded_at IS NULL",
+        )?;
+        let rows = st
+            .query_map([thread.as_str()], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        rows
+    };
+    for (id, json) in rows {
+        let mut k: Classification = from_json(json)?;
+        let missing: Vec<&String> = strata.iter().filter(|s| !k.strata.contains(s)).collect();
+        if missing.is_empty() {
+            continue;
+        }
+        for s in missing {
+            k.strata.push(s.clone());
+            c.execute(
+                "INSERT OR IGNORE INTO message_strata (message_id, stratum) VALUES (?1, ?2)",
+                params![k.message_id.as_str(), s],
+            )?;
+        }
+        c.execute(
+            "UPDATE classifications SET json = ?2 WHERE id = ?1",
+            params![id, to_json(&k)?],
+        )?;
+    }
+    Ok(())
 }

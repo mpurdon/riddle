@@ -105,11 +105,6 @@ export interface LogLine {
   payload: unknown | null
 }
 
-export interface InFlightCall {
-  command: string
-  elapsedMs: number
-}
-
 export interface ProbeResult {
   ok: boolean
   latencyMs: number

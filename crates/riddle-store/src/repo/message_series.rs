@@ -25,49 +25,7 @@ pub fn settle(
     key: &str,
     now: &chrono::DateTime<chrono::Utc>,
 ) -> Result<Vec<MessageId>> {
-    store.write(|c| {
-        let members: Vec<(String, i64, Option<String>)> = {
-            let mut st = c.prepare(MEMBERS)?;
-            let rows = st
-                .query_map([key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            rows
-        };
-        let Some(keeper) = members
-            .iter()
-            .max_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)))
-            .map(|m| m.0.clone())
-        else {
-            return Ok(vec![]);
-        };
-        let mut newly = Vec::new();
-        for (id, _, before) in &members {
-            let by = (*id != keeper).then(|| keeper.clone());
-            if *before == by {
-                continue;
-            }
-            c.execute(
-                "INSERT INTO message_series (message_id, series_key, superseded_by, kept_at, updated_at)
-                 VALUES (?1, ?2, ?3, NULL, ?4)
-                 ON CONFLICT(message_id) DO UPDATE SET series_key = excluded.series_key,
-                   superseded_by = excluded.superseded_by, updated_at = excluded.updated_at",
-                params![id, key, by, ts(now)],
-            )?;
-            if by.is_some() {
-                newly.push(MessageId(id.clone()));
-            }
-        }
-        // Messages that left the series (re-decided as something else) and
-        // were not kept no longer stand in it.
-        c.execute(
-            &format!(
-                "DELETE FROM message_series WHERE series_key = ?1 AND kept_at IS NULL
-                   AND message_id NOT IN (SELECT message_id FROM ({MEMBERS}))"
-            ),
-            [key],
-        )?;
-        Ok(newly)
-    })
+    store.write(|c| settle_in(c, key, now))
 }
 
 /// The user undid a superseding: these messages stand again and stay out of
@@ -88,4 +46,54 @@ pub fn keep(
         }
         Ok(n)
     })
+}
+
+/// `settle` inside a caller's transaction: Sift persists a decision and
+/// settles its series in one write (17 Oct 2026).
+pub fn settle_in(
+    c: &rusqlite::Connection,
+    key: &str,
+    now: &chrono::DateTime<chrono::Utc>,
+) -> rusqlite::Result<Vec<MessageId>> {
+    let members: Vec<(String, i64, Option<String>)> = {
+        let mut st = c.prepare(MEMBERS)?;
+        let rows = st
+            .query_map([key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+    let Some(keeper) = members
+        .iter()
+        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)))
+        .map(|m| m.0.clone())
+    else {
+        return Ok(vec![]);
+    };
+    let mut newly = Vec::new();
+    for (id, _, before) in &members {
+        let by = (*id != keeper).then(|| keeper.clone());
+        if *before == by {
+            continue;
+        }
+        c.execute(
+            "INSERT INTO message_series (message_id, series_key, superseded_by, kept_at, updated_at)
+             VALUES (?1, ?2, ?3, NULL, ?4)
+             ON CONFLICT(message_id) DO UPDATE SET series_key = excluded.series_key,
+               superseded_by = excluded.superseded_by, updated_at = excluded.updated_at",
+            params![id, key, by, ts(now)],
+        )?;
+        if by.is_some() {
+            newly.push(MessageId(id.clone()));
+        }
+    }
+    // Messages that left the series (re-decided as something else) and
+    // were not kept no longer stand in it.
+    c.execute(
+        &format!(
+            "DELETE FROM message_series WHERE series_key = ?1 AND kept_at IS NULL
+               AND message_id NOT IN (SELECT message_id FROM ({MEMBERS}))"
+        ),
+        [key],
+    )?;
+    Ok(newly)
 }

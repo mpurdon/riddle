@@ -176,8 +176,11 @@ impl App {
             {
                 continue;
             }
+            // Newest first, so the first id is the message the question is
+            // asked on; the v3 verdicts were judged on the oldest by mistake
+            // (17 Oct 2026), which is why v4 judges every domain afresh.
             let ids = repo::messages::ids_from_sender(&store, &sender)?;
-            let Some(newest) = ids.last().cloned() else {
+            let Some(newest) = ids.first().cloned() else {
                 continue;
             };
             let mut samples = vec![newest.clone()];

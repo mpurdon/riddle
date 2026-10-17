@@ -167,8 +167,10 @@ impl OutboxProjection {
     }
 }
 
-impl ProjectionHook for OutboxProjection {
-    fn project(&self, dig_id: &DigId, classification: &Classification) -> Result<()> {
+impl OutboxProjection {
+    /// The Dig a classification is projected to, or `None` when it stays in
+    /// Riddle: below Act, under a Mesh's own cap, or with projection off.
+    fn projecting(&self, dig_id: &DigId, classification: &Classification) -> Result<Option<Dig>> {
         // Below Act, Sift's decision stays in Riddle. It is not queued for
         // later either, so raising autonomy never releases a backlog. Your own
         // corrections (Move to Spoil, set disposition) come through this hook
@@ -176,23 +178,32 @@ impl ProjectionHook for OutboxProjection {
         if classification.mechanism != DecisionMechanism::User
             && sift_projection_held(&self.runtime.policy.read(), dig_id).is_some()
         {
-            return Ok(());
+            return Ok(None);
         }
         let index = self.stores.index();
         // A rule may hold its own decisions below what the account allows.
         if classification.mechanism != DecisionMechanism::User {
             if let (Some(mid), Some(v)) = (&classification.mesh_id, classification.mesh_version) {
                 if cap_holds(self.mesh_cap(&index, mid, v)?) {
-                    return Ok(());
+                    return Ok(None);
                 }
             }
         }
         let Some(dig) = repo::digs::get(&index, dig_id)? else {
-            return Ok(());
+            return Ok(None);
         };
         if dig.projection == ProjectionMode::None {
-            return Ok(());
+            return Ok(None);
         }
+        Ok(Some(dig))
+    }
+}
+
+impl ProjectionHook for OutboxProjection {
+    fn project(&self, dig_id: &DigId, classification: &Classification) -> Result<()> {
+        let Some(dig) = self.projecting(dig_id, classification)? else {
+            return Ok(());
+        };
         let store = self.stores.dig(dig_id)?;
         let Some(message) = repo::messages::get(&store, dig_id, &classification.message_id)? else {
             return Ok(());
@@ -201,6 +212,27 @@ impl ProjectionHook for OutboxProjection {
             &store,
             &dig,
             &message,
+            &classification.disposition,
+            &classification.strata,
+        )?;
+        Ok(())
+    }
+    /// Sift's path: the message it has just decided, not read again
+    /// (17 Oct 2026); the gates are the same.
+    fn project_message(
+        &self,
+        dig_id: &DigId,
+        message: &Message,
+        classification: &Classification,
+    ) -> Result<()> {
+        let Some(dig) = self.projecting(dig_id, classification)? else {
+            return Ok(());
+        };
+        let store = self.stores.dig(dig_id)?;
+        riddle_projection::outbox::enqueue_classification(
+            &store,
+            &dig,
+            message,
             &classification.disposition,
             &classification.strata,
         )?;

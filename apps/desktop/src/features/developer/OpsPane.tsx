@@ -5,9 +5,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Copy, FolderOpen, Pause, Play } from 'lucide-react'
-import { exportDiagnostics, inFlightCalls, logCategories, probeJudge, probeLlm, probeProvider, qk, readAppLogs } from '@/lib/api'
+import { exportDiagnostics, logCategories, probeJudge, probeLlm, probeProvider, qk, readAppLogs } from '@/lib/api'
 import { cx, fmtBytes, fmtClockMs, fmtDuration, safeJson } from '@/lib/format'
-import { isTauri, log } from '@/lib/ipc'
+import { inFlightCalls, isTauri, log } from '@/lib/ipc'
 import { useDevInfo, useDigs, useSettings } from '@/lib/queries'
 import { toast, useUi } from '@/lib/stores'
 import type { ProbeResult } from '@/lib/types'
@@ -164,13 +164,25 @@ function Diagnostics() {
   )
 }
 
+/**
+ * The invoke wrapper's own registry (`lib/ipc.ts`), read in place: every
+ * call the UI makes passes through it, so a hang shows here with its
+ * elapsed time. The pane used to ask the backend, which could not know
+ * what the front end was waiting on and answered with an empty list. The
+ * registry offers no subscription, so the pane polls it once a second
+ * while it is on screen.
+ */
 function InFlight() {
-  const q = useQuery({ queryKey: qk.inFlight, queryFn: inFlightCalls, refetchInterval: 1000 })
+  const [calls, setCalls] = useState(() => inFlightCalls())
+  useEffect(() => {
+    const t = setInterval(() => setCalls(inFlightCalls()), 1000)
+    return () => clearInterval(t)
+  }, [])
   return (
-    <Section title="IPC in flight" right={<span className="text-xs text-clay">{q.data?.length ?? 0}</span>}>
-      {q.data?.length ? (
+    <Section title="IPC in flight" right={<span className="text-xs text-clay">{calls.length}</span>}>
+      {calls.length ? (
         <ul className="text-xs">
-          {q.data.map((c, i) => (
+          {calls.map((c, i) => (
             <li key={i} className="flex justify-between mono">
               <span>{c.command}</span>
               <span className={cx(c.elapsedMs > 2000 && 'text-ochre')}>{c.elapsedMs}ms</span>

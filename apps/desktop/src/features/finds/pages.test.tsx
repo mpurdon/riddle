@@ -131,6 +131,19 @@ describe('Unresolved', () => {
     expect(screen.getAllByRole('button', { name: /^Decide all \d+ from .+ as$/ }).length).toBeGreaterThanOrEqual(1)
   })
 
+  it('says why each row is held and groups the tray by reason in the header', async () => {
+    mountApp('#/unresolved')
+    const list = await screen.findByRole('listbox', { name: 'Unresolved messages' })
+    await waitFor(() => expect(within(list).getAllByRole('option').length).toBe(5))
+    // Each row carries its explanation's sentence, not only the cursor row's pane.
+    expect(await within(list).findByText('Too little context: a first-time sender about an unnamed matter.')).toBeTruthy()
+    expect(within(list).getAllByText('An alert from a monitoring sender no rule mentions; the Signals disagree on whether it needs you.').length).toBe(3)
+    const held = await screen.findByLabelText('Why they are held')
+    await waitFor(() => expect(held.textContent).toMatch(/^3 held: An alert from a monitoring sender no rule mentions; the Signals disagree on whether it needs you\. · 1: /))
+    expect(held.textContent).toContain('1: Too little context: a first-time sender about an unnamed matter.')
+    expect(held.textContent).toContain('1: Portuguese, from a first-time sender. Riddle would rather ask than guess.')
+  })
+
   it('n no longer files the message and ! marks Contamination', async () => {
     mountApp('#/unresolved')
     const list = await screen.findByRole('listbox', { name: 'Unresolved messages' })

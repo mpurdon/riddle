@@ -51,7 +51,6 @@ import type { UserProfile } from '@/bindings/UserProfile'
 import type {
   DevInfo,
   DirectorSendResult,
-  InFlightCall,
   LogLine,
   MessageFilter,
   ProbeResult,
@@ -213,7 +212,6 @@ export const probeProvider = (digId: string) => call<ProbeResult>('probe_provide
 export const readAppLogs = (args: { limit?: number; category?: string | null; level?: string | null; text?: string | null } = {}) =>
   call<LogLine[]>('read_app_logs', { limit: args.limit ?? null, category: args.category ?? null, level: args.level ?? null, text: args.text ?? null })
 export const logCategories = () => call<string[]>('log_categories')
-export const inFlightCalls = () => call<InFlightCall[]>('in_flight_calls')
 export const exportDiagnostics = () => call<string>('export_diagnostics')
 export const updatePreview = () => call<UpdatePreview | null>('update_preview')
 
@@ -272,7 +270,6 @@ export const qk = {
   comparison: ['comparison'] as const,
   logs: ['logs'] as const,
   logCategories: ['log_categories'] as const,
-  inFlight: ['in_flight'] as const,
   actions: ['actions'] as const,
   pending: ['pending'] as const,
   updatePreview: ['update_preview'] as const,

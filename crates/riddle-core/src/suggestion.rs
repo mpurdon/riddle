@@ -97,7 +97,7 @@ pub struct SenderKindVerdict {
 
 impl SenderKindVerdict {
     /// v3: the judge's identity on the verdict.
-    pub const PREFIX: &'static str = "sender_kind:v3:";
+    pub const PREFIX: &'static str = "sender_kind:v4:";
 
     pub fn key(domain: &str) -> String {
         format!("{}{}", Self::PREFIX, domain.trim().to_ascii_lowercase())

@@ -8,11 +8,17 @@
  * "Decide all as…" header, because a burst from a notifier was the common
  * case and it took one keypress per message; and every decision says what
  * it taught and how many from that sender are still waiting.
+ *
+ * Every row shows why it is held, and the header groups the tray by that
+ * reason ("3 held: an alert no rule mentions · 1: …"). The reason was
+ * visible for the cursor row alone, so a tray of forty read as forty
+ * unknowns. A row carries no reason of its own, so each row's explanation
+ * is read once, under the key the pane uses for the cursor row.
  */
 import { NeverHideButton } from '@/components/NeverHideButton'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { ListChecks } from 'lucide-react'
 import type { Disposition } from '@/bindings/Disposition'
 import type { FindType } from '@/bindings/FindType'
@@ -38,7 +44,7 @@ import { senderOf } from '@/components/ThreadRow'
 import { openFromList } from '@/features/messages/queue'
 import { usePagedMessages } from '@/features/messages/usePagedMessages'
 import { senderKey } from '@/features/rules/yourCorrections'
-import { decideOutcome, groupBySender, remainingFromSender, targetLabel, teachingLine } from './model'
+import { decideOutcome, groupBySender, reasonGroups, reasonLine, remainingFromSender, targetLabel, teachingLine } from './model'
 import { SelectionBar } from './SelectionBar'
 import { useBulkRun } from './useBulkRun'
 
@@ -58,6 +64,13 @@ export default function UnresolvedPage() {
   const current = list.current
   const { runBulk, bulkError } = useBulkRun(list)
   const ex = useQuery({ queryKey: current ? qk.explain(current.digId, current.id) : ['explain', 'none'], queryFn: () => explain(current!.digId, current!.id), enabled: !!current })
+  /** Each row's reason: undefined until read, null when the explanation has none or could not be read. */
+  const reasons = useQueries({
+    queries: ordered.map((m) => ({ queryKey: qk.explain(m.digId, m.id), queryFn: () => explain(m.digId, m.id), staleTime: 60_000, retry: false })),
+    combine: (rs) => rs.map((r) => (r.data ? r.data.reason.trim() || null : r.error ? null : undefined)),
+  })
+  const reasonOf = (m: MessageSummary) => reasons[indexOf.get(m.id) ?? -1]
+  const heldLine = reasonLine(reasonGroups(ordered, reasonOf))
   const [neverHiddenBusy, setNeverHiddenBusy] = useState(false)
   /** The messages a keyboard `f` or a cluster's "Find…" is choosing a type for. */
   const [typePicker, setTypePicker] = useState<MessageSummary[] | null>(null)
@@ -121,7 +134,13 @@ export default function UnresolvedPage() {
   return (
     <div className="flex min-h-0 flex-1">
       <section className="flex w-[460px] shrink-0 flex-col border-r border-line">
-        <PageHeader title="Unresolved" subtitle={q.total !== null ? `${num(q.total)} Riddle could not decide. Deciding here is the fastest way to teach it.` : 'Loading…'} />
+        <PageHeader title="Unresolved" subtitle={q.total !== null ? `${num(q.total)} Riddle could not decide. Deciding here is the fastest way to teach it.` : 'Loading…'}>
+          {heldLine ? (
+            <span className="text-xs text-ink-2 selectable" aria-label="Why they are held">
+              {heldLine}
+            </span>
+          ) : null}
+        </PageHeader>
         <SelectionBar count={count} error={bulkError} onClear={list.clear} />
         <div className="min-h-0 flex-1 overflow-auto" role="listbox" aria-multiselectable aria-label="Unresolved messages">
           {!q.isPending && !ordered.length ? (
@@ -141,6 +160,7 @@ export default function UnresolvedPage() {
                 const idx = indexOf.get(m.id) ?? 0
                 const active = current?.id === m.id
                 const checked = list.selected.has(m.id)
+                const reason = reasonOf(m)
                 return (
                   <div key={m.id} role="option" aria-selected={active} data-row-index={idx} tabIndex={-1} onClick={() => list.setCursor(idx)} className={cx('flex cursor-default items-start gap-2 border-b border-line/60 px-3 py-2', active ? 'row-selected' : checked ? 'bg-ochre/5' : 'hover:bg-sand/60')}>
                     <input type="checkbox" checked={checked} onChange={() => list.toggle(m.id)} onClick={(e) => e.stopPropagation()} aria-label={`Select ${m.subject}`} title={`Select or deselect (${keyHint('select')})`} className="mt-1 shrink-0" />
@@ -153,6 +173,11 @@ export default function UnresolvedPage() {
                       <div className="mt-0.5 flex items-center gap-2 text-xs text-ink-2">
                         <span className="truncate selectable">{m.snippet}</span>
                       </div>
+                      {reason ? (
+                        <div className="mt-0.5 truncate text-2xs text-ochre selectable" title={reason}>
+                          {reason}
+                        </div>
+                      ) : null}
                       <div className="mt-1 text-2xs text-clay">
                         {digName(m.digId)} <StrataChips strata={m.strata} />
                       </div>

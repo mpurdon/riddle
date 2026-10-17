@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MessageSummary } from '@/bindings/MessageSummary'
-import { bulkOutcome, decideOutcome, findStatusLabel, groupBySender, nextFindsCursor, outcomeOf, pendingStatuses, remainingFromSender, tabEmptyState, tabForStatus, tabStatuses, tabSubtitle, targetLabel, teachingLine } from './model'
+import { bulkOutcome, decideOutcome, findStatusLabel, groupBySender, nextFindsCursor, outcomeOf, pendingStatuses, reasonGroups, reasonLine, remainingFromSender, tabEmptyState, tabForStatus, tabStatuses, tabSubtitle, targetLabel, teachingLine } from './model'
 
 const msg = (id: string, email: string, name: string | null = null): MessageSummary => ({
   id,
@@ -141,5 +141,23 @@ describe('sender clusters in Unresolved', () => {
     expect(teachingLine('Filed', 2, 'notifications@github.example')).toBe('Recorded as a correction: Filed. 2 more from notifications@github.example are still Unresolved.')
     expect(teachingLine('Spoil', 1, 'x@y.example')).toBe('Recorded as a correction: Spoil. 1 more from x@y.example is still Unresolved.')
     expect(teachingLine('Filed', 0, 'x@y.example')).toBe('Recorded as a correction: Filed. Nothing else from x@y.example is Unresolved.')
+  })
+})
+
+describe('why the tray is held', () => {
+  const reasons: Record<string, string | null | undefined> = { a: 'budget exhausted', b: 'judge unavailable', c: 'budget exhausted', d: undefined, e: '  ', f: 'budget exhausted' }
+  const items = Object.keys(reasons).map((id) => msg(id, `${id}@x.example`))
+
+  it('groups rows by reason, largest first, leaving out rows not read yet', () => {
+    expect(reasonGroups(items, (m) => reasons[m.id])).toEqual([
+      { reason: 'budget exhausted', count: 3 },
+      { reason: 'judge unavailable', count: 1 },
+      { reason: null, count: 1 },
+    ])
+  })
+
+  it('reads as one line, and says nothing until a reason is known', () => {
+    expect(reasonLine(reasonGroups(items, (m) => reasons[m.id]))).toBe('3 held: budget exhausted · 1: judge unavailable · 1: no reason recorded')
+    expect(reasonLine(reasonGroups(items, () => undefined))).toBeNull()
   })
 })

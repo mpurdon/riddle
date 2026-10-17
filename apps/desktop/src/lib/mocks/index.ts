@@ -6,7 +6,7 @@
  */
 import { mailPlaces } from './places'
 import { comparisonOverview, comparisonRows, directorComparisons } from './comparison'
-import { mock, clearMocks, isTauri, inFlightCalls } from '../ipc'
+import { mock, clearMocks, isTauri } from '../ipc'
 import { emitMock } from '../events'
 import { u64 } from '../format'
 import type { PageRequest } from '@/bindings/PageRequest'
@@ -150,7 +150,6 @@ export function registerMocks(): void {
   })
   mock('read_app_logs', (a) => q.readLogs(state, { limit: opt(a, 'limit') as number | null, category: opt(a, 'category') as string | null, level: opt(a, 'level') as string | null, text: opt(a, 'text') as string | null }))
   mock('log_categories', () => q.LOG_CATEGORIES)
-  mock('in_flight_calls', () => inFlightCalls())
   mock('export_diagnostics', () => q.exportDiagnostics(state))
   mock('update_preview', () => q.updatePreview(state))
   mock('ui_log', () => undefined)

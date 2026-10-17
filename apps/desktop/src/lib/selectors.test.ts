@@ -4,7 +4,7 @@ import type { Summary } from '@/bindings/Summary'
 import type { TaskCentre } from '@/bindings/TaskCentre'
 import type { Job } from '@/bindings/Job'
 import { u64 } from './format'
-import { digStatusChip, errorAffordance, jobPriorityLabel, skippedLines, skippedSummary, summaryCopy, taskCentreIndicator, digPipeline } from './selectors'
+import { catchUpJob, catchUpLine, digStatusChip, errorAffordance, jobPriorityLabel, skippedLines, skippedSummary, summaryCopy, taskCentreIndicator, digPipeline } from './selectors'
 
 const summary = (over: Partial<Summary> = {}): Summary => ({
   asOf: '2026-09-22T07:42:00.000Z',
@@ -124,6 +124,37 @@ describe('the Task Centre indicator', () => {
     const job = (state: 'running' | 'queued' | 'paused') => ({ id: state, kind: 'catch_up' as const, priority: 'catch_up' as const, status: state === 'paused' ? { state, reason: 'sleep' } : { state }, digId: null, label: state, progress: { done: u64(0), total: null, unit: 'x', step: 's', etaSeconds: null }, checkpoint: null, cancellable: true, attempts: 0, createdAt: '', startedAt: null, finishedAt: null, updatedAt: '' })
     const i = taskCentreIndicator(tc({ jobs: [job('running'), job('queued'), job('paused'), job('paused')] }))
     expect([i.running, i.queued, i.paused]).toEqual([1, 1, 2])
+  })
+})
+
+describe('the Summary while catching up', () => {
+  const tc = (over: Partial<TaskCentre>): TaskCentre => ({ overall: 'catching_up', digs: [{ digId: 'a', name: 'Work', status: { state: 'catching_up', remaining: u64(1240), total: u64(4981) } }], jobs: [], storeFault: null, asOf: '2026-09-22T07:42:00.000Z', ...over })
+  const job = (over: Partial<Job>): Job => ({ id: 'j', kind: 'catch_up', priority: 'catch_up', status: { state: 'running' }, digId: 'a', label: 'Catch-up: Work', progress: { done: u64(3741), total: u64(4981), unit: 'messages', step: 'Fetching bodies', etaSeconds: u64(248) }, checkpoint: null, cancellable: true, attempts: 1, createdAt: '', startedAt: null, finishedAt: null, updatedAt: '', ...over })
+
+  it('reads fetching, sorted and Finds from numbers the page already has', () => {
+    const s = summary({ caughtUp: false, findsOpen: u64(4), remainingToSift: u64(1240), totalToSift: u64(2220) })
+    expect(catchUpLine(s, tc({}), null)).toBe('Fetching 1,240 · sorted 980 · 4 need you so far')
+  })
+
+  it('leaves fetching out when no account is fetching, and counts one Find in the singular', () => {
+    const s = summary({ caughtUp: false, findsOpen: u64(1), remainingToSift: u64(200), totalToSift: u64(1180) })
+    expect(catchUpLine(s, tc({ digs: [{ digId: 'a', name: 'Work', status: { state: 'sifting', remaining: u64(200) } }] }), null)).toBe('Sorted 980 · 1 needs you so far')
+  })
+
+  it('scopes fetching to the selected account', () => {
+    const s = summary({ caughtUp: false, findsOpen: u64(0), remainingToSift: u64(0), totalToSift: u64(0) })
+    const both = tc({ digs: [{ digId: 'a', name: 'Work', status: { state: 'catching_up', remaining: u64(100), total: u64(500) } }, { digId: 'b', name: 'Home', status: { state: 'catching_up', remaining: u64(50), total: u64(80) } }] })
+    expect(catchUpLine(s, both, 'b')).toBe('Fetching 50 · sorted 0 · 0 need you so far')
+    expect(catchUpLine(s, both, null)).toBe('Fetching 150 · sorted 0 · 0 need you so far')
+  })
+
+  it('picks the running first sync over a catch-up, and only jobs for the selected account', () => {
+    const first = job({ id: 'first', kind: 'initial_sync', digId: 'b', label: 'Initial sync: Home' })
+    const t = tc({ jobs: [job({}), first, job({ id: 'done', status: { state: 'completed' } })] })
+    expect(catchUpJob(t, null)?.id).toBe('first')
+    expect(catchUpJob(t, 'a')?.id).toBe('j')
+    expect(catchUpJob(t, 'c')).toBeNull()
+    expect(catchUpJob(undefined, null)).toBeNull()
   })
 })
 

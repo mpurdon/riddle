@@ -218,10 +218,20 @@ impl Default for SiftOptions {
 /// Whether escalation to the LLM has budget left for this Dig (§55).
 pub trait EscalationBudget: Send + Sync {
     fn allows(&self, dig: &DigId) -> bool;
+    /// An escalation was made and cost this much, so a budget that keeps
+    /// its own tally for the pass can count it instead of summing the
+    /// usage ledger again on the next check (17 Oct 2026). The default
+    /// ignores it.
+    fn spent(&self, dig: &DigId, usd: f64) {
+        let _ = (dig, usd);
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct SiftOutcome {
+    /// The message decided, as Sift read it, so persisting the decision
+    /// hands it to the projection hook instead of reading it again.
+    pub message: Message,
     pub classification: Classification,
     /// What a Mesh in Shadow would have decided instead, recorded beside
     /// the live decision for the Shadow review; never applied.
@@ -261,6 +271,19 @@ pub struct Sift {
     /// The running and live Meshes (`repo::meshes::running_and_live`), read
     /// once for the pass a `Sift` is built for, not once per message.
     meshes: std::sync::OnceLock<(Vec<riddle_core::Mesh>, Vec<riddle_core::Mesh>)>,
+    /// The user's named lists and the Signal registry, read once for the
+    /// pass like the Meshes (17 Oct 2026): each message read the lists (a
+    /// kv scan) and one registry row per Signal reference, plus the version
+    /// list of every Baseline member. A list, Signal or Mesh edited while a
+    /// pass runs takes effect on the next pass.
+    pass: std::sync::OnceLock<PassSnapshot>,
+}
+
+/// What every message of a pass resolves its rules against.
+#[derive(Debug, Clone, Default)]
+pub struct PassSnapshot {
+    pub named: riddle_core::NamedLists,
+    pub registry: riddle_signals::RegistrySnapshot,
 }
 
 impl Sift {
@@ -281,6 +304,23 @@ impl Sift {
             budget: None,
             projection: None,
             meshes: std::sync::OnceLock::new(),
+            pass: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// The named lists and the Signal registry for this pass, read on the
+    /// first message and kept.
+    pub fn pass_snapshot(&self) -> riddle_errors::Result<&PassSnapshot> {
+        match self.pass.get() {
+            Some(p) => Ok(p),
+            None => {
+                let index = self.stores.index();
+                let read = PassSnapshot {
+                    named: riddle_store::repo::lists::named(&index)?,
+                    registry: riddle_signals::Registry::new(index.clone()).snapshot()?,
+                };
+                Ok(self.pass.get_or_init(|| read))
+            }
         }
     }
 

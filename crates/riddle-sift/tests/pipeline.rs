@@ -690,3 +690,196 @@ async fn move_to_spoil_records_a_correction_and_undo_restores_and_retracts() {
         1
     );
 }
+
+/// A projection hook that records what it was handed: the message with the
+/// classification (`project_message`), or the classification alone.
+#[derive(Default)]
+struct RecordingHook {
+    with_message: std::sync::Mutex<Vec<(DigId, MessageId, ClassificationId)>>,
+    without: std::sync::Mutex<Vec<MessageId>>,
+}
+
+impl ProjectionHook for RecordingHook {
+    fn project(&self, _dig: &DigId, k: &Classification) -> riddle_errors::Result<()> {
+        self.without.lock().unwrap().push(k.message_id.clone());
+        Ok(())
+    }
+    fn project_message(
+        &self,
+        dig: &DigId,
+        m: &Message,
+        k: &Classification,
+    ) -> riddle_errors::Result<()> {
+        self.with_message
+            .lock()
+            .unwrap()
+            .push((dig.clone(), m.id.clone(), k.id.clone()));
+        Ok(())
+    }
+    fn unproject(&self, _dig: &DigId, _id: &MessageId) -> riddle_errors::Result<()> {
+        Ok(())
+    }
+}
+
+/// Persisting a decision is one write (17 Oct 2026): the facts, the
+/// classification and the trace land together, the hook gets the message
+/// Sift read rather than reading it again, and deciding the message again
+/// supersedes the first decision as before.
+#[tokio::test]
+async fn persist_leaves_facts_classification_and_trace_in_one_write_and_hands_the_hook_the_message()
+{
+    let (mut sift, stores, _) = harness(Some(Arc::new(ScriptedJudge::new())));
+    let hook = Arc::new(RecordingHook::default());
+    sift.projection = Some(hook.clone());
+    let m = github_review_request();
+    let people = PeopleFacts {
+        mailing_list: true,
+        ..Default::default()
+    };
+    let mut outcome = sift.run(input(m.clone(), people.clone())).await.unwrap();
+    assert_eq!(outcome.message.id, m.id);
+    let proposal = sift.persist(&mut outcome).unwrap();
+    assert!(proposal.is_some());
+    let store = stores.dig(&DigId("d1".into())).unwrap();
+    let k = repo::classifications::current(&store, &m.id)
+        .unwrap()
+        .expect("the current classification");
+    assert_eq!(k.id, outcome.classification.id);
+    assert_eq!(
+        k.disposition,
+        Disposition::Find {
+            find_type: FindType::Review
+        }
+    );
+    assert_eq!(k.strata, outcome.classification.strata);
+    let facts = repo::facts::get(&store, &m.id).unwrap().expect("facts row");
+    assert_eq!(facts.sender_domain, outcome.facts.sender_domain);
+    let trace = repo::traces::get(&store, &k.trace_id)
+        .unwrap()
+        .expect("trace row");
+    assert_eq!(trace.conclusion, k.disposition);
+    assert_eq!(
+        trace.timing.persist_ms, outcome.timing.persist_ms,
+        "the stored trace carries the persist timing"
+    );
+    assert!(repo::classifications::current_shadow(&store, &m.id)
+        .unwrap()
+        .is_none());
+    assert!(outcome.superseded.is_empty(), "no `+ Replaces` series");
+    assert_eq!(
+        hook.with_message.lock().unwrap().as_slice(),
+        &[(DigId("d1".into()), m.id.clone(), k.id.clone())]
+    );
+    assert!(
+        hook.without.lock().unwrap().is_empty(),
+        "the hook was handed the message, not asked to read it"
+    );
+
+    // Decided again: one current decision, the first superseded.
+    let mut again = sift.run(input(m.clone(), people)).await.unwrap();
+    sift.persist(&mut again).unwrap();
+    assert_eq!(
+        repo::classifications::history(&store, &m.id).unwrap().len(),
+        2
+    );
+    assert_eq!(
+        repo::classifications::current(&store, &m.id)
+            .unwrap()
+            .unwrap()
+            .id,
+        again.classification.id,
+        "the second decision is the current one"
+    );
+    assert_eq!(repo::traces::for_message(&store, &m.id).unwrap().len(), 2);
+}
+
+/// The named lists and the Signal registry are read once for the pass a
+/// `Sift` is built for, like the Meshes (17 Oct 2026): a list added or a
+/// Signal promoted while the pass runs is used by the next pass.
+#[tokio::test]
+async fn the_lists_and_the_registry_are_read_once_per_pass_and_an_edit_waits_for_the_next_pass() {
+    let (sift, stores, _) = harness(Some(Arc::new(ScriptedJudge::new())));
+    let index = stores.index();
+    sift.run(input(github_comment(), PeopleFacts::default()))
+        .await
+        .unwrap();
+    let snapshot = sift.pass_snapshot().unwrap();
+    assert!(!snapshot.named.exists("banks"));
+    assert_eq!(
+        snapshot
+            .registry
+            .resolve_active("review_requested")
+            .unwrap()
+            .version,
+        1
+    );
+
+    // Mid-pass edits: a new list and a promoted Signal.
+    repo::lists::put(
+        &index,
+        &NamedListDef {
+            name: "banks".into(),
+            description: String::new(),
+            entries: vec!["alerts@bank.example".into()],
+            pack: None,
+            kinds: vec![],
+        },
+    )
+    .unwrap();
+    let registry = riddle_signals::Registry::new(index.clone());
+    registry
+        .propose(
+            Signal::noul(
+                "review_requested",
+                "The recipient is named as a reviewer of a change.",
+            ),
+            CreatedBy::User,
+        )
+        .unwrap();
+    registry
+        .promote(
+            "review_requested",
+            2,
+            riddle_signals::PromoteOptions {
+                report: None,
+                override_untested: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        registry.resolve_active("review_requested").unwrap().version,
+        2
+    );
+
+    sift.run(input(github_comment(), PeopleFacts::default()))
+        .await
+        .unwrap();
+    let same = sift.pass_snapshot().unwrap();
+    assert!(!same.named.exists("banks"), "this pass keeps its lists");
+    assert_eq!(
+        same.registry
+            .resolve_active("review_requested")
+            .unwrap()
+            .version,
+        1,
+        "this pass keeps its registry"
+    );
+
+    // The next pass builds its own Sift and sees both.
+    let next = Sift::new(
+        stores.clone(),
+        Arc::new(SystemClock),
+        Arc::new(RecordingSink::default()),
+        BuildStamp::from_env_vars("0.1.0-test", None, None, None, "test"),
+    );
+    let fresh = next.pass_snapshot().unwrap();
+    assert!(fresh.named.exists("banks"));
+    assert_eq!(
+        fresh
+            .registry
+            .resolve_active("review_requested")
+            .unwrap()
+            .version,
+        2
+    );
+}

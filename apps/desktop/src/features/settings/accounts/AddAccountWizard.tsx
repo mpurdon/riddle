@@ -5,11 +5,16 @@
  *
  * Before this, adding a Gmail account meant finding the right field among
  * a dozen, signing in, and then reading a card that said "Not connected".
- * The wizard starts every account at Observe with no Gmail changes, so a
- * new account can be looked at before Riddle is allowed to touch it.
+ * The wizard starts every account at Observe, so a new account can be
+ * looked at before Riddle is allowed to touch it; privacy and Gmail changes
+ * start where Settings → Accounts → Defaults says, and at Observe a Gmail
+ * change is held whatever that default is. The Behaviour step asks for a
+ * name and a group and states the rest in one sentence; the nine option
+ * cards it used to show before sign-in wait under "Advanced options".
  */
 import { useEffect, useRef, useState } from 'react'
-import { CheckCircle2, FlaskConical, Mail } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { CheckCircle2, FlaskConical, Mail, Sunrise } from 'lucide-react'
 import type { Autonomy } from '@/bindings/Autonomy'
 import type { Dig } from '@/bindings/Dig'
 import type { PrivacyMode } from '@/bindings/PrivacyMode'
@@ -17,6 +22,7 @@ import type { ProjectionMode } from '@/bindings/ProjectionMode'
 import { cx } from '@/lib/format'
 import { mailboxName } from '@/lib/gmailEffect'
 import { useDigGroups, useAllDigs, useSettings } from '@/lib/queries'
+import { useUi } from '@/lib/stores'
 import { useAction } from '@/lib/useAction'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
@@ -58,6 +64,8 @@ export function AddAccountWizard({ open, onOpenChange, onCreated }: { open: bool
   const settings = useSettings().data
   const groups = useDigGroups().data ?? []
   const { run } = useAction()
+  const nav = useNavigate()
+  const setDigId = useUi((s) => s.setDigId)
   const [kind, setKind] = useState<Kind>('gmail')
   const [step, setStep] = useState<Step>('kind')
   const [setup, setSetup] = useState<Setup | null>(null)
@@ -67,14 +75,21 @@ export function AddAccountWizard({ open, onOpenChange, onCreated }: { open: bool
   // import, a save) must not reset a wizard in progress.
   const ready = !!settings
   const privacyDefault = settings?.privacyDefault ?? 'cloud_judgment'
+  const projectionDefault = settings?.projectionDefault ?? 'none'
   const reset = () => {
     setStep('kind')
     setCreated(null)
-    setSetup({ name: '', email: '', count: '120', group: null, privacy: privacyDefault, autonomy: 'observe', projection: 'none' })
+    setSetup({ name: '', email: '', count: '120', group: null, privacy: privacyDefault, autonomy: 'observe', projection: projectionDefault })
   }
   useEffect(() => {
     if (open && ready) reset()
-  }, [open, ready]) // privacyDefault is read once per opening
+  }, [open, ready]) // the defaults are read once per opening
+  /** "Watch it sort": the Summary, following the new account, where its first sync shows its progress. */
+  const watch = (dig: Dig) => {
+    setDigId(dig.id)
+    onOpenChange(false)
+    nav('/')
+  }
 
   if (!settings || !setup) return null
   const steps = STEPS[kind]
@@ -191,9 +206,12 @@ export function AddAccountWizard({ open, onOpenChange, onCreated }: { open: bool
         ) : null}
         {step === 'done' && created ? (
           <>
-            <Button onClick={reset}>Add another</Button>
-            <Button variant="primary" onClick={() => { onCreated(created.id); onOpenChange(false) }}>
-              Open the account settings
+            <Button variant="ghost" onClick={reset}>
+              Add another
+            </Button>
+            <Button onClick={() => { onCreated(created.id); onOpenChange(false) }}>Open the account settings</Button>
+            <Button variant="primary" icon={<Sunrise />} onClick={() => watch(created)} title="Open the Summary for this account: the first sync's progress, and what Riddle has sorted so far">
+              Watch it sort
             </Button>
           </>
         ) : null}
@@ -227,6 +245,41 @@ function KindCard({ on, icon, title, detail, onClick }: { on: boolean; icon: Rea
   )
 }
 
+const AUTONOMY_WORDS: Record<Autonomy, string> = {
+  observe: 'observe only',
+  suggest: 'suggest moves for you to apply',
+  act: 'act on its decisions',
+  trusted: 'act without asking',
+}
+
+const PRIVACY_WORDS: Record<PrivacyMode, string> = {
+  local_only: 'keep everything on this Mac',
+  cloud_judgment: 'use cloud judgment',
+  cloud_reasoning: 'use cloud reasoning',
+}
+
+/**
+ * The behaviour a new account will have, in one sentence, so what the user
+ * accepts by continuing is said before sign-in: "Riddle will observe only,
+ * change nothing in Gmail, and use cloud judgment." The Gmail clause says
+ * what will happen, not what the setting is: at Observe a "Labels" default
+ * writes nothing until the account is raised to Act.
+ */
+export function behaviourSentence(setup: Pick<Setup, 'autonomy' | 'projection' | 'privacy'>, kind: Kind): string {
+  const provider = kind === 'fixture' ? 'fixture' : 'gmail'
+  const mailbox = mailboxName(provider)
+  const effect = gmailEffect(setup.autonomy, setup.projection, { provider })
+  const changes =
+    effect.writes === 'labels_and_archive'
+      ? `add labels and archive mail in ${mailbox}`
+      : effect.writes === 'labels'
+        ? `add labels in ${mailbox}`
+        : effect.held === 'autonomy'
+          ? `change nothing in ${mailbox} until it is raised to Act`
+          : `change nothing in ${mailbox}`
+  return `Riddle will ${AUTONOMY_WORDS[setup.autonomy]}, ${changes}, and ${PRIVACY_WORDS[setup.privacy]}.`
+}
+
 function SetupStep({ kind, setup, onChange, groups }: { kind: Kind; setup: Setup; onChange: (s: Setup) => void; groups: string[] }) {
   const set = (patch: Partial<Setup>) => onChange({ ...setup, ...patch })
   const effect = gmailEffect(setup.autonomy, setup.projection, { provider: kind === 'fixture' ? 'fixture' : 'gmail' })
@@ -247,22 +300,30 @@ function SetupStep({ kind, setup, onChange, groups }: { kind: Kind; setup: Setup
           </Field>
         )}
       </div>
-      <div>
-        <div className="mb-1 text-xs font-medium">Autonomy</div>
-        <OptionCards label="Autonomy" options={AUTONOMY_OPTIONS.filter((o) => o.value !== 'trusted')} value={setup.autonomy} onChange={(v) => set({ autonomy: v })} />
-      </div>
-      <div>
-        <div className="mb-1 text-xs font-medium">Changes in {mailboxName(kind)}</div>
-        <OptionCards label="Changes in Gmail" options={PROJECTION_OPTIONS} value={setup.projection} onChange={(v) => set({ projection: v })} />
-      </div>
-      <div>
-        <div className="mb-1 text-xs font-medium">Privacy</div>
-        <OptionCards label="Privacy" options={PRIVACY_OPTIONS} value={setup.privacy} onChange={(v) => set({ privacy: v })} />
-      </div>
-      <p className="rounded-md bg-sand/70 px-3 py-2 text-xs text-ink-2">
-        <span className="font-medium text-ink">With these settings: </span>
-        {effect.sentence} You can change any of this later, and raising to Trusted is done from the account itself.
+      <p className="text-sm text-ink-2">
+        <span className="font-medium text-ink">{behaviourSentence(setup, kind)}</span> You can change any of this later, and raising to Trusted is done from the account itself.
       </p>
+      <details className="rounded-md border border-line bg-sand/50 px-3 py-2">
+        <summary className="cursor-pointer select-none text-xs font-medium text-ink-2 hover:text-ink">Advanced options</summary>
+        <div className="mt-3 flex flex-col gap-4">
+          <div>
+            <div className="mb-1 text-xs font-medium">Autonomy</div>
+            <OptionCards label="Autonomy" options={AUTONOMY_OPTIONS.filter((o) => o.value !== 'trusted')} value={setup.autonomy} onChange={(v) => set({ autonomy: v })} />
+          </div>
+          <div>
+            <div className="mb-1 text-xs font-medium">Changes in {mailboxName(kind)}</div>
+            <OptionCards label="Changes in Gmail" options={PROJECTION_OPTIONS} value={setup.projection} onChange={(v) => set({ projection: v })} />
+          </div>
+          <div>
+            <div className="mb-1 text-xs font-medium">Privacy</div>
+            <OptionCards label="Privacy" options={PRIVACY_OPTIONS} value={setup.privacy} onChange={(v) => set({ privacy: v })} />
+          </div>
+          <p className="rounded-md bg-sand/70 px-3 py-2 text-xs text-ink-2">
+            <span className="font-medium text-ink">With these settings: </span>
+            {effect.sentence}
+          </p>
+        </div>
+      </details>
     </div>
   )
 }

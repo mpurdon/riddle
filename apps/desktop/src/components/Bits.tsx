@@ -369,13 +369,17 @@ function OtherSignals({ ex }: { ex: Explanation }) {
 
 /**
  * The "Why?" card (README "Mesh Feedback & Repair"). Its job is to show
- * exactly what happened: who decided, the rule as written, and the route
- * walk with each clause's actual value under a disclosure. The sentence a
- * person would say (`reason`, written by `riddle_mesh::humanize`) belongs
- * in the lists and headers around it, so a Mesh or LLM decision does not
- * repeat it here; a gate's or the judge's reason is the only account of
- * that decision and stays. The inspector link appears only in Developer
- * Mode, since its destination says "Developer Mode is off" to everyone else.
+ * exactly what happened: who decided, the decision in words, and under a
+ * disclosure the route walk with each clause's actual value and the rule
+ * as written. The sentence (`reason`, written by `riddle_mesh::humanize`)
+ * is shown for every mechanism: it carries what nothing else on the page
+ * does, such as the rule that looked first and nearly took the message
+ * ("Bills v3 looked first and nearly took it: …, but the margin …"). An
+ * earlier card dropped it for Mesh and LLM decisions and put the rule's
+ * grammar in its place, so the one surface meant to explain a decision
+ * showed syntax where a sentence was wanted. The inspector link appears
+ * only in Developer Mode, since its destination says "Developer Mode is
+ * off" to everyone else.
  */
 export function ExplanationCard({
   ex,
@@ -414,9 +418,9 @@ export function ExplanationCard({
             : mech === 'temporal'
               ? 'Made by time, not by mail: Temporal Sift.'
               : `Decided on Signals: ${dispositionLabel(ex.disposition)}.`
-  // A Mesh or LLM decision's reason is the route in words; the grammar below says it exactly.
-  const reason = mech === 'mesh' || mech === 'llm' ? null : ex.reason?.trim() || null
-  const hasDetail = ex.routes.length > 0 || ex.signals.length > 0 || !!ex.llmRationale
+  // Words first: the decision as a person would say it, whoever made it. The grammar waits under the disclosure.
+  const reason = ex.reason?.trim() || null
+  const hasDetail = ex.routes.length > 0 || ex.signals.length > 0 || !!ex.llmRationale || !!ex.matched
   return (
     <div className={cx('rounded-md border border-line bg-sand selectable', compact ? 'p-2 text-xs' : 'p-3 text-sm')}>
       <div className="flex items-start gap-2">
@@ -424,8 +428,7 @@ export function ExplanationCard({
         <div className="min-w-0 flex-1">
           <div className="font-medium">Why? {ex.shadow ? <Chip tone="neutral">Shadow: proposed, not applied</Chip> : null}</div>
           <div className="mt-0.5">{head}</div>
-          {reason ? <div className="mt-0.5 text-ink-2">{reason}</div> : null}
-          {ex.matched ? <pre className="mt-1.5 whitespace-pre-wrap rounded border border-line bg-paper px-2 py-1 text-xs mono selectable">{ex.matched}</pre> : null}
+          {reason ? <div className="mt-0.5 text-ink-2 selectable">{reason}</div> : null}
           {ex.meshName === YOUR_CORRECTIONS_MESH ? (
             <div className="mt-1.5">
               <Chip tone="ok" title="One of your own rules decided it: a sender or domain you corrected. Edit or remove it in Settings → Mail rules → Your corrections.">
@@ -445,6 +448,12 @@ export function ExplanationCard({
               {ex.routes.length ? <RouteWalk ex={ex} /> : null}
               <OtherSignals ex={ex} />
               {ex.llmRationale ? <blockquote className="mt-2 border-l-2 border-ochre/40 pl-2 text-ink-2">{ex.llmRationale}</blockquote> : null}
+              {ex.matched ? (
+                <details className="mt-2 text-xs">
+                  <summary className="cursor-pointer select-none text-ink-2 hover:text-ink">Rule as written</summary>
+                  <pre className="mt-1 whitespace-pre-wrap rounded border border-line bg-paper px-2 py-1 text-xs mono selectable">{ex.matched}</pre>
+                </details>
+              ) : null}
             </details>
           ) : null}
           <div className="mt-2 flex flex-wrap gap-1.5">

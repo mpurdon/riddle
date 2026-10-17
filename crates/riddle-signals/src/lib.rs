@@ -25,7 +25,7 @@ pub mod vocabulary;
 
 pub use cache::{cached_or_evaluate, CacheOutcome};
 pub use calibration::{fit_platt, LabelledSet, PlattFit};
-pub use registry::{PromoteOptions, Registry};
+pub use registry::{PromoteOptions, Registry, RegistrySnapshot};
 pub use sets::{assign_to_sets, select_sets, BuiltState, SetId, StateBuilder, StateInput};
 pub use testing::{test_signal, AdversarialExample, SignalCorpus, SignalTestReport, TestSample};
 pub use vocabulary::{system_signal, system_signal_names, system_signals};

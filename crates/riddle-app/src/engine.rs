@@ -5,6 +5,15 @@
 //!
 //! Nothing here decides anything: Sift decides, Finds dedupe, the outbox
 //! writes. The engine only sequences and reports.
+//!
+//! A pass's housekeeping (the stale-Unresolved retry and the sender review)
+//! runs when the pass has something to do: the backlog has mail (a sync
+//! added some, or something was sent back to Sift), or the rules changed
+//! since housekeeping last ran. An idle pass skips both, with a floor so a
+//! judge that came back still drains Unresolved: housekeeping runs anyway
+//! on every tenth pass or after ten minutes, whichever comes first. Both
+//! had run every 45 seconds on every account, each a read of the whole
+//! classification and sender tables (17 Oct 2026).
 
 use crate::domains::Domains;
 use crate::App;
@@ -237,7 +246,24 @@ impl App {
 
     /// Build the full Sift input for a stored message: normalized text,
     /// People facts, Thread State, Context slices (§44: retrieved, not stuffed).
+    /// One message on its own; a pass builds one `PassContext` for all of
+    /// its messages and calls `sift_input_with`.
     pub fn sift_input(&self, dig: &Dig, message: Message) -> Result<SiftInput> {
+        let store = self.stores.dig(&dig.id)?;
+        let pass = riddle_context::PassContext::load(&store)?;
+        self.sift_input_with(dig, message, &pass)
+    }
+
+    /// `sift_input` with the pass's Context: the standing corrections, read
+    /// once per pass rather than per message (17 Oct 2026). The Person and
+    /// Thread State fetched here for the People facts and the input are
+    /// handed to the slices, which read them both again before.
+    pub fn sift_input_with(
+        &self,
+        dig: &Dig,
+        message: Message,
+        pass: &riddle_context::PassContext,
+    ) -> Result<SiftInput> {
         let index = self.stores.index();
         let store = self.stores.dig(&dig.id)?;
         let mut profile = repo::user_profile::get(&index)?;
@@ -252,18 +278,25 @@ impl App {
         let thread_state = repo::thread_state::get(&store, &message.thread_id)?;
         let has_calendar_part = riddle_mail::normalize::has_calendar_part(&message);
         let has_structured_receipt = riddle_mail::normalize::has_structured_receipt(&message);
+        let sources = riddle_context::SliceSources {
+            person: person.as_ref(),
+            thread_state: thread_state.as_ref(),
+            pass,
+        };
         let mut input =
             SiftInput::simple(message.clone(), profile, people, DigContext::from_dig(dig));
+        let mut slices: BTreeMap<String, String> = input.context_slices.clone();
+        for s in
+            riddle_context::slices_with(&store, &message, &sources, riddle_context::SLICE_NAMES)?
+        {
+            slices.insert(s.name, s.text);
+        }
+        input.context_slices = slices;
         input.normalized_text = normalized.text;
         input.language = normalized.language;
         input.thread_state = thread_state;
         input.has_calendar_part = has_calendar_part;
         input.has_structured_receipt = has_structured_receipt;
-        let mut slices: BTreeMap<String, String> = input.context_slices.clone();
-        for s in riddle_context::slices(&index, &store, &message, riddle_context::SLICE_NAMES)? {
-            slices.insert(s.name, s.text);
-        }
-        input.context_slices = slices;
         Ok(input)
     }
 
@@ -291,38 +324,47 @@ impl App {
         );
         let domains = self.domains()?;
         let store = self.stores.dig(&dig.id)?;
-        // Bookkeeping: a failure to look for stale Unresolved never stops the pass.
-        if let Err(e) = self.retry_stale_unresolved(dig, &store) {
-            rwarn!(
-                Category::Sift,
-                "could not retry stale Unresolved for {}: {e}",
-                dig.id
-            );
-        }
-        // Bookkeeping: judging what kind of sender the new ones are costs
-        // one call each and never stops the pass.
-        if let Err(e) = self
-            .review_senders(dig, crate::suggestions::SENDERS_PER_PASS)
-            .await
-        {
-            rwarn!(
-                Category::Sift,
-                "could not review senders for {}: {e}",
-                dig.id
-            );
+        let shadow_decides = matches!(dig.status, DigStatus::Shadow { .. });
+        // Housekeeping is due when the backlog has mail, the rules changed,
+        // or the floor says so; an idle pass skips it. Bookkeeping: if the
+        // question itself fails, the housekeeping runs.
+        let housekeeping = self
+            .housekeeping_due(dig, &store, shadow_decides)
+            .unwrap_or_else(|e| {
+                rwarn!(
+                    Category::Sift,
+                    "could not tell whether housekeeping is due for {}: {e}",
+                    dig.id
+                );
+                true
+            });
+        if housekeeping {
+            // Bookkeeping: a failure to look for stale Unresolved never stops the pass.
+            if let Err(e) = self.retry_stale_unresolved(dig, &store) {
+                rwarn!(
+                    Category::Sift,
+                    "could not retry stale Unresolved for {}: {e}",
+                    dig.id
+                );
+            }
+            // Bookkeeping: judging what kind of sender the new ones are costs
+            // one call each and never stops the pass.
+            if let Err(e) = self
+                .review_senders(dig, crate::suggestions::SENDERS_PER_PASS)
+                .await
+            {
+                rwarn!(
+                    Category::Sift,
+                    "could not review senders for {}: {e}",
+                    dig.id
+                );
+            }
         }
         let mut sift = Sift::from_services(&self.services);
         if let Some(settings) = self.services.get::<riddle_settings::SettingsStore>() {
-            sift = sift.with_budget(Arc::new(EscalationCap {
-                stores: self.stores.clone(),
-                settings,
-            }));
+            sift = sift.with_budget(Arc::new(EscalationCap::new(self.stores.clone(), settings)));
         }
-        let ids = repo::messages::unclassified_ids(
-            &store,
-            limit,
-            matches!(dig.status, DigStatus::Shadow { .. }),
-        )?;
+        let ids = repo::messages::unclassified_ids(&store, limit, shadow_decides)?;
         let mut report = SiftPassReport::default();
         // Grouped for the ledger: (mesh id, version, name, disposition kind) -> (ids, cached, fresh, trace of first).
         let mut groups: SiftGroups = std::collections::BTreeMap::new();
@@ -330,6 +372,8 @@ impl App {
         let mut closed: MeshGroups<Find> = std::collections::BTreeMap::new();
         // Messages superseded, by the Mesh version whose route did it.
         let mut superseded: MeshGroups<MessageId> = std::collections::BTreeMap::new();
+        // The pass's Context: the standing corrections, read once.
+        let pass_context = riddle_context::PassContext::load(&store)?;
         for id in ids {
             if cancel.is_some_and(|c| c.is_cancelled()) {
                 break;
@@ -337,7 +381,7 @@ impl App {
             let Some(message) = repo::messages::get(&store, &dig.id, &id)? else {
                 continue;
             };
-            let input = match self.sift_input(dig, message) {
+            let input = match self.sift_input_with(dig, message, &pass_context) {
                 Ok(i) => i,
                 Err(e) => {
                     rwarn!(
@@ -829,28 +873,183 @@ impl EmitSummary for Arc<crate::events::Broadcast> {
     }
 }
 
-/// The per-Dig daily cap on escalation spend (`budgets.escalationPerDigUsd`),
-/// read from settings on each check so a saved change applies at once. A
-/// ledger that cannot be read allows escalation: bookkeeping never fails
-/// the work, and the daily LLM budget still bounds spend.
+/// The per-Dig daily cap on escalation spend (`budgets.escalationPerDigUsd`).
+/// The cap and the day's spend so far are read once per pass, on the first
+/// escalation, and the pass tallies its own escalations in memory from
+/// there (17 Oct 2026): every check used to read the settings and sum the
+/// usage ledger again, once per escalation. A saved change to the cap
+/// applies from the next pass. A ledger that cannot be read allows
+/// escalation: bookkeeping never fails the work, and the daily LLM budget
+/// still bounds spend.
 struct EscalationCap {
     stores: Arc<riddle_store::Stores>,
     settings: Arc<riddle_settings::SettingsStore>,
+    /// Per Dig, read on first use.
+    ledger: parking_lot::Mutex<std::collections::HashMap<DigId, PassLedger>>,
 }
 
-impl riddle_sift::EscalationBudget for EscalationCap {
-    fn allows(&self, dig: &DigId) -> bool {
+/// The cap, what the ledger held when the pass first asked, and what the
+/// pass has escalated since.
+#[derive(Debug, Clone, Copy)]
+struct PassLedger {
+    limit: f64,
+    spent_before: f64,
+    spent_in_pass: f64,
+}
+
+impl EscalationCap {
+    fn new(
+        stores: Arc<riddle_store::Stores>,
+        settings: Arc<riddle_settings::SettingsStore>,
+    ) -> Self {
+        Self {
+            stores,
+            settings,
+            ledger: parking_lot::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    fn read_ledger(&self, dig: &DigId) -> PassLedger {
         let settings = self.settings.settings();
         let limit = settings.budgets.escalation_per_dig_usd;
         // The provider the spend is booked under is whichever is configured;
         // a hardcoded name silently disabled the cap for every other one.
         let provider = crate::ops::ai_config(&settings).provider;
-        let spent = self
+        let spent_before = self
             .stores
             .dig(dig)
             .and_then(|s| repo::usage::spent_today_on(&s, &provider, UsageTask::Sift))
             .unwrap_or(0.0);
-        spent < limit
+        PassLedger {
+            limit,
+            spent_before,
+            spent_in_pass: 0.0,
+        }
+    }
+}
+
+impl riddle_sift::EscalationBudget for EscalationCap {
+    fn allows(&self, dig: &DigId) -> bool {
+        let mut ledger = self.ledger.lock();
+        let l = ledger
+            .entry(dig.clone())
+            .or_insert_with(|| self.read_ledger(dig));
+        l.spent_before + l.spent_in_pass < l.limit
+    }
+
+    /// The same figure the refiner's usage row carries, so the tally stays
+    /// level with what the ledger would sum.
+    fn spent(&self, dig: &DigId, usd: f64) {
+        let mut ledger = self.ledger.lock();
+        let l = ledger
+            .entry(dig.clone())
+            .or_insert_with(|| self.read_ledger(dig));
+        l.spent_in_pass += usd;
+    }
+}
+
+/// Passes in a row an account may skip housekeeping before one runs it anyway.
+const HOUSEKEEPING_EVERY_PASSES: u32 = 10;
+/// Minutes since housekeeping last ran after which the next pass runs it.
+const HOUSEKEEPING_EVERY_MINUTES: i64 = 10;
+
+/// When housekeeping last ran for an account and what it saw (`Housekeeping`).
+#[derive(Debug, Clone, Default)]
+struct HousekeepingState {
+    last_run_at: Option<chrono::DateTime<chrono::Utc>>,
+    rules_seen: Option<chrono::DateTime<chrono::Utc>>,
+    skipped: u32,
+}
+
+/// Whether a pass's housekeeping is due, per account (`App::sift_pass`,
+/// module header). The decision is recorded as it is made.
+#[derive(Default)]
+pub struct Housekeeping(std::sync::Mutex<std::collections::HashMap<DigId, HousekeepingState>>);
+
+impl Housekeeping {
+    /// Due when the backlog has mail, the rules changed since the last run,
+    /// or the floor is reached (the first pass always); records the answer.
+    pub fn due(
+        &self,
+        dig: &DigId,
+        now: chrono::DateTime<chrono::Utc>,
+        backlog: bool,
+        rules_changed_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> bool {
+        let mut map = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        let s = map.entry(dig.clone()).or_default();
+        let due = backlog
+            || s.rules_seen != rules_changed_at
+            || s.skipped + 1 >= HOUSEKEEPING_EVERY_PASSES
+            || s.last_run_at
+                .is_none_or(|t| now - t >= chrono::Duration::minutes(HOUSEKEEPING_EVERY_MINUTES));
+        if due {
+            s.last_run_at = Some(now);
+            s.rules_seen = rules_changed_at;
+            s.skipped = 0;
+        } else {
+            s.skipped += 1;
+        }
+        due
+    }
+}
+
+impl App {
+    /// The inputs of `Housekeeping::due` for one pass: one probe of the
+    /// backlog index and one key-value read. Without the service registered
+    /// (a bare `App`), housekeeping always runs.
+    fn housekeeping_due(
+        &self,
+        dig: &Dig,
+        store: &riddle_store::Store,
+        shadow_decides: bool,
+    ) -> Result<bool> {
+        let Some(h) = self.services.get::<Housekeeping>() else {
+            return Ok(true);
+        };
+        let backlog = !repo::messages::unclassified_ids(store, 1, shadow_decides)?.is_empty();
+        let rules = repo::kv::rules_changed_at(&self.stores.index())?;
+        Ok(h.due(&dig.id, self.services.clock.now(), backlog, rules))
+    }
+}
+
+#[cfg(test)]
+mod housekeeping_tests {
+    use super::*;
+
+    #[test]
+    fn housekeeping_runs_on_new_mail_rule_changes_and_the_floor_and_skips_an_idle_pass() {
+        let h = Housekeeping::default();
+        let dig = DigId::from("dig-1");
+        let t0 = chrono::Utc::now();
+        let tick = |n: i64| t0 + chrono::Duration::seconds(45 * n);
+        // The first pass runs; an idle one after it does not.
+        assert!(h.due(&dig, tick(0), false, None));
+        assert!(!h.due(&dig, tick(1), false, None));
+        // Mail in the backlog, then a rule change, each run it.
+        assert!(h.due(&dig, tick(2), true, None));
+        let changed = Some(tick(2));
+        assert!(h.due(&dig, tick(3), false, changed));
+        assert!(!h.due(&dig, tick(4), false, changed));
+        // The pass floor: the tenth pass since the last run runs it.
+        let mut ran = 0;
+        for n in 5..=13 {
+            if h.due(&dig, tick(n), false, changed) {
+                ran += 1;
+            }
+        }
+        assert_eq!(ran, 1, "one run in nine idle passes");
+        // The time floor: ten minutes idle runs it on the next pass.
+        assert!(h.due(&dig, tick(14), true, changed));
+        assert!(!h.due(&dig, tick(15), false, changed));
+        assert!(h.due(
+            &dig,
+            tick(14) + chrono::Duration::minutes(10),
+            false,
+            changed
+        ));
+        // Accounts are independent.
+        assert!(h.due(&DigId::from("dig-2"), tick(16), false, changed));
     }
 }
 

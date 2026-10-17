@@ -2,11 +2,9 @@
 //! shell's own bookkeeping.
 
 use crate::paths::{AppDirs, Profile};
-use parking_lot::Mutex;
 use riddle_app::{App, AppConfig};
 use riddle_core::BuildStamp;
 use riddle_store::Stores;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -17,8 +15,6 @@ pub struct AppState {
     pub profile: Profile,
     pub build: BuildStamp,
     pub started_at: Instant,
-    /// In-flight command names with their start, for the Developer pane.
-    pub in_flight: Mutex<HashMap<u64, (String, Instant)>>,
 }
 
 impl AppState {
@@ -49,7 +45,6 @@ impl AppState {
             profile,
             build,
             started_at: Instant::now(),
-            in_flight: Mutex::new(HashMap::new()),
         })
     }
 

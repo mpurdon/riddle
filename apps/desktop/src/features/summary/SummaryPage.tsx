@@ -14,23 +14,28 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { FlaskConical, Mail, RefreshCw, Sunrise } from 'lucide-react'
+import type { Summary } from '@/bindings/Summary'
+import type { TaskCentre } from '@/bindings/TaskCentre'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
+import { ProgressBar } from '@/components/ui/Progress'
 import { Sep } from '@/components/Bits'
 import { ErrorCard } from '@/components/ErrorCard'
-import { fmtInt, fmtRelative, num } from '@/lib/format'
+import { PRIVACY_OPTIONS, detailOf, labelOf } from '@/features/settings/accounts/model'
+import { fmtDuration, fmtInt, fmtRelative, num } from '@/lib/format'
 import { toRiddleError } from '@/lib/ipc'
-import { useSummary, useDigContext, useSettings } from '@/lib/queries'
-import { summaryCopy } from '@/lib/selectors'
+import { useSummary, useDigContext, useSettings, useTaskCentre } from '@/lib/queries'
+import { catchUpJob, catchUpLine, jobKindLabel, jobProgressPct, summaryCopy } from '@/lib/selectors'
 import { useAction, useLastUndoable } from '@/lib/useAction'
 import { useUi } from '@/lib/stores'
 import { TrustCard } from './TrustCard'
 
-/** The sample mailbox the first-run card creates: the wizard's "Test mailbox" defaults. */
-const SAMPLE_MAILBOX = { name: 'Sample mail', email: 'sample@riddle.example', count: 120, group: null, projection: 'none' as const }
+/** The sample mailbox the first-run card creates: the wizard's "Test mailbox" defaults; privacy and projection come from Settings as the wizard's do. */
+const SAMPLE_MAILBOX = { name: 'Sample mail', email: 'sample@riddle.example', count: 120, group: null }
 
 export default function SummaryPage() {
   const q = useSummary()
+  const tc = useTaskCentre()
   const nav = useNavigate()
   const { digId, digName } = useDigContext()
   const setTaskCentreOpen = useUi((s) => s.setTaskCentreOpen)
@@ -61,6 +66,7 @@ export default function SummaryPage() {
             </button>
           ) : null}
         </p>
+        {!s.caughtUp && !c.firstRun ? <CatchUp s={s} tc={tc.data} digId={digId} /> : null}
         {s.degraded.length ? (
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
             <Chip tone="bad">Degraded</Chip>
@@ -153,21 +159,57 @@ export default function SummaryPage() {
 }
 
 /**
+ * What Riddle is doing while it catches up: the sync job's own progress,
+ * hoisted from the Task Centre so the page does not send the user there
+ * for it, and one line of what has come of the work so far. Without a
+ * job in the Task Centre the Summary's own sift counts drive the bar.
+ */
+function CatchUp({ s, tc, digId }: { s: Summary; tc: TaskCentre | undefined; digId: string | null }) {
+  const job = catchUpJob(tc, digId)
+  const queued = job?.status.state === 'queued'
+  const total = job ? (job.progress.total === null ? null : num(job.progress.total)) : num(s.totalToSift) || null
+  const done = job ? num(job.progress.done) : Math.max(0, num(s.totalToSift) - num(s.remainingToSift))
+  const pct = job ? jobProgressPct(job) : total ? Math.min(100, Math.round((done / total) * 100)) : null
+  const eta = job?.status.state === 'running' && job.progress.etaSeconds !== null ? `~${fmtDuration(job.progress.etaSeconds)} left` : null
+  const count = job ? `${fmtInt(done)}${total !== null ? ` of ${fmtInt(total)}` : ''} ${job.progress.unit}` : total ? `${fmtInt(done)} of ${fmtInt(total)} messages` : ''
+  return (
+    <section aria-label="Catching up" className="mt-4 rounded-md border border-ochre/40 bg-ochre/10 p-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <span className="font-medium">{job ? `${jobKindLabel(job.kind)}: ${job.progress.step}` : 'Sifting what has arrived'}</span>
+        <span className="text-ink-2">
+          {count}
+          {pct !== null && !queued ? ` (${pct}%)` : ''}
+          {eta ? ` · ${eta}` : ''}
+        </span>
+      </div>
+      <div className="mt-1.5">
+        <ProgressBar done={done} total={queued ? null : total} label={job?.label ?? 'Catching up'} />
+      </div>
+      <p className="mt-1.5 text-ink-2">{catchUpLine(s, tc, digId)}</p>
+    </section>
+  )
+}
+
+/**
  * The two ways to start. Connect Gmail opens the Add account wizard through
  * the Settings deep link; sample mail creates the wizard's test mailbox
- * with its defaults, so the app fills without a real account.
+ * with its defaults, so the app fills without a real account. The privacy
+ * line below says what a new account actually starts in (the default under
+ * Settings → Accounts → Defaults); it used to promise that nothing left
+ * the machine while the default was Cloud judgment.
  */
 function FirstRunCards() {
   const nav = useNavigate()
   const { run } = useAction()
   const settings = useSettings().data
+  const privacy = settings?.privacyDefault
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const trySample = async () => {
     setBusy(true)
     setError(null)
     try {
-      await run('add_fixture_dig', { ...SAMPLE_MAILBOX, privacy: settings?.privacyDefault ?? 'local_only' }, { successToast: 'Sample mail is loading' })
+      await run('add_fixture_dig', { ...SAMPLE_MAILBOX, privacy: settings?.privacyDefault ?? 'local_only', projection: settings?.projectionDefault ?? 'none' }, { successToast: 'Sample mail is loading' })
     } catch (e) {
       setError(toRiddleError(e).message)
     } finally {
@@ -194,11 +236,11 @@ function FirstRunCards() {
         </p>
       ) : null}
       <p className="mt-4 text-xs text-clay">
-        Either way, nothing leaves this machine until you choose a privacy mode for the account in{' '}
-        <Link to="/settings#digs" className="underline hover:text-ink">
-          Settings → Accounts
+        {privacy ? `Either way, a new account starts in ${labelOf(PRIVACY_OPTIONS, privacy)}: ${detailOf(PRIVACY_OPTIONS, privacy)}` : 'Either way, a new account starts in the default privacy mode.'} Change the default under{' '}
+        <Link to="/settings#new-digs" className="underline hover:text-ink">
+          Settings → Accounts → Defaults
         </Link>
-        .
+        , or the account's own setting afterwards.
       </p>
     </section>
   )

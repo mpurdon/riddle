@@ -11,7 +11,8 @@ use riddle_mesh::{
 };
 use riddle_observability::{rdebug, rinfo, rwarn, Category};
 use riddle_signals::{
-    assign_to_sets, cached_or_evaluate, select_sets, Registry, SetId, StateBuilder, StateInput,
+    assign_to_sets, cached_or_evaluate, select_sets, RegistrySnapshot, SetId, StateBuilder,
+    StateInput,
 };
 use riddle_store::repo;
 use std::time::Instant;
@@ -225,7 +226,6 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
     let message_id = input.message.id.clone();
     let dig_id = input.dig.dig_id.clone();
     let dig_store = sift.stores.dig(&dig_id)?;
-    let index = sift.stores.index();
     let mut timing = TraceTiming::default();
     let mut cost = TraceCost::default();
     let mut draft = Draft::new(input.dig.shadow);
@@ -283,7 +283,9 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
     }
 
     // 3. Signal Selection and 4. the judge (cache first).
-    let registry = Registry::new(index.clone());
+    // The lists and the registry as the pass began (`Sift::pass_snapshot`).
+    let pass = sift.pass_snapshot()?;
+    let registry = &pass.registry;
     // Live versions decide; the running set (Shadow included) picks the
     // Signals and measures what a Mesh in Shadow would do instead.
     let (trial, meshes) = sift.meshes_in_scope(&dig_id, input.dig.group.as_deref())?;
@@ -298,23 +300,23 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
             scored.push(m.clone());
         }
     }
-    // The user's named lists (`sender IN list:banks`), read once per message.
-    let named = repo::lists::named(&index)?;
+    // The user's named lists (`sender IN list:banks`), from the pass snapshot.
+    let named = &pass.named;
     let judge = sift
         .judge
         .as_ref()
         .filter(|_| input.dig.privacy != PrivacyMode::LocalOnly);
     let (needed, unresolvable) = if input.message.is_sent {
-        select_sent(&registry)
+        select_sent(registry)
     } else {
         let sender = input.message.from.email.to_ascii_lowercase();
         let lists = ProfileLists {
             profile: &input.profile,
             sender: &sender,
             facts: &facts,
-            named: &named,
+            named,
         };
-        select_signals(&registry, &scored, &facts, &lists)
+        select_signals(registry, &scored, &facts, &lists)
     };
     let mut judge_reason: Option<String> = None;
     if judge.is_none() {
@@ -453,7 +455,7 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
         profile: &input.profile,
         sender: &sender,
         facts: &facts,
-        named: &named,
+        named,
     };
     let routed_meshes: Vec<Mesh> = if draft.judge_unavailable {
         meshes.iter().map(deterministic_projection).collect()
@@ -527,6 +529,12 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
                             cost.llm_input_tokens = resp.input_tokens;
                             cost.llm_output_tokens = resp.output_tokens;
                             cost.llm_cost_usd = resp.cost_usd;
+                            // The same figure the usage ledger books for
+                            // this call, so a budget tallying in memory
+                            // stays level with the ledger.
+                            if let Some(b) = &sift.budget {
+                                b.spent(&dig_id, resp.cost_usd.unwrap_or(0.0));
+                            }
                             for r in &resp.refined {
                                 match draft.evaluations.iter_mut().find(|e| {
                                     e.signal_name == r.signal_name
@@ -740,7 +748,7 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
 }
 
 fn select_signals(
-    registry: &Registry,
+    registry: &RegistrySnapshot,
     meshes: &[Mesh],
     facts: &Facts,
     lists: &dyn riddle_mesh::ListMembership,
@@ -772,7 +780,7 @@ fn select_signals(
     (signals, unresolvable)
 }
 
-fn select_sent(registry: &Registry) -> (Vec<Signal>, Vec<String>) {
+fn select_sent(registry: &RegistrySnapshot) -> (Vec<Signal>, Vec<String>) {
     let mut signals = Vec::new();
     let mut missing = Vec::new();
     for name in SENT_SIGNALS {
@@ -989,6 +997,7 @@ fn finish(
                 ..classification.clone()
             });
     SiftOutcome {
+        message: input.message.clone(),
         shadow_proposal,
         thread_id: input.message.thread_id.clone(),
         classification,
@@ -1014,29 +1023,51 @@ pub fn persist(sift: &Sift, outcome: &mut SiftOutcome) -> Result<Option<FindProp
     let dig_id = outcome.classification.dig_id.clone();
     let store = sift.stores.dig(&dig_id)?;
     let id = outcome.classification.message_id.clone();
-    repo::facts::put(&store, &id, &outcome.facts)?;
-    repo::classifications::record(&store, &outcome.classification)?;
-    match &outcome.shadow_proposal {
-        Some(p) => repo::classifications::record(&store, p)?,
-        // A proposal that no longer differs, or whose Mesh was made
-        // Active, is retired when the message is decided again.
-        None if !outcome.classification.shadow => {
-            repo::classifications::retire_shadow(&store, &id)?
+    let now = sift.clock.now();
+    // One write per decision (17 Oct 2026): the facts, the classification
+    // and its Shadow proposal (or the retirement of a stale one), the
+    // Strata the user's replies inherit, the trace and the `+ Replaces`
+    // series settle in one transaction. They were five to seven, each with
+    // its own commit, and a store fault between two of them left a decision
+    // with no trace; now the decision stands whole or not at all, and a
+    // message whose write failed is decided again on the next pass.
+    let shadow = outcome.classification.shadow;
+    let is_sent = outcome.facts.is_sent;
+    // Spoil and Filed with `+ Replaces`: the series settles now, so the
+    // store's previous sale is superseded the moment the next one is sifted.
+    // A Dig in its Shadow Period settles nothing.
+    let series = if outcome.shadow {
+        None
+    } else {
+        outcome.classification.series.clone()
+    };
+    outcome.superseded = store.write(|c| {
+        repo::facts::put_in(c, &id, &outcome.facts)?;
+        repo::classifications::record_in(c, &outcome.classification)?;
+        match &outcome.shadow_proposal {
+            Some(p) => repo::classifications::record_in(c, p)?,
+            // A proposal that no longer differs, or whose Mesh was made
+            // Active, is retired when the message is decided again.
+            None if !shadow => repo::classifications::retire_shadow_in(c, &id)?,
+            None => {}
         }
-        None => {}
-    }
-    // The user's replies in the thread are about what it is about.
-    if !outcome.facts.is_sent && !outcome.classification.shadow {
-        repo::classifications::spread_to_replies(
-            &store,
-            &outcome.thread_id,
-            &outcome.classification.strata,
-        )?;
-    }
-    outcome.timing.persist_ms = t.elapsed().as_millis() as u64;
-    outcome.timing.total_ms += outcome.timing.persist_ms;
-    outcome.trace.timing = outcome.timing.clone();
-    repo::traces::record(&store, &outcome.trace)?;
+        // The user's replies in the thread are about what it is about.
+        if !is_sent && !shadow {
+            repo::classifications::spread_to_replies_in(
+                c,
+                &outcome.thread_id,
+                &outcome.classification.strata,
+            )?;
+        }
+        outcome.timing.persist_ms = t.elapsed().as_millis() as u64;
+        outcome.timing.total_ms += outcome.timing.persist_ms;
+        outcome.trace.timing = outcome.timing.clone();
+        repo::traces::record_in(c, &outcome.trace)?;
+        match &series {
+            Some(key) => repo::message_series::settle_in(c, key, &now),
+            None => Ok(vec![]),
+        }
+    })?;
     sift.events.emit(RiddleEvent::PipelineStage {
         message_id: id.clone(),
         stage: "persist".into(),
@@ -1050,7 +1081,9 @@ pub fn persist(sift: &Sift, outcome: &mut SiftOutcome) -> Result<Option<FindProp
     });
     if !outcome.shadow {
         if let Some(hook) = &sift.projection {
-            if let Err(e) = hook.project(&dig_id, &outcome.classification) {
+            // The message as Sift read it, so the hook reads nothing again.
+            if let Err(e) = hook.project_message(&dig_id, &outcome.message, &outcome.classification)
+            {
                 // Bookkeeping never fails the work; the outbox will reconcile.
                 rwarn!(
                     Category::Projection,
@@ -1071,11 +1104,6 @@ pub fn persist(sift: &Sift, outcome: &mut SiftOutcome) -> Result<Option<FindProp
     );
     if outcome.shadow {
         return Ok(None);
-    }
-    // Spoil and Filed with `+ Replaces`: the series settles now, so the
-    // store's previous sale is superseded the moment the next one is sifted.
-    if let Some(key) = outcome.classification.series.as_deref() {
-        outcome.superseded = repo::message_series::settle(&store, key, &sift.clock.now())?;
     }
     Ok(outcome.find.clone())
 }

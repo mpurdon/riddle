@@ -228,6 +228,19 @@ pub trait ProjectionHook: Send + Sync {
         dig: &crate::ids::DigId,
         classification: &crate::classification::Classification,
     ) -> Result<()>;
+    /// `project` for a caller that already holds the message: Sift persists
+    /// the decision of a message it has just read, and the outbox hook read
+    /// it again, bodies and all, for every decision (17 Oct 2026). The
+    /// default ignores the message and calls `project`.
+    fn project_message(
+        &self,
+        dig: &crate::ids::DigId,
+        message: &crate::mail::Message,
+        classification: &crate::classification::Classification,
+    ) -> Result<()> {
+        let _ = message;
+        self.project(dig, classification)
+    }
     fn unproject(&self, dig: &crate::ids::DigId, message_id: &crate::ids::MessageId) -> Result<()>;
 }
 

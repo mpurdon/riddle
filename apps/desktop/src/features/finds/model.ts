@@ -179,3 +179,36 @@ export function teachingLine(decidedAs: string, remaining: number, sender: strin
   if (remaining === 0) return `${lead} Nothing else from ${sender} is Unresolved.`
   return `${lead} ${remaining} more from ${sender} ${remaining === 1 ? 'is' : 'are'} still Unresolved.`
 }
+
+// ---------------------------------------------------------------------------
+// Why each is held. A list row (`MessageSummary`) carries a disposition and
+// nothing of how it was reached, so the tray reads each row's explanation
+// and groups the sentences; a reason on the row would make this one pass.
+
+export interface ReasonGroup {
+  /** The explanation's sentence; null when it has none. */
+  reason: string | null
+  count: number
+}
+
+/**
+ * Rows grouped by reason, largest group first and ties in list order. A row
+ * whose reason is not known yet (`undefined`) is left out, so the line never
+ * counts what it has not read.
+ */
+export function reasonGroups<T>(items: T[], reasonOf: (m: T) => string | null | undefined): ReasonGroup[] {
+  const counts = new Map<string | null, number>()
+  for (const m of items) {
+    const r = reasonOf(m)
+    if (r === undefined) continue
+    const key = r?.trim() || null
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return [...counts].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count)
+}
+
+/** "12 held: budget exhausted · 3: judge unavailable", or null until a reason is known. */
+export function reasonLine(groups: ReasonGroup[]): string | null {
+  if (!groups.length) return null
+  return groups.map((g, i) => `${g.count}${i === 0 ? ' held' : ''}: ${g.reason ?? 'no reason recorded'}`).join(' · ')
+}

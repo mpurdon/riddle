@@ -140,3 +140,38 @@ pub fn decided_and_reversed_by_mesh(
         Ok((decided as usize, reversed as usize))
     })
 }
+
+/// A standing correction with where its message came from: the thread and
+/// the sender, read in the same query. The Context slice that lists the
+/// corrections touching a message's sender or thread read the fifty newest
+/// corrections and then each corrected message, bodies and all, for every
+/// message sifted (17 Oct 2026); it needs these two columns and nothing else.
+#[derive(Debug, Clone)]
+pub struct CorrectionOrigin {
+    pub correction: Correction,
+    /// `None` when the corrected message is gone (deleted or purged).
+    pub thread_id: Option<riddle_core::ThreadId>,
+    pub from_email: Option<String>,
+}
+
+/// Active (not retracted) corrections, newest first, each with its
+/// message's thread and sender.
+pub fn active_with_origin(store: &Store, limit: u32) -> Result<Vec<CorrectionOrigin>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT k.json, m.thread_id, m.from_email FROM corrections k
+             LEFT JOIN messages m ON m.id = k.message_id AND m.deleted_at IS NULL
+             WHERE k.retracted_at IS NULL ORDER BY k.created_at DESC LIMIT ?1",
+        )?;
+        let rows = st
+            .query_map([limit], |r| {
+                Ok(CorrectionOrigin {
+                    correction: from_json(r.get::<_, String>(0)?)?,
+                    thread_id: r.get::<_, Option<String>>(1)?.map(riddle_core::ThreadId),
+                    from_email: r.get(2)?,
+                })
+            })?
+            .collect();
+        rows
+    })
+}

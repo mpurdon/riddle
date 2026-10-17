@@ -105,3 +105,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 46 | refactor: suggestions cost nothing idle, keep honest verdicts, and read kinds from the lists | -33 | 0 | 0 | 0 | 0 |
 | 47 | fix: invoice senders count the newest six again; a pack-recognised domain is no vendor offer | 8 | 0 | 0 | 0 | 0 |
 | 48 | refactor: sender review reads the installed packs' detect domains and the invoice verdicts of each sender's newest six alone | 13 | 0 | 0 | 0 | 0 |
+| 49 | perf: the Sift path reads four rows per message and one probe per idle pass; the Why card says why, the wizard says what it will do | 39 | 0 | 0 | 0 | 0 |

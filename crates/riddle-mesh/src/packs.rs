@@ -216,12 +216,20 @@ pub fn parse_pack(text: &str) -> Result<Pack> {
     Ok(pack)
 }
 
-/// The packs compiled into Riddle.
+/// The packs compiled into Riddle, parsed once per process: the sender
+/// review asks for their `[detect]` domains every Sift pass, and parsing
+/// ten pack files with their Meshes each time was most of an idle pass
+/// (17 Oct 2026).
 pub fn builtin_packs() -> Vec<Pack> {
-    BUILTIN
-        .iter()
-        .map(|t| parse_pack(t).expect("built-in pack parses"))
-        .collect()
+    static PARSED: std::sync::OnceLock<Vec<Pack>> = std::sync::OnceLock::new();
+    PARSED
+        .get_or_init(|| {
+            BUILTIN
+                .iter()
+                .map(|t| parse_pack(t).expect("built-in pack parses"))
+                .collect()
+        })
+        .clone()
 }
 
 /// The pack file for a pack, as TOML: what export writes and import reads.

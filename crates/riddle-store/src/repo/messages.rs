@@ -1,5 +1,17 @@
 //! Messages and threads in a Dig store. Bodies are nullable and fetched
 //! lazily; list rows never load them.
+//!
+//! The Sift backlog is read from the row: `sifted_at` (and
+//! `shadow_sifted_at` for a Shadow proposal) mirror the message's current
+//! classification through triggers on the classifications table (migration
+//! 0008), so `unclassified_ids` is a probe of the `messages_unsifted`
+//! partial index rather than a probe of `classifications` per message from
+//! the newest down to the oldest, which is where the unsifted ones are. A
+//! message sent back to Sift (`supersede_current`, `supersede_by_mesh`,
+//! `supersede_sift_decisions`) looks unclassified again through the same
+//! triggers; nothing clears the markers by hand. Sender addresses are
+//! stored lowercase so the sender queries use `messages_from` instead of
+//! `lower(from_email)` (17 Oct 2026).
 
 use crate::{from_json, from_ts, now_ts, to_json, ts, Store};
 use riddle_core::{
@@ -59,7 +71,7 @@ pub fn upsert_in(c: &rusqlite::Connection, m: &Message) -> rusqlite::Result<()> 
            body_html = COALESCE(excluded.body_html, messages.body_html),
            synced_at = excluded.synced_at, deleted_at = NULL",
         params![
-            m.id.as_str(), m.provider_id, m.thread_id.as_str(), m.subject, m.from.email, m.from.name,
+            m.id.as_str(), m.provider_id, m.thread_id.as_str(), m.subject, m.from.email.to_lowercase(), m.from.name,
             to_json(&m.to)?, to_json(&m.cc)?, to_json(&m.bcc)?, ts(&m.date), m.snippet, to_json(&m.labels)?,
             to_json(&m.headers)?, to_json(&m.attachments)?, m.size_bytes as i64, m.is_sent as i64,
             m.body_text, m.body_html, ts(&m.synced_at)
@@ -182,22 +194,29 @@ pub fn count_since(store: &Store, since: &chrono::DateTime<chrono::Utc>) -> Resu
 /// proposals are all it records; otherwise mail a Mesh in Shadow had only
 /// proposed for still needs a live decision.
 pub fn unclassified_ids(store: &Store, limit: u32, shadow_decides: bool) -> Result<Vec<MessageId>> {
+    // Both forms imply the `messages_unsifted` index's WHERE clause.
+    let shadow = if shadow_decides {
+        " AND shadow_sifted_at IS NULL"
+    } else {
+        ""
+    };
     store.read(|c| {
-        let mut st = c.prepare(
-            "SELECT m.id FROM messages m
-             WHERE m.deleted_at IS NULL
-               AND NOT EXISTS (SELECT 1 FROM classifications k WHERE k.message_id = m.id AND k.superseded_at IS NULL AND (?2 OR k.shadow = 0))
-             ORDER BY m.date DESC LIMIT ?1",
-        )?;
-        let rows = st.query_map(params![limit, shadow_decides], |r| Ok(MessageId(r.get(0)?)))?.collect();
+        let mut st = c.prepare(&format!(
+            "SELECT id FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL{shadow}
+             ORDER BY date DESC LIMIT ?1"
+        ))?;
+        let rows = st
+            .query_map([limit], |r| Ok(MessageId(r.get(0)?)))?
+            .collect();
         rows
     })
 }
 
+/// Messages with no current classification of either kind.
 pub fn unclassified_count(store: &Store) -> Result<u64> {
     store.read(|c| {
         c.query_row(
-            "SELECT count(*) FROM messages m WHERE m.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM classifications k WHERE k.message_id = m.id AND k.superseded_at IS NULL)",
+            "SELECT count(*) FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL AND shadow_sifted_at IS NULL",
             [], |r| r.get::<_, i64>(0),
         ).map(|n| n as u64)
     })
@@ -592,8 +611,9 @@ pub fn ids_since(
 
 /// Every message received from one address, newest first.
 pub fn ids_from_sender(store: &Store, email: &str) -> Result<Vec<MessageId>> {
+    let email = email.to_lowercase();
     store.read(|c| {
-        let mut st = c.prepare("SELECT id FROM messages WHERE lower(from_email) = lower(?1) AND deleted_at IS NULL AND is_sent = 0 ORDER BY date DESC")?;
+        let mut st = c.prepare("SELECT id FROM messages WHERE from_email = ?1 AND deleted_at IS NULL AND is_sent = 0 ORDER BY date DESC")?;
         let rows = st.query_map([email], |r| Ok(MessageId(r.get(0)?)))?.collect();
         rows
     })
@@ -649,7 +669,7 @@ pub fn sender_counts_since(
 ) -> Result<Vec<(String, u64)>> {
     store.read(|c| {
         let mut st = c.prepare(
-            "SELECT lower(from_email), count(*) FROM messages WHERE deleted_at IS NULL AND is_sent = 0 AND date >= ?1 GROUP BY 1",
+            "SELECT from_email, count(*) FROM messages WHERE deleted_at IS NULL AND is_sent = 0 AND date >= ?1 GROUP BY from_email",
         )?;
         let rows = st
             .query_map([ts(since)], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?
@@ -668,7 +688,7 @@ pub fn sender_recent_ids(
 ) -> Result<std::collections::HashMap<String, Vec<MessageId>>> {
     store.read(|c| {
         let mut st = c.prepare(
-            "SELECT lower(from_email), id FROM messages WHERE deleted_at IS NULL AND is_sent = 0 AND date >= ?1 ORDER BY date DESC",
+            "SELECT from_email, id FROM messages WHERE deleted_at IS NULL AND is_sent = 0 AND date >= ?1 ORDER BY date DESC",
         )?;
         let mut out: std::collections::HashMap<String, Vec<MessageId>> =
             std::collections::HashMap::new();
@@ -877,6 +897,31 @@ pub fn thread_strata(
     })
 }
 
+/// The current live decision of every other message in a thread: `(message
+/// id, disposition kind)`, oldest first. The `previous_classifications`
+/// Context slice loaded the thread with bodies and asked for each sibling's
+/// current classification one read at a time, for every message sifted
+/// (17 Oct 2026); it needs the kinds alone.
+pub fn thread_decisions(
+    store: &Store,
+    thread_id: &ThreadId,
+    except: &MessageId,
+) -> Result<Vec<(MessageId, String)>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT k.message_id, k.disposition_kind FROM classifications k JOIN messages m ON m.id = k.message_id
+             WHERE m.thread_id = ?1 AND m.id <> ?2 AND m.deleted_at IS NULL AND k.shadow = 0 AND k.superseded_at IS NULL
+             ORDER BY m.date",
+        )?;
+        let rows = st
+            .query_map(params![thread_id.as_str(), except.as_str()], |r| {
+                Ok((MessageId(r.get(0)?), r.get(1)?))
+            })?
+            .collect();
+        rows
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -916,6 +961,158 @@ mod tests {
             .collect();
         v.sort();
         v
+    }
+
+    fn decided(m: &Message, shadow: bool) -> riddle_core::Classification {
+        riddle_core::Classification {
+            id: riddle_core::ClassificationId::new(),
+            message_id: m.id.clone(),
+            dig_id: m.dig_id.clone(),
+            importance: riddle_core::Importance::default_for(&riddle_core::Disposition::Spoil),
+            disposition: riddle_core::Disposition::Spoil,
+            strata: vec![],
+            notify: false,
+            mechanism: riddle_core::DecisionMechanism::Mesh,
+            mesh_id: None,
+            mesh_version: None,
+            matched_rule: None,
+            confidence: None,
+            reason: "test".into(),
+            trace_id: riddle_core::TraceId::new(),
+            shadow,
+            created_at: chrono::Utc::now(),
+            superseded_at: None,
+            series: None,
+        }
+    }
+
+    fn markers(store: &Store, id: &MessageId) -> (Option<i64>, Option<i64>) {
+        store
+            .read(|c| {
+                c.query_row(
+                    "SELECT sifted_at, shadow_sifted_at FROM messages WHERE id = ?1",
+                    [id.as_str()],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+            })
+            .unwrap()
+    }
+
+    fn backlog(store: &Store, shadow_decides: bool) -> Vec<String> {
+        unclassified_ids(store, 10, shadow_decides)
+            .unwrap()
+            .into_iter()
+            .map(|id| id.0)
+            .collect()
+    }
+
+    #[test]
+    fn sifted_at_follows_the_current_classification_and_the_backlog_skips_sifted_rows() {
+        use crate::repo::classifications as k;
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        let dig = DigId::from("dig-1");
+        let (m1, m2, m3) = (
+            message(&dig, 1, &[]),
+            message(&dig, 2, &[]),
+            message(&dig, 3, &[]),
+        );
+        for m in [&m1, &m2, &m3] {
+            upsert(&store, m).unwrap();
+        }
+        let (a, b, c) = (m1.id.as_str(), m2.id.as_str(), m3.id.as_str());
+        assert_eq!(backlog(&store, false), [a, b, c]);
+        assert_eq!(unclassified_count(&store).unwrap(), 3);
+
+        // A live decision marks the row; the backlog and the count skip it.
+        let decision = decided(&m2, false);
+        k::record(&store, &decision).unwrap();
+        assert_eq!(
+            markers(&store, &m2.id),
+            (Some(ts(&decision.created_at)), None)
+        );
+        assert_eq!(backlog(&store, false), [a, c]);
+        assert_eq!(unclassified_count(&store).unwrap(), 2);
+
+        // A Shadow proposal counts only while the account is in Shadow.
+        k::record(&store, &decided(&m3, true)).unwrap();
+        assert!(markers(&store, &m3.id).1.is_some());
+        assert_eq!(backlog(&store, false), [a, c]);
+        assert_eq!(backlog(&store, true), [a]);
+        assert_eq!(unclassified_count(&store).unwrap(), 1);
+
+        // Sent back to Sift (one message, or every Sift decision at once),
+        // the row looks unclassified again; a resync leaves the marker.
+        k::supersede_current(&store, &m2.id).unwrap();
+        assert_eq!(markers(&store, &m2.id), (None, None));
+        assert_eq!(backlog(&store, false), [a, b, c]);
+        k::record(&store, &decided(&m1, false)).unwrap();
+        upsert(&store, &m1).unwrap();
+        assert_eq!(backlog(&store, false), [b, c]);
+        assert_eq!(k::supersede_sift_decisions(&store).unwrap(), 1);
+        assert_eq!(backlog(&store, false), [a, b, c]);
+        k::retire_shadow(&store, &m3.id).unwrap();
+        assert_eq!(markers(&store, &m3.id), (None, None));
+        assert_eq!(unclassified_count(&store).unwrap(), 3);
+    }
+
+    #[test]
+    fn the_backlog_body_and_sender_queries_use_their_indexes() {
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        let plan = |sql: &str| -> String {
+            store
+                .read(|c| {
+                    let mut st = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+                    let rows = st
+                        .query_map([], |r| r.get::<_, String>(3))?
+                        .collect::<rusqlite::Result<Vec<String>>>()?;
+                    Ok(rows.join("\n"))
+                })
+                .unwrap()
+        };
+        for sql in [
+            "SELECT id FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL ORDER BY date DESC LIMIT 10",
+            "SELECT id FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL AND shadow_sifted_at IS NULL ORDER BY date DESC LIMIT 10",
+            "SELECT count(*) FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL AND shadow_sifted_at IS NULL",
+        ] {
+            let p = plan(sql);
+            assert!(p.contains("messages_unsifted"), "{sql}\n{p}");
+        }
+        for sql in [
+            "SELECT id FROM messages WHERE deleted_at IS NULL AND body_text IS NULL AND body_html IS NULL ORDER BY date DESC LIMIT 10",
+            "SELECT count(*) FROM messages WHERE deleted_at IS NULL AND body_text IS NULL AND body_html IS NULL",
+        ] {
+            let p = plan(sql);
+            assert!(p.contains("messages_without_body"), "{sql}\n{p}");
+        }
+        let p = plan("SELECT id FROM messages WHERE from_email = 'a@b.c' AND deleted_at IS NULL AND is_sent = 0 ORDER BY date DESC");
+        assert!(p.contains("messages_from"), "{p}");
+    }
+
+    #[test]
+    fn a_mixed_case_sender_is_stored_and_found_by_its_lowercase_address() {
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        let dig = DigId::from("dig-1");
+        let since = chrono::Utc::now() - chrono::Duration::minutes(100);
+        for (n, from) in [(1, "Billing@Acme.example"), (2, "billing@acme.example")] {
+            let mut m = message(&dig, n, &[]);
+            // Built without `Address::new`, as a provider might.
+            m.from = Address {
+                email: from.into(),
+                name: None,
+            };
+            upsert(&store, &m).unwrap();
+        }
+        let stored = get(&store, &dig, &MessageId::for_provider(&dig, "p1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.from.email, "billing@acme.example");
+        for asked in ["billing@acme.example", "BILLING@ACME.EXAMPLE"] {
+            assert_eq!(ids_from_sender(&store, asked).unwrap().len(), 2, "{asked}");
+        }
+        assert_eq!(
+            sender_counts_since(&store, &since).unwrap(),
+            [("billing@acme.example".to_string(), 2)]
+        );
     }
 
     #[test]

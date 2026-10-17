@@ -202,6 +202,54 @@ impl Registry {
         repo::signals::upsert(&self.index, &s)?;
         Ok(s)
     }
+
+    /// The registry as it stands now, for a caller that resolves many
+    /// references in a loop: one read, then lookups.
+    pub fn snapshot(&self) -> Result<RegistrySnapshot> {
+        Ok(RegistrySnapshot {
+            signals: self.list()?,
+        })
+    }
+}
+
+/// The registry read at one moment. Sift resolves every Signal reference of
+/// every Mesh in scope for every message, and read one row per reference
+/// plus the version list of each Baseline member each time (17 Oct 2026);
+/// a pass now takes one snapshot and resolves from it, so a Signal promoted
+/// or proposed while a pass runs is used by the next pass, as an edited
+/// Mesh already is.
+#[derive(Debug, Clone, Default)]
+pub struct RegistrySnapshot {
+    signals: Vec<Signal>,
+}
+
+impl RegistrySnapshot {
+    /// As `Registry::resolve`: the exact version, whatever its status.
+    pub fn resolve(&self, name: &str, version: u32) -> Result<Signal> {
+        self.signals
+            .iter()
+            .find(|s| s.name == name && s.version == version)
+            .cloned()
+            .ok_or_else(|| RiddleError::not_found(format!("signal {name}@v{version}")))
+    }
+
+    /// As `Registry::resolve_active`: the highest ACTIVE version.
+    pub fn resolve_active(&self, name: &str) -> Result<Signal> {
+        self.signals
+            .iter()
+            .filter(|s| s.name == name && s.status == SignalStatus::Active)
+            .max_by_key(|s| s.version)
+            .cloned()
+            .ok_or_else(|| RiddleError::not_found(format!("no active version of signal {name}")))
+    }
+
+    pub fn len(&self) -> usize {
+        self.signals.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.signals.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -292,6 +340,56 @@ mod tests {
             SignalStatus::Deprecated
         );
         assert_eq!(r.resolve_active("review_requested").unwrap().version, 2);
+    }
+
+    #[test]
+    fn a_snapshot_resolves_what_the_registry_resolves_and_keeps_doing_so_after_a_promotion() {
+        let r = registry();
+        r.seed_system().unwrap();
+        let snap = r.snapshot().unwrap();
+        assert_eq!(snap.len(), r.list().unwrap().len());
+        for s in r.list().unwrap() {
+            assert_eq!(snap.resolve(&s.name, s.version).unwrap(), s);
+        }
+        assert_eq!(
+            snap.resolve_active("review_requested").unwrap(),
+            r.resolve_active("review_requested").unwrap()
+        );
+        assert_eq!(
+            snap.resolve_active("human_authored").unwrap_err().kind,
+            r.resolve_active("human_authored").unwrap_err().kind,
+            "a deprecated Signal has no active version in either"
+        );
+        assert_eq!(
+            snap.resolve("review_requested", 9).unwrap_err().kind,
+            riddle_errors::ErrorKind::NotFound
+        );
+        // Promoted mid-pass: the registry moves, the snapshot stands until
+        // the next pass takes a new one.
+        let candidate = Signal::noul(
+            "review_requested",
+            "The recipient is named as a reviewer of a change.",
+        );
+        r.propose(candidate, CreatedBy::User).unwrap();
+        r.promote(
+            "review_requested",
+            2,
+            PromoteOptions {
+                report: None,
+                override_untested: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(r.resolve_active("review_requested").unwrap().version, 2);
+        assert_eq!(snap.resolve_active("review_requested").unwrap().version, 1);
+        assert_eq!(
+            r.snapshot()
+                .unwrap()
+                .resolve_active("review_requested")
+                .unwrap()
+                .version,
+            2
+        );
     }
 
     #[test]

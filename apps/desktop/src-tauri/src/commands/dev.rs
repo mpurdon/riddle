@@ -106,27 +106,6 @@ pub async fn log_categories() -> Vec<&'static str> {
     Category::ALL.iter().map(|c| c.as_str()).collect()
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InFlight {
-    pub command: String,
-    pub elapsed_ms: u64,
-}
-
-#[tauri::command]
-pub async fn in_flight_calls(state: State<'_, AppState>) -> Result<Vec<InFlight>> {
-    let g = state.in_flight.lock();
-    let mut v: Vec<InFlight> = g
-        .values()
-        .map(|(c, t)| InFlight {
-            command: c.clone(),
-            elapsed_ms: t.elapsed().as_millis() as u64,
-        })
-        .collect();
-    v.sort_by_key(|i| std::cmp::Reverse(i.elapsed_ms));
-    Ok(v)
-}
-
 #[allow(dead_code)]
 fn _assert_error_is_serializable(e: RiddleError) -> String {
     serde_json::to_string(&e).unwrap_or_default()

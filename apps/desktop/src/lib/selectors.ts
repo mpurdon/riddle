@@ -285,6 +285,39 @@ export function summaryCopy(s: Summary, now: Date = new Date()): SummaryCopy {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The Summary while catching up. It said "Catching up." and left the user
+// to open the Task Centre for what that meant; these hoist the sync job
+// and the counts the page already has into one picture.
+
+/** The sync job catching this account (or any) up: a running first sync first, else the running catch-up, else one waiting. */
+export function catchUpJob(tc: TaskCentre | undefined, digId: string | null): Job | null {
+  const mine = (tc?.jobs ?? []).filter((j) => isJobActive(j) && (j.kind === 'initial_sync' || j.kind === 'catch_up') && (!digId || j.digId === digId))
+  return mine.find((j) => j.kind === 'initial_sync' && j.status.state === 'running') ?? mine.find((j) => j.status.state === 'running') ?? mine[0] ?? null
+}
+
+/** Messages still to fetch for the account (or all), from each account's status; null when none is fetching. */
+export function fetchRemaining(tc: TaskCentre | undefined, digId: string | null): number | null {
+  const rows = (tc?.digs ?? []).filter((d) => (!digId || d.digId === digId) && d.status.state === 'catching_up')
+  if (!rows.length) return null
+  return rows.reduce((acc, d) => acc + (d.status.state === 'catching_up' ? num(d.status.remaining) : 0), 0)
+}
+
+/**
+ * "Fetching 1,240 · sorted 3,741 · 4 need you so far": the catch-up in the
+ * numbers the Summary and the Task Centre already carry, nothing invented.
+ * "Sorted" is what has been sifted of what there is to sift.
+ */
+export function catchUpLine(s: Summary, tc: TaskCentre | undefined, digId: string | null): string {
+  const parts: string[] = []
+  const toFetch = fetchRemaining(tc, digId)
+  if (toFetch) parts.push(`fetching ${fmtInt(toFetch)}`)
+  parts.push(`sorted ${fmtInt(Math.max(0, num(s.totalToSift) - num(s.remainingToSift)))}`)
+  parts.push(`${fmtInt(s.findsOpen)} need${num(s.findsOpen) === 1 ? 's' : ''} you so far`)
+  const line = parts.join(' · ')
+  return line[0].toUpperCase() + line.slice(1)
+}
+
 export function sinceLabel(iso: string, now: Date = new Date()): string {
   const d = new Date(iso)
   const diff = now.getTime() - d.getTime()

@@ -10,12 +10,25 @@
 //!
 //! Context slices are retrieved, not stuffed (§44): each named slice is a
 //! bounded string built from the store on demand.
+//!
+//! What a slice needs is read once, where it is the same for the pass or
+//! already in the caller's hands (17 Oct 2026): the corrections slice read
+//! the fifty newest corrections and then each corrected message, bodies and
+//! all, for every message sifted, to learn its thread and sender; the
+//! thread slice loaded the thread with bodies and asked for each sibling's
+//! decision one read at a time; the sender and Thread State slices read
+//! again what the engine had just fetched to build the Sift input. A pass
+//! now loads its corrections once (`PassContext`), the thread's decisions
+//! come from one query, and the engine passes in the Person and Thread
+//! State it holds (`SliceSources`). A correction made while a pass runs is
+//! seen by the next pass, as an edited Mesh is.
 
 use chrono::{DateTime, Utc};
 use regex::Regex;
-use riddle_core::{DigId, Message, Speaker, ThreadId, ThreadState, UserProfile};
+use riddle_core::{DigId, Message, Person, Speaker, ThreadId, ThreadState, UserProfile};
 use riddle_errors::Result;
 use riddle_mail::normalize::{normalize_message, strip_quoted_reply, strip_signature};
+use riddle_store::repo::corrections::CorrectionOrigin;
 use riddle_store::{repo, Store};
 use std::sync::OnceLock;
 
@@ -228,22 +241,92 @@ fn bound(s: String) -> String {
     }
 }
 
+/// How many of the newest standing corrections the corrections slice reads.
+pub const MAX_CORRECTIONS_READ: u32 = 50;
+
+/// What the slices draw on that is the same for every message of a Sift
+/// pass: the user's standing corrections, newest first, each with its
+/// message's thread and sender. Loaded once per pass (one query).
+#[derive(Debug, Clone, Default)]
+pub struct PassContext {
+    corrections: Vec<CorrectionOrigin>,
+}
+
+impl PassContext {
+    pub fn load(dig_store: &Store) -> Result<Self> {
+        Ok(Self {
+            corrections: repo::corrections::active_with_origin(dig_store, MAX_CORRECTIONS_READ)?,
+        })
+    }
+
+    pub fn corrections(&self) -> &[CorrectionOrigin] {
+        &self.corrections
+    }
+}
+
+/// What the caller already holds for one message, so the slices read
+/// nothing the engine fetched to build the Sift input.
+#[derive(Debug, Clone, Copy)]
+pub struct SliceSources<'a> {
+    pub person: Option<&'a Person>,
+    pub thread_state: Option<&'a ThreadState>,
+    pub pass: &'a PassContext,
+}
+
 /// The named Context slices for a message, each bounded in size. Missing
 /// data yields a short "unknown" sentence rather than an absent slice, so
-/// the judge is told what is not known.
+/// the judge is told what is not known. This form reads the sender, the
+/// Thread State and the corrections itself; a pass over many messages uses
+/// `slices_with`.
 pub fn slices(
     index: &Store,
     dig_store: &Store,
     message: &Message,
     names: &[&str],
 ) -> Result<Vec<ContextSlice>> {
+    let person = if names.contains(&"sender_relationship") {
+        repo::people::by_email(index, &message.from.email)?
+    } else {
+        None
+    };
+    let thread_state = if names.contains(&"thread_state") {
+        repo::thread_state::get(dig_store, &message.thread_id)?
+    } else {
+        None
+    };
+    let pass = if names.contains(&"recent_corrections") {
+        PassContext::load(dig_store)?
+    } else {
+        PassContext::default()
+    };
+    slices_with(
+        dig_store,
+        message,
+        &SliceSources {
+            person: person.as_ref(),
+            thread_state: thread_state.as_ref(),
+            pass: &pass,
+        },
+        names,
+    )
+}
+
+/// `slices` from what the caller holds: the Person and Thread State it
+/// fetched for the Sift input and the pass's corrections. Reads the store
+/// for the thread's decisions and this message's history alone.
+pub fn slices_with(
+    dig_store: &Store,
+    message: &Message,
+    sources: &SliceSources<'_>,
+    names: &[&str],
+) -> Result<Vec<ContextSlice>> {
     let mut out = Vec::new();
     for name in names {
         let text = match *name {
-            "sender_relationship" => sender_relationship(index, message)?,
-            "thread_state" => thread_state_slice(dig_store, message)?,
+            "sender_relationship" => sender_relationship(sources.person, message),
+            "thread_state" => thread_state_slice(sources.thread_state),
             "previous_classifications" => previous_classifications(dig_store, message)?,
-            "recent_corrections" => recent_corrections(dig_store, message)?,
+            "recent_corrections" => recent_corrections(sources.pass, message),
             _ => continue,
         };
         out.push(ContextSlice {
@@ -254,8 +337,8 @@ pub fn slices(
     Ok(out)
 }
 
-fn sender_relationship(index: &Store, m: &Message) -> Result<String> {
-    Ok(match repo::people::by_email(index, &m.from.email)? {
+fn sender_relationship(person: Option<&Person>, m: &Message) -> String {
+    match person {
         Some(p) => {
             let mut s = format!(
                 "Sender {}: {} messages from them, {} from you to them; {}.",
@@ -293,14 +376,14 @@ fn sender_relationship(index: &Store, m: &Message) -> Result<String> {
             s
         }
         None => "Sender is unknown: no previous mail from or to them.".into(),
-    })
+    }
 }
 
-fn thread_state_slice(store: &Store, m: &Message) -> Result<String> {
-    Ok(match repo::thread_state::get(store, &m.thread_id)? {
+fn thread_state_slice(thread_state: Option<&ThreadState>) -> String {
+    match thread_state {
         Some(t) => t.summary(),
         None => "Thread State unknown: first message of a new thread.".into(),
-    })
+    }
 }
 
 fn previous_classifications(store: &Store, m: &Message) -> Result<String> {
@@ -318,14 +401,10 @@ fn previous_classifications(store: &Store, m: &Message) -> Result<String> {
             }
         ));
     }
-    let siblings = repo::messages::thread_messages(store, &m.dig_id, &m.thread_id)?;
+    // The other messages' current decisions, one query: the kinds alone.
     let mut counts: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
-    for s in siblings.iter().filter(|s| s.id != m.id) {
-        if let Some(k) = repo::classifications::current(store, &s.id)? {
-            *counts
-                .entry(k.disposition.kind().as_str().to_string())
-                .or_default() += 1;
-        }
+    for (_, kind) in repo::messages::thread_decisions(store, &m.thread_id, &m.id)? {
+        *counts.entry(kind).or_default() += 1;
     }
     if !counts.is_empty() {
         lines.push(format!(
@@ -343,20 +422,18 @@ fn previous_classifications(store: &Store, m: &Message) -> Result<String> {
     Ok(lines.join(" "))
 }
 
-fn recent_corrections(store: &Store, m: &Message) -> Result<String> {
+fn recent_corrections(pass: &PassContext, m: &Message) -> String {
     let mut lines = Vec::new();
-    for k in repo::corrections::active(store, 50)? {
+    for origin in pass.corrections() {
         if lines.len() >= 5 {
             break;
         }
-        let same_thread_or_sender = if k.message_id == m.id {
-            true
-        } else {
-            match repo::messages::get(store, &m.dig_id, &k.message_id)? {
-                Some(other) => other.thread_id == m.thread_id || other.from.email == m.from.email,
-                None => false,
-            }
-        };
+        let k = &origin.correction;
+        // Its own correction counts; otherwise the corrected message must
+        // still exist and share the thread or the sender.
+        let same_thread_or_sender = k.message_id == m.id
+            || origin.thread_id.as_ref() == Some(&m.thread_id)
+            || origin.from_email.as_deref() == Some(m.from.email.as_str());
         if !same_thread_or_sender {
             continue;
         }
@@ -378,7 +455,7 @@ fn recent_corrections(store: &Store, m: &Message) -> Result<String> {
     if lines.is_empty() {
         lines.push("No corrections involving this sender or thread.".into());
     }
-    Ok(lines.join(" "))
+    lines.join(" ")
 }
 
 #[cfg(test)]
@@ -460,6 +537,277 @@ mod tests {
         assert!(is_commitment("I can have the write-up to you by Thursday."));
         assert!(!is_commitment("Will you send it by Friday?"));
         assert!(!is_commitment("I will be out on Friday."));
+    }
+
+    fn correction(dig: &DigId, on: &Message, hours_ago: i64) -> riddle_core::Correction {
+        riddle_core::Correction {
+            id: riddle_core::CorrectionId::new(),
+            kind: riddle_core::CorrectionKind::Move,
+            dig_id: dig.clone(),
+            message_id: on.id.clone(),
+            from_disposition: Some(riddle_core::Disposition::Find {
+                find_type: riddle_core::FindType::Respond,
+            }),
+            to_disposition: Some(riddle_core::Disposition::Spoil),
+            from_find_type: None,
+            to_find_type: None,
+            mesh_id: None,
+            mesh_version: None,
+            activity_id: None,
+            created_at: Utc::now() - chrono::Duration::hours(hours_ago),
+            retracted_at: None,
+        }
+    }
+
+    fn decision(m: &Message, disposition: riddle_core::Disposition) -> riddle_core::Classification {
+        riddle_core::Classification {
+            id: riddle_core::ClassificationId::new(),
+            message_id: m.id.clone(),
+            dig_id: m.dig_id.clone(),
+            disposition,
+            strata: vec![],
+            notify: false,
+            mechanism: riddle_core::DecisionMechanism::Mesh,
+            mesh_id: None,
+            mesh_version: None,
+            matched_rule: None,
+            confidence: None,
+            reason: String::new(),
+            trace_id: riddle_core::TraceId::new(),
+            shadow: false,
+            created_at: Utc::now(),
+            superseded_at: None,
+            series: None,
+            importance: riddle_core::Importance::Normal,
+        }
+    }
+
+    /// The corrections slice as it was written before 17 Oct 2026: the
+    /// fifty newest corrections, then each corrected message in full.
+    fn recent_corrections_by_message_reads(store: &Store, m: &Message) -> String {
+        let mut lines = Vec::new();
+        for k in repo::corrections::active(store, 50).unwrap() {
+            if lines.len() >= 5 {
+                break;
+            }
+            let same = if k.message_id == m.id {
+                true
+            } else {
+                match repo::messages::get(store, &m.dig_id, &k.message_id).unwrap() {
+                    Some(other) => {
+                        other.thread_id == m.thread_id || other.from.email == m.from.email
+                    }
+                    None => false,
+                }
+            };
+            if !same {
+                continue;
+            }
+            let what = match (&k.from_disposition, &k.to_disposition) {
+                (Some(f), Some(t)) => {
+                    format!(
+                        "{:?} → {} to {}",
+                        k.kind,
+                        f.kind().as_str(),
+                        t.kind().as_str()
+                    )
+                }
+                _ => format!("{:?}", k.kind),
+            };
+            lines.push(format!(
+                "You corrected mail from this sender or thread on {}: {}.",
+                k.created_at.format("%Y-%m-%d"),
+                what
+            ));
+        }
+        if lines.is_empty() {
+            lines.push("No corrections involving this sender or thread.".into());
+        }
+        lines.join(" ")
+    }
+
+    #[test]
+    fn the_corrections_join_returns_thread_and_sender_without_bodies_and_the_slice_text_is_unchanged(
+    ) {
+        let stores = riddle_store::Stores::in_memory().unwrap();
+        let dig = DigId::from("d1");
+        let store = stores.dig(&dig).unwrap();
+        // Same thread, different sender; same sender, other thread; neither;
+        // and a correction on a message that is gone.
+        let subject = msg(
+            "1",
+            "priya@example.com",
+            false,
+            "Could you approve the vendor contract today?",
+            0,
+        );
+        let mut same_thread = msg(
+            "2",
+            "sam@example.com",
+            false,
+            "Looping in Sam, see the thread below for the contract.",
+            1,
+        );
+        same_thread.thread_id = subject.thread_id.clone();
+        let mut same_sender = msg(
+            "3",
+            "priya@example.com",
+            false,
+            "Lunch on Thursday? Let me know.",
+            2,
+        );
+        same_sender.thread_id = ThreadId::from("d1:t2");
+        let mut neither = msg(
+            "4",
+            "bob@example.com",
+            false,
+            "Unrelated news about the office move.",
+            3,
+        );
+        neither.thread_id = ThreadId::from("d1:t3");
+        for m in [&subject, &same_thread, &same_sender, &neither] {
+            repo::messages::upsert(&store, m).unwrap();
+        }
+        let gone = msg(
+            "5",
+            "priya@example.com",
+            false,
+            "A message since deleted from the mailbox.",
+            4,
+        );
+        for (m, hours) in [
+            (&same_thread, 3),
+            (&same_sender, 2),
+            (&neither, 1),
+            (&gone, 5),
+        ] {
+            repo::corrections::record(&store, &correction(&dig, m, hours)).unwrap();
+        }
+
+        let origins = repo::corrections::active_with_origin(&store, 50).unwrap();
+        assert_eq!(origins.len(), 4, "every standing correction, newest first");
+        let by_message = |id: &riddle_core::MessageId| {
+            origins
+                .iter()
+                .find(|o| &o.correction.message_id == id)
+                .expect("present")
+        };
+        assert_eq!(
+            by_message(&same_thread.id).thread_id,
+            Some(subject.thread_id.clone())
+        );
+        assert_eq!(
+            by_message(&same_thread.id).from_email.as_deref(),
+            Some("sam@example.com")
+        );
+        assert_eq!(
+            by_message(&same_sender.id).thread_id,
+            Some(ThreadId::from("d1:t2"))
+        );
+        assert_eq!(
+            by_message(&same_sender.id).from_email.as_deref(),
+            Some("priya@example.com")
+        );
+        assert_eq!(
+            by_message(&gone.id).thread_id,
+            None,
+            "a missing message has no origin"
+        );
+        assert_eq!(by_message(&gone.id).from_email, None);
+        assert!(
+            origins
+                .windows(2)
+                .all(|w| w[0].correction.created_at >= w[1].correction.created_at),
+            "newest first, as `active` orders them"
+        );
+
+        let pass = PassContext::load(&store).unwrap();
+        let sources = SliceSources {
+            person: None,
+            thread_state: None,
+            pass: &pass,
+        };
+        for m in [&subject, &same_thread, &same_sender, &neither] {
+            let s = slices_with(&store, m, &sources, &["recent_corrections"]).unwrap();
+            assert_eq!(
+                s[0].text,
+                recent_corrections_by_message_reads(&store, m),
+                "{}",
+                m.id
+            );
+        }
+        let s = slices_with(&store, &subject, &sources, &["recent_corrections"]).unwrap();
+        assert!(s[0].text.contains("Move → find to spoil"), "{}", s[0].text);
+        assert_eq!(
+            s[0].text.matches("You corrected").count(),
+            2,
+            "the thread's and the sender's corrections, not the stranger's or the deleted one's"
+        );
+    }
+
+    #[test]
+    fn the_thread_slice_counts_the_siblings_current_decisions_from_one_query() {
+        let stores = riddle_store::Stores::in_memory().unwrap();
+        let dig = DigId::from("d1");
+        let store = stores.dig(&dig).unwrap();
+        let first = msg(
+            "1",
+            "priya@example.com",
+            false,
+            "Could you approve the vendor contract today?",
+            0,
+        );
+        let mut second = msg(
+            "2",
+            "sam@example.com",
+            false,
+            "Approved, sending it over now.",
+            1,
+        );
+        second.thread_id = first.thread_id.clone();
+        let mut third = msg("3", "priya@example.com", false, "Thanks both.", 2);
+        third.thread_id = first.thread_id.clone();
+        let mut elsewhere = msg(
+            "4",
+            "priya@example.com",
+            false,
+            "Another thread entirely.",
+            3,
+        );
+        elsewhere.thread_id = ThreadId::from("d1:t2");
+        for m in [&first, &second, &third, &elsewhere] {
+            repo::messages::upsert(&store, m).unwrap();
+        }
+        repo::classifications::record(&store, &decision(&first, riddle_core::Disposition::Filed))
+            .unwrap();
+        // The second was decided twice: only its current decision counts.
+        repo::classifications::record(&store, &decision(&second, riddle_core::Disposition::Spoil))
+            .unwrap();
+        repo::classifications::record(&store, &decision(&second, riddle_core::Disposition::Filed))
+            .unwrap();
+        repo::classifications::record(
+            &store,
+            &decision(&elsewhere, riddle_core::Disposition::Spoil),
+        )
+        .unwrap();
+        // A Shadow proposal is not a decision.
+        let mut shadow = decision(&third, riddle_core::Disposition::Spoil);
+        shadow.shadow = true;
+        repo::classifications::record(&store, &shadow).unwrap();
+
+        let pass = PassContext::default();
+        let sources = SliceSources {
+            person: None,
+            thread_state: None,
+            pass: &pass,
+        };
+        let s = slices_with(&store, &third, &sources, &["previous_classifications"]).unwrap();
+        assert_eq!(s[0].text, "Earlier in this thread: 2 filed.");
+        let s = slices_with(&store, &first, &sources, &["previous_classifications"]).unwrap();
+        assert_eq!(
+            s[0].text,
+            "This message was filed by Mesh. Earlier in this thread: 1 filed."
+        );
     }
 
     #[test]

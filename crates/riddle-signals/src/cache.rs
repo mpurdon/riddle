@@ -128,16 +128,26 @@ pub async fn cached_or_evaluate(
     let mut out = CacheOutcome::default();
     let mut slots: Vec<Option<SignalEvaluation>> = Vec::with_capacity(signals.len());
     let mut misses: Vec<usize> = Vec::new();
+    // One read for everything this engine has evaluated on the message,
+    // then a lookup per Signal; it was one read per Signal, and the fresh
+    // answers below go back in one write (17 Oct 2026). The key is the
+    // same: name, version, engine, and the context hash for a
+    // Context-dependent Signal (an empty hash otherwise).
+    let known = repo::signals::evaluations_for_engine(store, message_id, &engine)?;
     for (i, s) in signals.iter().enumerate() {
         let key_hash = if s.inputs.is_context_dependent() {
             context_hash
         } else {
             ""
         };
-        match repo::signals::get_evaluation(
-            store, message_id, &s.name, s.version, &engine, key_hash,
-        )? {
-            Some(mut e) => {
+        let hit = known.iter().find(|e| {
+            e.signal_name == s.name
+                && e.signal_version == s.version
+                && e.context_hash.as_deref().unwrap_or("") == key_hash
+        });
+        match hit {
+            Some(e) => {
+                let mut e = e.clone();
                 e.cached = true;
                 slots.push(Some(e));
                 out.cached += 1;
@@ -173,6 +183,7 @@ pub async fn cached_or_evaluate(
         out.input_tokens = answers.iter().map(|a| a.input_tokens).max().unwrap_or(0);
         out.cost_usd = price.map(|p| out.input_tokens as f64 * p / 1_000_000.0);
         out.raw = answers.iter().find_map(|a| a.raw.clone());
+        let mut fresh: Vec<SignalEvaluation> = Vec::with_capacity(misses.len());
         for &i in &misses {
             let s = &signals[i];
             let Some(a) = answers.iter().find(|a| a.question_id == s.key()) else {
@@ -200,19 +211,27 @@ pub async fn cached_or_evaluate(
                 Some(request_hash.clone()),
                 false,
             );
-            if write_back {
-                if let Err(err) = repo::signals::put_evaluation(store, &e) {
-                    // Bookkeeping never fails the work: the evaluation is still used.
-                    rwarn!(
-                        Category::Judge,
-                        "could not cache evaluation {}: {}",
-                        s.key(),
-                        err.message
-                    );
-                }
-            }
-            slots[i] = Some(e);
+            slots[i] = Some(e.clone());
+            fresh.push(e);
             out.fresh += 1;
+        }
+        if write_back && !fresh.is_empty() {
+            let put = store.write(|c| {
+                for e in &fresh {
+                    repo::signals::put_evaluation_in(c, e)?;
+                }
+                Ok(())
+            });
+            if let Err(err) = put {
+                // Bookkeeping never fails the work: the evaluations are still used.
+                rwarn!(
+                    Category::Judge,
+                    "could not cache {} evaluations for message {}: {}",
+                    fresh.len(),
+                    message_id,
+                    err.message
+                );
+            }
         }
     }
     out.evaluations = slots.into_iter().flatten().collect();
@@ -255,6 +274,95 @@ mod tests {
         assert_eq!((second.cached, second.fresh), (2, 0));
         assert!(second.evaluations.iter().all(|e| e.cached));
         assert_eq!(judge.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn one_read_serves_a_mix_of_hits_and_misses_in_the_requested_order_with_the_same_scores()
+    {
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        let judge = ScriptedJudge::default();
+        let review = system_signal("review_requested").unwrap();
+        let routine = system_signal("routine").unwrap();
+        let responds = system_signal("requires_response").unwrap();
+        let id = MessageId::for_provider(&riddle_core::DigId("d".into()), "m1");
+        let state = JudgeState::new("Subject: review requested on #12".into());
+        let first = cached_or_evaluate(
+            &store,
+            &judge,
+            &id,
+            std::slice::from_ref(&review),
+            &state,
+            "ctx",
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!((first.cached, first.fresh), (0, 1));
+        // One hit between two misses: the order and the hit's scores hold.
+        let mixed = cached_or_evaluate(
+            &store,
+            &judge,
+            &id,
+            &[routine.clone(), review.clone(), responds.clone()],
+            &state,
+            "ctx",
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!((mixed.cached, mixed.fresh), (1, 2));
+        assert_eq!(
+            mixed
+                .evaluations
+                .iter()
+                .map(|e| (e.signal_name.as_str(), e.cached))
+                .collect::<Vec<_>>(),
+            vec![
+                ("routine", false),
+                ("review_requested", true),
+                ("requires_response", false)
+            ]
+        );
+        let hit = &mixed.evaluations[1];
+        assert_eq!(hit.selected, first.evaluations[0].selected);
+        // Scores round-trip through the JSON column, so within a ULP.
+        assert!((hit.confidence - first.evaluations[0].confidence).abs() < 1e-9);
+        assert!(
+            (hit.score(None) - first.evaluations[0].score(None)).abs() < 1e-9,
+            "{} vs {}",
+            hit.score(None),
+            first.evaluations[0].score(None)
+        );
+        assert_eq!(hit.request_hash, first.evaluations[0].request_hash);
+        // The two misses went back in one write: everything is a hit now.
+        let all = cached_or_evaluate(
+            &store,
+            &judge,
+            &id,
+            &[routine, review, responds],
+            &state,
+            "ctx",
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!((all.cached, all.fresh), (3, 0));
+        assert_eq!(
+            all.evaluations
+                .iter()
+                .map(|e| e.selected.clone())
+                .collect::<Vec<_>>(),
+            mixed
+                .evaluations
+                .iter()
+                .map(|e| e.selected.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(judge.calls(), 2);
+        assert_eq!(
+            repo::signals::evaluations_for(&store, &id).unwrap().len(),
+            3
+        );
     }
 
     #[tokio::test]

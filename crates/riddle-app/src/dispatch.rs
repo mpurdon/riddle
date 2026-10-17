@@ -151,7 +151,6 @@ pub const COMMANDS: &[&str] = &[
     "dev_info",
     "read_app_logs",
     "log_categories",
-    "in_flight_calls",
     "export_diagnostics",
     "clear_caches",
 ];
@@ -562,7 +561,6 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             .iter()
             .map(|c| c.as_str())
             .collect::<Vec<_>>()),
-        "in_flight_calls" => json!([]),
         "export_diagnostics" => {
             let mut out = format!(
                 "Riddle {} ({}) [{}]\n",

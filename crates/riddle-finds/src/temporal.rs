@@ -9,6 +9,7 @@ use riddle_errors::Result;
 use riddle_observability::{rinfo, rwarn, Category};
 use riddle_store::repo;
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone)]
 pub struct TemporalOptions {
@@ -199,20 +200,31 @@ impl FindService {
             }
         }
 
-        // 3. Respond Finds resolved by my reply from any client.
-        for f in repo::finds::list_by_status(&index, FindStatus::Open, Some(FindType::Respond))? {
-            let mut replied = false;
-            for src in &f.sources {
-                let Ok(store) = self.stores.dig(&src.dig_id) else {
-                    continue;
-                };
-                if let Some(ts) = repo::thread_state::get(&store, &src.thread_id)? {
-                    if ts.last_reply_by_me_at.is_some_and(|t| t > f.created_at) {
-                        replied = true;
-                        break;
-                    }
-                }
-            }
+        // 3. Respond Finds resolved by my reply from any client. The thread
+        // states come in one query per Dig, not one per Find.
+        let respond =
+            repo::finds::list_by_status(&index, FindStatus::Open, Some(FindType::Respond))?;
+        let mut wanted: BTreeMap<DigId, Vec<ThreadId>> = BTreeMap::new();
+        for src in respond.iter().flat_map(|f| &f.sources) {
+            wanted
+                .entry(src.dig_id.clone())
+                .or_default()
+                .push(src.thread_id.clone());
+        }
+        let mut states: HashMap<DigId, HashMap<ThreadId, ThreadState>> = HashMap::new();
+        for (dig_id, threads) in wanted {
+            let Ok(store) = self.stores.dig(&dig_id) else {
+                continue;
+            };
+            states.insert(dig_id, repo::thread_state::get_many(&store, &threads)?);
+        }
+        for f in respond {
+            let replied = f.sources.iter().any(|src| {
+                states
+                    .get(&src.dig_id)
+                    .and_then(|m| m.get(&src.thread_id))
+                    .is_some_and(|ts| ts.last_reply_by_me_at.is_some_and(|t| t > f.created_at))
+            });
             if replied {
                 match self.transition(&f.id, FindStatus::Resolved, Some(ResolvedBy::ThreadState)) {
                     Ok(f) => out.push(TemporalOutcome {
