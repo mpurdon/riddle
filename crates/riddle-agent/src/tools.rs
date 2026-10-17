@@ -140,7 +140,7 @@ impl ReadTool {
             ),
             ReadTool::MeshCorrections => ToolSpec::new(
                 self.name(),
-                "The user's recent corrections (dismissed Finds, retypes, moves) grouped by the Mesh that made the corrected decision, with a suggestion where three or more point the same way; and seriesSuggestions, senders whose open Finds repeat one subject (numbers aside) under a route without Replaces, each naming the Mesh, the route and the count, for proposing `+ Replaces: same subject` on that route. Evidence for proposing a Mesh change; never a reason to change one without the user's yes.",
+                "The user's recent corrections (dismissed Finds, retypes, moves) grouped by the Mesh that made the corrected decision, with a suggestion where three or more point the same way; and seriesSuggestions, senders whose open Finds repeat one subject (numbers aside) under a route without Replaces, each naming the Mesh, the route and the count, for proposing `+ Replaces: same subject` on that route; and senderSuggestions, senders with enough mail and on no list, each with the list it looks like it belongs on (judged once per domain, or from invoices scored and promotions restored), for proposing save_list with the domain added. Evidence for proposing a change; never a reason to make one without the user's yes.",
                 json!({"type":"object","properties":{"meshId":{"type":"string"}}}),
             ),
         }

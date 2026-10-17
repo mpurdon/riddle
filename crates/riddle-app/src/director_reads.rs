@@ -267,6 +267,9 @@ impl DirectorReads for AppReads {
                 "text": s.text,
             })).collect::<Vec<_>>(),
             "seriesSuggestions": series,
+            // Senders with enough mail that are on no list and look like
+            // they belong on one.
+            "senderSuggestions": self.0.sender_suggestions(&scope.dig_ids)?,
             // Identifiers and dispositions only; the Director reads a message
             // with get_message when its content matters.
             "corrections": corrections.iter().take(50).map(|c| json!({

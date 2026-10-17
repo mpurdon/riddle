@@ -18,6 +18,8 @@ import type { Find } from '@/bindings/Find'
 import type { Dig } from '@/bindings/Dig'
 import type { Mesh } from '@/bindings/Mesh'
 import type { SeriesSuggestion } from '@/bindings/SeriesSuggestion'
+import type { SenderKind } from '@/bindings/SenderKind'
+import type { SenderSuggestion } from '@/bindings/SenderSuggestion'
 import type { MeshOrder } from '@/bindings/MeshOrder'
 import type { Pack } from '@/bindings/Pack'
 import type { PackInfo } from '@/bindings/PackInfo'
@@ -802,4 +804,55 @@ export function seriesSuggestions(state: MockState): SeriesSuggestion[] {
     })
   }
   return out.sort((a, b) => b.count - a.count)
+}
+
+/** What the judge would say of a fixture sender's domain; the mock's stand-in for one judgment per domain. */
+const SENDER_KINDS: Record<string, SenderKind> = { 'cloud.example': 'cloud_or_hosting' }
+const LIST_FOR_KIND: Partial<Record<SenderKind, string>> = { cloud_or_hosting: 'engineering_vendors', domain_registrar: 'engineering_vendors', developer_tooling: 'engineering_vendors', payments_service: 'money_transfers', accounting_or_adviser: 'financial_advisors' }
+const KIND_WORDS: Record<SenderKind, string> = {
+  cloud_or_hosting: 'a cloud or hosting provider',
+  domain_registrar: 'a domain registrar',
+  developer_tooling: 'a developer tooling vendor',
+  payments_service: 'a payments service',
+  accounting_or_adviser: 'an accountant or financial adviser',
+  retailer: 'a retailer',
+  newsletter: 'a newsletter',
+  government: 'a government body',
+  person_or_other: 'a person or something else',
+}
+
+/**
+ * Senders with three or more messages in the window, on no list, whose
+ * judged kind maps to a list, mirroring `riddle_agent::senders` (the
+ * invoice and restored-promotion evidence is not modelled here).
+ */
+export function senderSuggestions(state: MockState): SenderSuggestion[] {
+  const since = Date.now() - 120 * 24 * 3600 * 1000
+  const byDomain = new Map<string, { sender: string; messages: number }>()
+  for (const m of state.messages) {
+    if (m.isSent || new Date(m.date).getTime() < since) continue
+    const sender = m.from.email.trim().toLowerCase()
+    const domain = sender.split('@')[1] ?? ''
+    if (!domain) continue
+    const g = byDomain.get(domain) ?? { sender, messages: 0 }
+    g.messages += 1
+    byDomain.set(domain, g)
+  }
+  const onAList = (sender: string, domain: string) => state.namedLists.some((l) => l.entries.some((e) => e === sender || e === domain || domain.endsWith(`.${e}`)))
+  const out: SenderSuggestion[] = []
+  for (const [domain, g] of byDomain) {
+    const kind = SENDER_KINDS[domain]
+    const list = kind ? LIST_FOR_KIND[kind] : undefined
+    if (!kind || !list || g.messages < 3 || onAList(g.sender, domain)) continue
+    out.push({
+      list,
+      entry: domain,
+      sender: g.sender,
+      messages: g.messages,
+      kind,
+      evidence: `judged ${kind} (0.90) from one message`,
+      text: `${domain} looks like ${KIND_WORDS[kind]} and is on no list (${g.messages} messages in the last four months). Add it to ${list}? I can propose the list change and show what re-deciding its mail would do.`,
+    })
+  }
+  return out.sort((a, b) => b.messages - a.messages)
 }

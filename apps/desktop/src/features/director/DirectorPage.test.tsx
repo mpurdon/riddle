@@ -57,6 +57,19 @@ function renderDirector() {
 }
 
 describe('the Director page', () => {
+  it('offers a sender on no list the list it looks like it belongs on', async () => {
+    resetMockState()
+    registerMocks()
+    mockState().conversations.splice(0)
+    renderDirector()
+    // Three statements from cloud.example in the fixtures, judged a cloud provider.
+    const hint = await screen.findByRole('button', { name: /cloud\.example looks like a cloud or hosting provider/ })
+    fireEvent.click(hint)
+    const box = (await screen.findByLabelText('Message to the Director')) as HTMLTextAreaElement
+    await waitFor(() => expect(box.value).toContain('engineering_vendors'))
+    expect(box.value).toContain('cloud.example')
+  })
+
   it('voices a pile of same-subject Finds as a suggestion that prefills the composer', async () => {
     resetMockState()
     registerMocks()

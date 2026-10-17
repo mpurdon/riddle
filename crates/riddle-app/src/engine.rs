@@ -299,6 +299,18 @@ impl App {
                 dig.id
             );
         }
+        // Bookkeeping: judging what kind of sender the new ones are costs
+        // one call each and never stops the pass.
+        if let Err(e) = self
+            .review_senders(dig, crate::suggestions::SENDERS_PER_PASS)
+            .await
+        {
+            rwarn!(
+                Category::Sift,
+                "could not review senders for {}: {e}",
+                dig.id
+            );
+        }
         let mut sift = Sift::from_services(&self.services);
         if let Some(settings) = self.services.get::<riddle_settings::SettingsStore>() {
             sift = sift.with_budget(Arc::new(EscalationCap {

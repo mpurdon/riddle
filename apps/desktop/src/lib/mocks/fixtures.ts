@@ -404,6 +404,26 @@ export function messageSpecs(): MessageSpec[] {
       reason: 'Adam is waiting on your answer by tomorrow noon.',
       mechanism: 'jev',
     },
+    // --- Personal: a vendor on no list yet (three statements, Filed as receipts): what the sender suggestion is about ---
+    ...[1, 2, 3].map((n) => ({
+      id: `m_pers_cloud_${n}`,
+      dig: DIG_PERSONAL,
+      from: { email: 'billing@cloud.example', name: 'Cloud Example' },
+      to: [ME[DIG_PERSONAL]],
+      subject: `Your Cloud Example statement for month ${n} is ready`,
+      snippet: 'Your monthly statement for compute and storage is ready to view.',
+      text: 'Your monthly statement for compute and storage is ready to view.\n\nNo action is needed; the card on file was charged.',
+      hoursAgo: (40 - 10 * n) * 24,
+      labels: ['CATEGORY_UPDATES'],
+      disposition: { kind: 'filed' } as const,
+      strata: ['Receipts'],
+      facts: { senderDomain: 'cloud.example', autoSubmitted: true, gmailCategory: 'updates' },
+      signals: { receipt: 0.95, invoice: 0.1, marketing: 0.05, routine: 0.9 },
+      meshId: 'mesh_receipts',
+      matchedRule: 'IF receipt@v1 > .80 → Filed + Stratum: Receipts',
+      reason: 'It appears receipt is almost certain, so it is filed under Receipts.',
+      mechanism: 'jev' as const,
+    })),
     // --- Personal: a notice that repeats (three Do Finds on one subject) ---
     ...[1, 2, 3].map((n) => ({
       id: `m_pers_lock_${n}`,
