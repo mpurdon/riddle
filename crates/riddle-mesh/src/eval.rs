@@ -327,9 +327,12 @@ pub struct MeshDecision {
     /// Meshes whose route chain was poisoned by an unknown condition.
     pub unknown_meshes: Vec<String>,
     /// Routes that matched on a Signal too close to call and so let a later
-    /// Mesh decide, read against the message as `words` is: "Frequent
-    /// promotions v2: it appears marketing is likely, so it is set aside as
-    /// Spoil (margin 0.08 is below the 0.15 required)".
+    /// Mesh decide, read against the message as `words` is, each a sentence
+    /// without its full stop: "Frequent promotions v2 looked first and nearly
+    /// took it: it appears marketing is likely, so it is set aside as Spoil,
+    /// but the margin 0.08 is below the 0.15 required". The earlier form,
+    /// "Passed over first, too close to call: Frequent promotions v2: …",
+    /// read as if the message had been filed there.
     #[serde(default)]
     pub passed_over: Vec<String>,
     /// Strata from tag routes (`MeshOutput::is_tag`) that matched before the
@@ -435,7 +438,7 @@ pub fn evaluate_with(
                             &crate::humanize::Evidence { facts, evaluations },
                         );
                         passed_over.push(format!(
-                            "{}: {} (margin {})",
+                            "{} looked first and nearly took it: {}, but the margin {}",
                             m.key(),
                             lower_first(reading.trim_end_matches('.')),
                             crate::policy::shortfall_words(margin, needed)
@@ -958,9 +961,11 @@ mod tests {
         // The passed-over route is read against the message, as the decision
         // is, not quoted as written.
         assert!(
-            d.passed_over[0].starts_with("Promos v1: it appears marketing is ")
-                && d.passed_over[0].contains(", so it is set aside as Spoil (margin")
-                && !d.passed_over[0].contains("IF marketing"),
+            d.passed_over[0]
+                .starts_with("Promos v1 looked first and nearly took it: it appears marketing is ")
+                && d.passed_over[0].contains(", so it is set aside as Spoil, but the margin")
+                && !d.passed_over[0].contains("IF marketing")
+                && !d.passed_over[0].ends_with('.'),
             "{:?}",
             d.passed_over
         );

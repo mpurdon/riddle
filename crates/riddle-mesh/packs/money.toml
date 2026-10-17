@@ -1,6 +1,6 @@
 id = "money"
 name = "Money"
-version = 6
+version = 7
 area = "Money"
 summary = "Bills, renewals and amounts due become Pay or Do Finds; transfers and credit alerts are Know Finds; receipts and charges are Filed; donation appeals are kept apart from bills."
 band = "general"
@@ -20,6 +20,13 @@ name = "invoice_senders"
 description = "Senders whose invoices you pay yourself"
 question = "Who sends you invoices you pay by hand (a domain registrar, a contractor)?"
 default = []
+
+# v7: a known transfer sender decides before a Signal guesses. Security and
+# account alerts (core, priority 0) looked at every Interac deposit first:
+# 39 of 41 scored .81–.85 as a security alert, and only the 0.05 Find margin
+# kept them under Finance; two had already scored enough to win. Bank and
+# transfers moves ahead of it (rank 17, priority −3), since the sender list
+# is a fact (16 Oct 2026).
 
 # v6: money that arrived matters more than a notice. An Interac e-Transfer
 # saying someone sent you money was a Know Find at P65, level with any
@@ -77,7 +84,7 @@ END
 
 [[meshes]]
 band = "specific"
-rank = 38
+rank = 17
 text = '''
 Mesh: Bank and transfers
 Scope:

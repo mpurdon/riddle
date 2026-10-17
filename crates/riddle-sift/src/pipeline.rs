@@ -622,14 +622,13 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
                     decision.matched_rule.clone().unwrap_or_default()
                 )
             });
-            // A thin match an earlier Mesh made, passed over for this one.
+            // A thin match an earlier Mesh made, passed over for this one:
+            // one sentence per Mesh, after the decision, so it reads as what
+            // nearly happened rather than as where the message went.
             let words = if decision.passed_over.is_empty() {
                 words
             } else {
-                format!(
-                    "{words} Passed over first, too close to call: {}.",
-                    decision.passed_over.join("; ")
-                )
+                format!("{words} {}.", decision.passed_over.join(". "))
             };
             draft.reason = if decision.vetoed() {
                 format!(
