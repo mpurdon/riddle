@@ -1140,6 +1140,13 @@ mod tests {
             })
         );
         assert_eq!(d.mesh_name.as_deref(), Some("Account notices"));
+        // A notice that repeats (a lock's low battery, every few days) is
+        // one Find: the newest from the sender replaces the earlier ones.
+        assert!(
+            d.output.as_ref().is_some_and(|o| o.replaces),
+            "{:?}",
+            d.output
+        );
 
         facts.subject = "Updates to our Terms of Service".into();
         let d = decide(&["core"], &facts, &[], &[]);

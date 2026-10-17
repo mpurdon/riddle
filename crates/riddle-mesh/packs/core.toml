@@ -1,6 +1,6 @@
 id = "core"
 name = "Core"
-version = 2
+version = 3
 area = "Essentials"
 summary = "Never hides the people you protect, sets scams apart, surfaces mail from people you write to and real security alerts, and gives everything else a place to land."
 band = "specific"
@@ -129,6 +129,15 @@ ELSE IF meeting_related@v1 > .85 AND requires_response@v1 > .70
 # details) is not routine at all; 13 went Unresolved. Policy notices are
 # Filed by subject first, so they land with no judge; an account notice
 # that wants something done is a Do Find; routine needs only be likely.
+#
+# v3: a repeated notice is one Find. A smart lock's "batteries are
+# critically low" came every few days from July and stood as 33 Do Finds;
+# a registrar's "2 of Your Domain Names Expire Soon" as 30, Search Console's
+# indexing notices as 8 (16 Oct 2026). With Replaces the newest from a
+# sender stays open and the earlier ones close as Superseded, as Daily
+# reminders does. The series is keyed by sender address, so a different
+# notice from the same address is replaced too; one ticket reply among
+# thirty renewal notices was the only case seen.
 [[meshes]]
 band = "fallback"
 rank = 4
@@ -143,7 +152,7 @@ ROUTES
 IF (automated_sender OR list_unsubscribe) AND NOT gmail_category = promotions AND (subject CONTAINS "terms of service" OR subject CONTAINS "terms of use" OR subject CONTAINS "privacy policy" OR subject CONTAINS "privacy notice" OR subject CONTAINS "legal update" OR subject CONTAINS "agreement")
     → Filed + Stratum: Notifications
 ELSE IF account_notification@v1 > .85 AND requires_action@v1 > .75 AND marketing@v1 < .70
-    → Find: Do + Stratum: Notifications
+    → Find: Do + Stratum: Notifications + Replaces
 ELSE IF account_notification@v1 > .85 AND routine@v1 > .50
     → Filed + Stratum: Notifications
 '''
