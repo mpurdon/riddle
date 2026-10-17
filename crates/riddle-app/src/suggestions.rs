@@ -14,11 +14,16 @@
 //! its promotions or none; and once per domain the judge has said what kind
 //! of organisation it is, kept in the index store with the judge's
 //! identity. The judging runs a few senders per Sift pass
-//! (`review_senders`) from one grouped query, so an idle pass costs two
-//! reads and a new vendor is known within minutes for one call.
+//! (`review_senders`) from one grouped query and a few index reads, none
+//! per sender, so an idle pass is cheap and a new vendor is known within
+//! minutes for one call. A sender an installed pack recognises in its
+//! `[detect]` block is neither judged nor offered: it is skipped where the
+//! rows are built, so the detector never sees it.
 
 use crate::App;
-use riddle_agent::senders::{sender_kind_question, suggest_lists, SenderRow, SUGGEST_AT};
+use riddle_agent::senders::{
+    sender_kind_question, suggest_lists, SenderRow, RECENT_PER_SENDER, SUGGEST_AT,
+};
 use riddle_agent::series::{suggest_series, OpenFindRow};
 use riddle_core::*;
 use riddle_errors::Result;
@@ -33,10 +38,6 @@ pub const SENDERS_PER_PASS: usize = 8;
 const SENDER_WINDOW_DAYS: i64 = 120;
 /// Messages in the window from which a sender is judged on two of them.
 const SECOND_SAMPLE_AT: u64 = 6;
-/// Invoice evaluations read per account when looking for invoice senders.
-const INVOICE_EVALUATIONS: u32 = 5_000;
-/// A sender's newest messages that count towards being an invoice sender.
-const RECENT_PER_SENDER: usize = 6;
 /// Characters of a message the judge reads to say what kind of sender it is.
 const JUDGE_CHARS: usize = 8_000;
 
@@ -57,17 +58,6 @@ impl App {
             .collect())
     }
 
-    /// Domains an installed pack already recognises (`[detect]`): GitHub's
-    /// mail is the GitHub pack's business, not a vendor waiting for a list.
-    fn recognised_domains(&self) -> Result<Vec<String>> {
-        Ok(riddle_mesh::packs::catalogue(&self.stores.index())?
-            .into_iter()
-            .filter(|p| p.installed.is_some())
-            .flat_map(|p| p.pack.detect.sender_domains)
-            .map(|d| d.to_ascii_lowercase())
-            .collect())
-    }
-
     /// Senders with mail in the window and what the store knows of each,
     /// with the lists that exist; `only` narrows to some accounts (empty:
     /// all). A handful of reads per account, none per sender.
@@ -76,7 +66,7 @@ impl App {
         let lists = repo::lists::all(&index)?;
         let named = NamedLists::from_defs(lists.iter().cloned());
         let verdicts = self.sender_verdicts()?;
-        let recognised = self.recognised_domains()?;
+        let recognised = riddle_mesh::packs::recognised_domains(&index)?;
         let since = self.services.clock.now() - chrono::Duration::days(SENDER_WINDOW_DAYS);
         let invoice_signal = repo::signals::latest(&index, "invoice", &[SignalStatus::Active])?;
         let mut rows = Vec::new();
@@ -86,24 +76,23 @@ impl App {
             }
             let store = self.stores.dig(&dig.id)?;
             // Each sender's newest few messages scored as an invoice: the
-            // Signal's evaluations in one read, the newest ids in one more. A
-            // sender with years of promotions and a few invoices among them
-            // is not an invoice sender.
+            // newest ids in one read, their evaluations of the Signal in a
+            // few more.
             let mut invoices: HashMap<String, u32> = HashMap::new();
             if let Some(sig) = &invoice_signal {
-                let scored: HashSet<String> = repo::signals::evaluations_of_signal(
+                let recent = repo::messages::sender_recent_ids(&store, &since, RECENT_PER_SENDER)?;
+                let ids: Vec<MessageId> = recent.values().flatten().cloned().collect();
+                let scored: HashSet<String> = repo::signals::evaluations_of_signal_for_ids(
                     &store,
                     "invoice",
                     sig.version,
-                    INVOICE_EVALUATIONS,
+                    &ids,
                 )?
                 .into_iter()
                 .filter(|e| e.distribution.get("YES").copied().unwrap_or(0.0) >= 0.8)
                 .map(|e| e.message_id.as_str().to_string())
                 .collect();
-                for (sender, ids) in
-                    repo::messages::sender_recent_ids(&store, &since, RECENT_PER_SENDER)?
-                {
+                for (sender, ids) in recent {
                     let n = ids.iter().filter(|id| scored.contains(id.as_str())).count();
                     if n > 0 {
                         invoices.insert(sender, n as u32);
@@ -127,7 +116,7 @@ impl App {
             }
             for (sender, messages) in repo::messages::sender_counts_since(&store, &since)? {
                 let domain = email_domain(&sender);
-                if domain.is_empty() {
+                if domain.is_empty() || recognised_by_a_pack(&recognised, &domain) {
                     continue;
                 }
                 rows.push(SenderRow {
@@ -143,7 +132,6 @@ impl App {
                         .map(|l| l.name.clone())
                         .collect(),
                     messages: messages as u32,
-                    recognised: recognised_by_a_pack(&recognised, &domain),
                     sender,
                     domain,
                 });
@@ -169,7 +157,7 @@ impl App {
         let store = self.stores.dig(&dig.id)?;
         let named = repo::lists::named(&index)?;
         let verdicts = self.sender_verdicts()?;
-        let recognised = self.recognised_domains()?;
+        let recognised = riddle_mesh::packs::recognised_domains(&index)?;
         let since = self.services.clock.now() - chrono::Duration::days(SENDER_WINDOW_DAYS);
         let question = sender_kind_question();
         let engine = judge.identity().key();
@@ -350,11 +338,11 @@ impl App {
     }
 }
 
-/// Whether a pack's `[detect]` names the domain or one above it.
+/// Whether an installed pack's `[detect]` names the domain or one above it:
+/// GitHub's mail is the GitHub pack's business, not a vendor waiting for a
+/// list. The one skip, for judging and for offering.
 fn recognised_by_a_pack(recognised: &[String], domain: &str) -> bool {
-    recognised
-        .iter()
-        .any(|d| domain == d || domain.ends_with(&format!(".{d}")))
+    recognised.iter().any(|d| domain_under(domain, d))
 }
 
 /// The latest Mesh's route for a decision's rule as written, matched by the

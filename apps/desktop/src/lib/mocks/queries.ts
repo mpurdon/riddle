@@ -534,7 +534,7 @@ export function packCatalogue(state: MockState): PackInfo[] {
     summary: 'Promotions from stores that write daily or weekly are set aside; stores you name keep showing.',
     band: 'general',
     detect: { sender_domains: [], gmail_categories: ['promotions'], min_messages: 20, always: false },
-    lists: [{ name: 'keep_promotions', description: 'Stores whose promotions you still want to see', question: "Which stores' or services' promotions do you still want to see?", default: [] }],
+    lists: [{ name: 'keep_promotions', description: 'Stores whose promotions you still want to see', question: "Which stores' or services' promotions do you still want to see?", default: [], kinds: [] }],
     meshes: [{ text: 'Mesh: Frequent promotions\nROUTES\nIF marketing@v1 > .70 AND NOT sender_domain IN list:keep_promotions → Spoil', band: null, fallback: false, rank: 7 }],
   }
   const installed = state.installedPacks.find((i) => i.id === shopping.id) ?? null

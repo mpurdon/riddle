@@ -23,6 +23,16 @@ fn bill(dig: &DigId, pid: &str, hours_ago: i64) -> Message {
     m
 }
 
+/// A GitHub notification: the GitHub pack's `[detect]` names github.com.
+fn notification(dig: &DigId, pid: &str, hours_ago: i64) -> Message {
+    let mut m = bill(dig, pid, hours_ago);
+    m.subject = format!("[acme/widgets] Build {pid} failed");
+    m.snippet = "The nightly build failed on main.".into();
+    m.from = Address::new("notifications@github.com", Some("GitHub"));
+    m.headers.message_id = Some(format!("<{pid}@github.com>"));
+    m
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_new_vendor_is_judged_once_and_offered_its_list_until_it_is_on_it() {
     let (app, ops) = common::boot_scripted(true, |_| {}).await;
@@ -40,15 +50,19 @@ async fn a_new_vendor_is_judged_once_and_offered_its_list_until_it_is_on_it() {
     for (pid, h) in [("s1", 72), ("s2", 48), ("s3", 24)] {
         repo::messages::upsert(&store, &bill(&dig.id, pid, h)).unwrap();
     }
+    // GitHub writes as often, and the GitHub pack recognises it: its mail
+    // is the pack's business, so it is neither judged nor offered.
+    for (pid, h) in [("g1", 70), ("g2", 46), ("g3", 22)] {
+        repo::messages::upsert(&store, &notification(&dig.id, pid, h)).unwrap();
+    }
 
-    // Nothing judged yet: no offer. One review pass judges the sender.
+    // Nothing judged yet: no offer. One review pass judges the one sender.
     let before = app.sender_suggestions(&[]).unwrap();
     assert!(
         before.iter().all(|s| s.entry != "acme-cloud.example"),
         "{before:?}"
     );
-    let judged = app.review_senders(&dig, 8).await.unwrap();
-    assert!(judged >= 1, "judged {judged}");
+    assert_eq!(app.review_senders(&dig, 8).await.unwrap(), 1);
     // A second pass finds nothing new to judge: one judgment per domain.
     assert_eq!(app.review_senders(&dig, 8).await.unwrap(), 0);
 
@@ -62,6 +76,10 @@ async fn a_new_vendor_is_judged_once_and_offered_its_list_until_it_is_on_it() {
     assert_eq!(ours.messages, 3);
     assert_eq!(ours.sender, SENDER);
     assert!(ours.text.contains("engineering_vendors"), "{}", ours.text);
+    assert!(
+        offers.iter().all(|s| !s.entry.ends_with("github.com")),
+        "{offers:?}"
+    );
 
     // On the list, the offer goes; the judgment stays cached.
     app.runtime

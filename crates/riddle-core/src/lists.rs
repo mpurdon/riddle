@@ -15,6 +15,7 @@
 //! acted is only in the From name; a sender list could not tell
 //! Dependabot's review requests from a colleague's (14 Oct 2026).
 
+use crate::domain_under;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use ts_rs::TS;
@@ -88,10 +89,7 @@ impl NamedLists {
             if e.contains('@') {
                 *e == sender
             } else {
-                domain == e
-                    || domain
-                        .strip_suffix(e.as_str())
-                        .is_some_and(|rest| rest.ends_with('.'))
+                domain_under(domain, e)
             }
         })
     }

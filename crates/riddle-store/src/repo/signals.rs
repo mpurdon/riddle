@@ -148,6 +148,38 @@ pub fn evaluations_for_engine(
     })
 }
 
+/// The evaluations of one Signal version for some messages, any engine, in
+/// chunks so the statement stays small: what the sender review reads for
+/// each sender's newest few messages, instead of the Dig's newest thousands.
+pub fn evaluations_of_signal_for_ids(
+    store: &Store,
+    name: &str,
+    version: u32,
+    ids: &[MessageId],
+) -> Result<Vec<SignalEvaluation>> {
+    let mut out = Vec::new();
+    for chunk in ids.chunks(500) {
+        let marks = vec!["?"; chunk.len()].join(",");
+        let sql = format!(
+            "SELECT json FROM signal_evaluations WHERE signal_name = ?1 AND signal_version = ?2 AND message_id IN ({marks})"
+        );
+        let mut values: Vec<rusqlite::types::Value> =
+            vec![name.to_string().into(), i64::from(version).into()];
+        values.extend(chunk.iter().map(|id| id.as_str().to_string().into()));
+        let rows: Vec<SignalEvaluation> = store.read(|c| {
+            let mut st = c.prepare(&sql)?;
+            let rows = st
+                .query_map(rusqlite::params_from_iter(values), |r| {
+                    from_json(r.get::<_, String>(0)?)
+                })?
+                .collect();
+            rows
+        })?;
+        out.extend(rows);
+    }
+    Ok(out)
+}
+
 /// Every evaluation of one Signal version in the Dig, for calibration and
 /// Signal testing.
 pub fn evaluations_of_signal(

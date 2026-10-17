@@ -19,7 +19,10 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const SUGGEST_AT: u32 = 3;
 /// The judge's confidence in a sender's kind before it is acted on.
 pub const KIND_AT: f64 = 0.6;
-/// Invoices scored from a sender before it is an invoice sender.
+/// A sender's newest messages that count towards being an invoice sender,
+/// and how many of them must be invoices: half. A sender with years of
+/// promotions and a bill now and then is not an invoice sender.
+pub const RECENT_PER_SENDER: usize = 6;
 pub const INVOICES_AT: u32 = 3;
 /// Promotions restored from Spoil before the sender is one to keep.
 pub const RESTORED_AT: u32 = 2;
@@ -55,9 +58,6 @@ pub struct SenderRow {
     pub restored_promotions: u32,
     /// Lists the sender is already on.
     pub lists: Vec<String>,
-    /// Whether an installed pack already recognises the sender's domain
-    /// (`[detect]`), so its mail is that pack's business, not a vendor's.
-    pub recognised: bool,
 }
 
 impl SenderRow {
@@ -84,10 +84,7 @@ struct Candidate<'a> {
 /// disagree (a retailer's app store beside its shop), each is offered on
 /// its own.
 pub fn suggest_lists(rows: &[SenderRow], lists: &[NamedListDef]) -> Vec<SenderSuggestion> {
-    let active: Vec<&SenderRow> = rows
-        .iter()
-        .filter(|r| r.messages >= SUGGEST_AT && !r.recognised)
-        .collect();
+    let active: Vec<&SenderRow> = rows.iter().filter(|r| r.messages >= SUGGEST_AT).collect();
     // Judged kinds under each registrable domain: do its subdomains speak as one?
     let mut kinds_by_root: BTreeMap<String, BTreeSet<SenderKind>> = BTreeMap::new();
     for r in &active {
@@ -207,7 +204,6 @@ mod tests {
             invoices: 0,
             restored_promotions: 0,
             lists: vec![],
-            recognised: false,
         }
     }
 
@@ -283,10 +279,7 @@ mod tests {
         on.lists = vec!["engineering_vendors".into()];
         assert!(suggest_lists(&[on.clone()], &lists()).is_empty());
         on.lists.clear();
-        assert!(suggest_lists(&[on.clone()], &[list("keep_promotions", &[])]).is_empty());
-        // A pack already recognises it: its mail is the pack's business.
-        on.recognised = true;
-        assert!(suggest_lists(&[on], &lists()).is_empty());
+        assert!(suggest_lists(&[on], &[list("keep_promotions", &[])]).is_empty());
     }
 
     #[test]

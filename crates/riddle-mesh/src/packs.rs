@@ -20,7 +20,7 @@ use riddle_core::{CreatedBy, Mesh, MeshId, MeshStatus, NamedListDef, PackRef};
 use riddle_errors::{Result, RiddleError};
 use riddle_store::{repo, Store};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use ts_rs::TS;
 
 /// Where a pack's Mesh runs. Lower runs first.
@@ -272,6 +272,19 @@ pub fn all_packs(index: &Store) -> Result<Vec<(Pack, bool)>> {
     let mut out: Vec<(Pack, bool)> = builtin_packs().into_iter().map(|p| (p, true)).collect();
     out.extend(imported(index)?.into_iter().map(|p| (p, false)));
     Ok(out)
+}
+
+/// Sender domains the installed packs recognise (`[detect]`), lowercase:
+/// their mail is the pack's business, not a vendor's. Two key-value scans
+/// and no Mesh parsing, so the sender review can ask every pass.
+pub fn recognised_domains(index: &Store) -> Result<Vec<String>> {
+    let installed: HashSet<String> = installed(index)?.into_iter().map(|p| p.id).collect();
+    Ok(all_packs(index)?
+        .into_iter()
+        .filter(|(p, _)| installed.contains(&p.id))
+        .flat_map(|(p, _)| p.detect.sender_domains)
+        .map(|d| d.to_ascii_lowercase())
+        .collect())
 }
 
 pub fn find_pack(index: &Store, id: &str) -> Result<(Pack, bool)> {

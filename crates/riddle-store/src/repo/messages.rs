@@ -968,4 +968,43 @@ mod tests {
         assert!(page.items.is_empty());
         assert_eq!(page.total, Some(0));
     }
+
+    #[test]
+    fn each_senders_newest_few_in_the_window_come_from_one_query() {
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        let dig = DigId::from("dig-1");
+        let since = chrono::Utc::now() - chrono::Duration::minutes(100);
+        // Acme writes four times, the oldest before the window; Bob once,
+        // from a mixed-case address; one is the user's own sent mail.
+        for (n, from, sent) in [
+            (10, "billing@acme.example", false),
+            (20, "Billing@Acme.example", false),
+            (30, "billing@acme.example", false),
+            (200, "billing@acme.example", false),
+            (40, "bob@example.com", false),
+            (50, "me@example.com", true),
+        ] {
+            let mut m = message(&dig, n, &["INBOX"]);
+            m.from = Address::new(from, None);
+            m.is_sent = sent;
+            upsert(&store, &m).unwrap();
+        }
+        let recent = sender_recent_ids(&store, &since, 2).unwrap();
+        let mut senders: Vec<&String> = recent.keys().collect();
+        senders.sort();
+        assert_eq!(senders, ["billing@acme.example", "bob@example.com"]);
+        let acme: Vec<&str> = recent["billing@acme.example"]
+            .iter()
+            .map(|id| id.as_str())
+            .collect();
+        assert_eq!(
+            acme,
+            [
+                MessageId::for_provider(&dig, "p10").as_str(),
+                MessageId::for_provider(&dig, "p20").as_str()
+            ]
+        );
+        assert_eq!(recent["bob@example.com"].len(), 1);
+        assert_eq!(sender_counts_since(&store, &since).unwrap().len(), 2);
+    }
 }

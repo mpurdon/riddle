@@ -466,6 +466,16 @@ pub fn registrable_domain(domain: &str) -> String {
     labels[n - keep..].join(".")
 }
 
+/// Whether a domain is `root` or under it, by whole labels: `email.uber.com`
+/// is under `uber.com`, `notuber.com` is not. Both lowercase. The one match
+/// a list entry, a shared domain and a pack's `[detect]` all mean.
+pub fn domain_under(domain: &str, root: &str) -> bool {
+    domain == root
+        || domain
+            .strip_suffix(root)
+            .is_some_and(|rest| rest.ends_with('.'))
+}
+
 /// Whether an address says nobody reads replies to it: `noreply`,
 /// `no-reply`, `donotreply` anywhere in the local part
 /// (`account-noreply@`, `jobs-noreply@`), or a bare `notifications@`.
@@ -517,11 +527,7 @@ const SHARED_DOMAINS: &[&str] = &[
 /// (`Facts::known_domain`). Subdomains of a shared domain count as shared.
 pub fn organisation_domain(domain: &str) -> bool {
     let d = domain.trim_end_matches('.').to_ascii_lowercase();
-    !d.is_empty()
-        && !free_mail_domain(&d)
-        && !SHARED_DOMAINS
-            .iter()
-            .any(|s| d == *s || d.ends_with(&format!(".{s}")))
+    !d.is_empty() && !free_mail_domain(&d) && !SHARED_DOMAINS.iter().any(|s| domain_under(&d, s))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -535,7 +541,16 @@ pub enum FactValue {
 
 #[cfg(test)]
 mod domain_and_address_tests {
-    use super::organisation_domain;
+    use super::{domain_under, organisation_domain};
+
+    #[test]
+    fn a_domain_is_under_a_root_by_whole_labels_only() {
+        assert!(domain_under("uber.com", "uber.com"));
+        assert!(domain_under("email.uber.com", "uber.com"));
+        assert!(!domain_under("notuber.com", "uber.com"));
+        assert!(!domain_under("uber.com", "email.uber.com"));
+        assert!(!domain_under("uber.com", ""));
+    }
 
     #[test]
     fn an_address_that_takes_no_replies_is_recognised() {
