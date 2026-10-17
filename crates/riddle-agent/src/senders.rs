@@ -1,13 +1,18 @@
 //! Sender discovery: a sender with enough mail that is on no list is offered
 //! the list it looks like it belongs on, from what the store already says
-//! (invoices scored, promotions the user restored) and from one judgment per
+//! (invoices scored, promotions the user restored) and from a judgment per
 //! domain of what kind of organisation sends the mail. Lists were filled by
 //! hand at install and by hand again when a registrar, a cloud provider and
 //! a tooling vendor turned up as plain bills (17 Oct 2026). Pure: the app
 //! assembles the rows and asks the judge; this maps evidence to a proposal
 //! the Director voices, and nothing joins a list without the user's yes.
+//! Which kinds belong on a list is the list's own declaration (`kinds`, from
+//! its pack), not a table here.
 
-use riddle_core::{JudgeQuestion, SenderKind, SenderSuggestion, SignalPrimitive};
+use riddle_core::{
+    plural, registrable_domain, JudgeQuestion, NamedListDef, SenderKind, SenderSuggestion,
+    SignalPrimitive,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Messages from a sender in the window before it is worth a word.
@@ -26,7 +31,7 @@ pub fn sender_kind_question() -> JudgeQuestion {
     JudgeQuestion {
         id: SENDER_KIND_QUESTION.into(),
         primitive: SignalPrimitive::Choice,
-        definition: "What kind of organisation sent this message, judged from the message alone: the service it sells or provides, not the subject of this one message.".into(),
+        definition: "What kind of organisation sent this message, judged from the message alone: the service it sells or provides, rather than the subject of this one message.".into(),
         options: SenderKind::ALL
             .iter()
             .map(|k| (k.as_str().to_string(), k.definition().to_string()))
@@ -41,7 +46,8 @@ pub struct SenderRow {
     pub domain: String,
     /// Messages in the window.
     pub messages: u32,
-    /// The judged kind and the judge's confidence, when judged.
+    /// The judged kind and the judge's confidence, when the judge was sure
+    /// of it (two messages agreed, when two were asked).
     pub kind: Option<(SenderKind, f64)>,
     /// Recent messages scored as an invoice (an amount due).
     pub invoices: u32,
@@ -51,180 +57,131 @@ pub struct SenderRow {
     pub lists: Vec<String>,
 }
 
-/// Which list a kind of sender belongs on, when the list exists.
-fn list_for_kind(kind: SenderKind) -> Option<&'static str> {
-    match kind {
-        SenderKind::CloudOrHosting | SenderKind::DomainRegistrar | SenderKind::DeveloperTooling => {
-            Some("engineering_vendors")
-        }
-        SenderKind::PaymentsService => Some("money_transfers"),
-        SenderKind::AccountingOrAdviser => Some("financial_advisors"),
-        SenderKind::Retailer
-        | SenderKind::Newsletter
-        | SenderKind::Government
-        | SenderKind::PersonOrOther => None,
+impl SenderRow {
+    /// The judged kind, when the judge was confident enough to act on.
+    pub fn judged(&self) -> Option<SenderKind> {
+        self.kind
+            .filter(|(_, score)| *score >= KIND_AT)
+            .map(|(k, _)| k)
     }
 }
 
-/// The part of a domain a list entry should name: `fb02.freshbooks.com` and
-/// `fb05.freshbooks.com` are one sender, `freshbooks.com`, and a list entry
-/// matches its subdomains. The last two labels, or three under a country
-/// code's second level (`example.co.uk`); a public-suffix list would be
-/// exact and is not worth carrying for this.
-pub fn registrable_domain(domain: &str) -> String {
-    let domain = domain.trim().trim_matches('.').to_ascii_lowercase();
-    let labels: Vec<&str> = domain.split('.').collect();
-    let n = labels.len();
-    if n <= 2 {
-        return domain;
-    }
-    let country_second_level = labels[n - 1].len() == 2
-        && matches!(
-            labels[n - 2],
-            "co" | "com" | "net" | "org" | "gov" | "edu" | "ac" | "gc"
-        );
-    let keep = if country_second_level { 3 } else { 2 };
-    labels[n - keep..].join(".")
+/// One reason to offer one sender one list.
+struct Candidate<'a> {
+    list: String,
+    entry: String,
+    row: &'a SenderRow,
+    why: String,
+    evidence: String,
 }
 
 /// Map each sender's evidence to the lists it looks like it belongs on,
-/// among the lists that exist, skipping lists it is already on. Sibling
-/// subdomains whose judged kinds agree are one offer for the registrable
-/// domain; when they disagree (a retailer's app store beside its shop),
-/// each is offered on its own.
-pub fn suggest_lists<'a>(
-    rows: &'a [SenderRow],
-    lists_present: &'a [String],
-) -> Vec<SenderSuggestion> {
-    let present: BTreeSet<&'a str> = lists_present.iter().map(String::as_str).collect();
+/// among `lists`, skipping lists it is already on. Sibling subdomains whose
+/// judged kinds agree are one offer for the registrable domain; when they
+/// disagree (a retailer's app store beside its shop), each is offered on
+/// its own.
+pub fn suggest_lists(rows: &[SenderRow], lists: &[NamedListDef]) -> Vec<SenderSuggestion> {
+    let active: Vec<&SenderRow> = rows.iter().filter(|r| r.messages >= SUGGEST_AT).collect();
     // Judged kinds under each registrable domain: do its subdomains speak as one?
     let mut kinds_by_root: BTreeMap<String, BTreeSet<SenderKind>> = BTreeMap::new();
-    for r in rows.iter().filter(|r| r.messages >= SUGGEST_AT) {
-        if let Some((kind, score)) = r.kind {
-            if score >= KIND_AT {
-                kinds_by_root
-                    .entry(registrable_domain(&r.domain))
-                    .or_default()
-                    .insert(kind);
-            }
+    for r in &active {
+        if let Some(kind) = r.judged() {
+            kinds_by_root
+                .entry(registrable_domain(&r.domain))
+                .or_default()
+                .insert(kind);
         }
     }
-    struct Offer<'a> {
-        list: &'static str,
-        entry: String,
-        best: &'a SenderRow,
-        messages: u32,
-        kind: Option<SenderKind>,
-        evidence: String,
-        why: String,
-    }
-    /// The offers so far, merging sibling subdomains that speak as one.
-    struct Offers<'a> {
-        present: BTreeSet<&'a str>,
-        kinds_by_root: BTreeMap<String, BTreeSet<SenderKind>>,
-        map: BTreeMap<(&'static str, String), Offer<'a>>,
-    }
-    impl<'a> Offers<'a> {
-        fn push(
-            &mut self,
-            list: &'static str,
-            row: &'a SenderRow,
-            kind: Option<SenderKind>,
-            evidence: String,
-            why: String,
-        ) {
-            if !self.present.contains(list) || row.lists.iter().any(|l| l == list) {
-                return;
-            }
-            let root = registrable_domain(&row.domain);
-            let one_voice = self.kinds_by_root.get(&root).is_none_or(|k| k.len() <= 1);
-            let entry = if one_voice { root } else { row.domain.clone() };
-            match self.map.entry((list, entry.clone())) {
-                std::collections::btree_map::Entry::Occupied(mut e) => {
-                    let o = e.get_mut();
-                    o.messages += row.messages;
-                    if row.messages > o.best.messages {
-                        o.best = row;
-                        o.kind = kind;
-                        o.evidence = evidence;
-                        o.why = why;
-                    }
-                }
-                std::collections::btree_map::Entry::Vacant(e) => {
-                    e.insert(Offer {
-                        list,
-                        entry,
-                        best: row,
-                        messages: row.messages,
-                        kind,
-                        evidence,
-                        why,
-                    });
-                }
-            }
+    let entry_for = |r: &SenderRow| {
+        let root = registrable_domain(&r.domain);
+        if kinds_by_root.get(&root).is_none_or(|k| k.len() <= 1) {
+            root
+        } else {
+            r.domain.clone()
         }
-    }
-    let mut offers = Offers {
-        present,
-        kinds_by_root,
-        map: BTreeMap::new(),
     };
-    for row in rows.iter().filter(|r| r.messages >= SUGGEST_AT) {
-        if let Some((kind, score)) = row.kind {
-            if score >= KIND_AT {
-                if let Some(list) = list_for_kind(kind) {
-                    offers.push(
-                        list,
-                        row,
-                        Some(kind),
-                        format!("judged {} ({score:.2}) from one message", kind.as_str()),
-                        format!("looks like {}", kind.words()),
-                    );
-                }
+    let exists = |name: &str| lists.iter().any(|l| l.name == name);
+
+    let mut candidates: Vec<Candidate<'_>> = Vec::new();
+    for r in &active {
+        let mut offer = |list: &str, why: String, evidence: String| {
+            if exists(list) && !r.lists.iter().any(|l| l == list) {
+                candidates.push(Candidate {
+                    list: list.to_string(),
+                    entry: entry_for(r),
+                    row: r,
+                    why,
+                    evidence,
+                });
+            }
+        };
+        if let (Some(kind), Some((_, score))) = (r.judged(), r.kind) {
+            for list in lists.iter().filter(|l| l.kinds.contains(&kind)) {
+                offer(
+                    &list.name,
+                    format!("looks like {}", kind.words()),
+                    format!("judged {} ({score:.2})", kind.as_str()),
+                );
             }
         }
-        if row.invoices >= INVOICES_AT {
-            offers.push(
+        if r.invoices >= INVOICES_AT {
+            offer(
                 "invoice_senders",
-                row,
-                row.kind.map(|(k, _)| k),
-                format!("{} recent messages scored as an invoice", row.invoices),
                 format!(
                     "sends invoices ({} of its recent messages present an amount due)",
-                    row.invoices
+                    r.invoices
                 ),
+                format!("{} recent messages scored as an invoice", r.invoices),
             );
         }
-        if row.restored_promotions >= RESTORED_AT {
-            offers.push(
+        if r.restored_promotions >= RESTORED_AT {
+            offer(
                 "keep_promotions",
-                row,
-                row.kind.map(|(k, _)| k),
-                format!("{} promotions restored from Spoil", row.restored_promotions),
                 format!(
                     "sends promotions you have restored from Spoil {} times",
-                    row.restored_promotions
+                    r.restored_promotions
                 ),
+                format!("{} promotions restored from Spoil", r.restored_promotions),
             );
         }
     }
-    let mut out: Vec<SenderSuggestion> = offers
-        .map
-        .into_values()
-        .map(|o| SenderSuggestion {
-            text: format!(
-                "{} {} and is on no list ({} in the last four months). Add it to {}? I can propose the list change and show what re-deciding its mail would do.",
-                o.entry,
-                o.why,
-                riddle_core::plural(o.messages as usize, "message"),
-                o.list
-            ),
-            list: o.list.to_string(),
-            entry: o.entry,
-            sender: o.best.sender.clone(),
-            messages: o.messages,
-            kind: o.kind,
-            evidence: o.evidence,
+
+    // One offer per list and entry: messages summed over the senders behind
+    // it, the words from the one with the most.
+    let mut grouped: BTreeMap<(String, String), Vec<Candidate<'_>>> = BTreeMap::new();
+    for c in candidates {
+        grouped
+            .entry((c.list.clone(), c.entry.clone()))
+            .or_default()
+            .push(c);
+    }
+    let mut out: Vec<SenderSuggestion> = grouped
+        .into_iter()
+        .map(|((list, entry), group)| {
+            let messages: u32 = group.iter().map(|c| c.row.messages).sum();
+            let best = group
+                .iter()
+                .max_by_key(|c| c.row.messages)
+                .expect("a group has a member");
+            let count = plural(messages as usize, "message");
+            SenderSuggestion {
+                label: format!("{entry} {}. Add it to {}?", best.why, list.replace('_', " ")),
+                prompt: format!(
+                    "{entry} {} and has sent {count} in the last four months; it is on no list. Add it to the {list} list and show me what re-deciding its mail would do before anything is applied.",
+                    best.why
+                ),
+                text: format!(
+                    "{entry} {} and is on no list ({count} in the last four months). Add it to {list}? I can propose the list change and show what re-deciding its mail would do.",
+                    best.why
+                ),
+                sender: best.row.sender.clone(),
+                kind: best.row.judged(),
+                why: best.why.clone(),
+                evidence: best.evidence.clone(),
+                list,
+                entry,
+                messages,
+            }
         })
         .collect();
     out.sort_by(|a, b| b.messages.cmp(&a.messages).then(a.entry.cmp(&b.entry)));
@@ -247,20 +204,34 @@ mod tests {
         }
     }
 
-    fn lists() -> Vec<String> {
-        [
-            "engineering_vendors",
-            "invoice_senders",
-            "keep_promotions",
-            "money_transfers",
+    fn list(name: &str, kinds: &[SenderKind]) -> NamedListDef {
+        NamedListDef {
+            name: name.into(),
+            description: String::new(),
+            entries: vec![],
+            pack: None,
+            kinds: kinds.to_vec(),
+        }
+    }
+
+    fn lists() -> Vec<NamedListDef> {
+        vec![
+            list(
+                "engineering_vendors",
+                &[
+                    SenderKind::CloudOrHosting,
+                    SenderKind::DomainRegistrar,
+                    SenderKind::DeveloperTooling,
+                ],
+            ),
+            list("invoice_senders", &[]),
+            list("keep_promotions", &[]),
+            list("money_transfers", &[SenderKind::PaymentsService]),
         ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
     }
 
     #[test]
-    fn a_cloud_provider_with_enough_mail_is_offered_the_engineering_vendors_list() {
+    fn a_cloud_provider_with_enough_mail_is_offered_the_list_that_declares_its_kind() {
         let rows = [
             row(
                 "amazonaws.com",
@@ -286,12 +257,17 @@ mod tests {
             ("engineering_vendors", "amazonaws.com")
         );
         assert_eq!(s[0].kind, Some(SenderKind::CloudOrHosting));
-        assert!(
-            s[0].text.contains("cloud or hosting provider"),
-            "{}",
-            s[0].text
-        );
+        assert_eq!(s[0].why, "looks like a cloud or hosting provider");
         assert!(s[0].text.contains("11 messages"), "{}", s[0].text);
+        assert_eq!(
+            s[0].label,
+            "amazonaws.com looks like a cloud or hosting provider. Add it to engineering vendors?"
+        );
+        assert!(
+            s[0].prompt.contains("the engineering_vendors list"),
+            "{}",
+            s[0].prompt
+        );
     }
 
     #[test]
@@ -300,7 +276,7 @@ mod tests {
         on.lists = vec!["engineering_vendors".into()];
         assert!(suggest_lists(&[on.clone()], &lists()).is_empty());
         on.lists.clear();
-        assert!(suggest_lists(&[on], &["keep_promotions".to_string()]).is_empty());
+        assert!(suggest_lists(&[on], &[list("keep_promotions", &[])]).is_empty());
     }
 
     #[test]
@@ -310,12 +286,8 @@ mod tests {
         let mut promo = row("shop.example", 12, None);
         promo.restored_promotions = 2;
         let s = suggest_lists(&[inv, promo], &lists());
-        let lists_offered: Vec<&str> = s.iter().map(|x| x.list.as_str()).collect();
-        assert_eq!(
-            lists_offered,
-            ["keep_promotions", "invoice_senders"],
-            "{s:?}"
-        );
+        let offered: Vec<&str> = s.iter().map(|x| x.list.as_str()).collect();
+        assert_eq!(offered, ["keep_promotions", "invoice_senders"], "{s:?}");
         assert!(
             s[1].text.contains("3 of its recent messages"),
             "{}",
@@ -369,5 +341,6 @@ mod tests {
         assert_eq!(q.primitive, SignalPrimitive::Choice);
         assert_eq!(q.options.len(), SenderKind::ALL.len());
         assert_eq!(q.options[0].0, "cloud_or_hosting");
+        assert_eq!(SenderKind::parse("retailer"), Some(SenderKind::Retailer));
     }
 }

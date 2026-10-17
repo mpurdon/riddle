@@ -10,7 +10,7 @@ import type { MeshId } from "./MeshId";
  * `+ Replaces: same subject` on the route, which the Director can now
  * propose for any sender from this.
  */
-export type SeriesSuggestion = { meshId: MeshId, meshVersion: number | null, meshName: string | null, 
+export type SeriesSuggestion = { meshId: MeshId, meshName: string | null, 
 /**
  * The route as written, when the Mesh still has it.
  */
@@ -30,4 +30,12 @@ sample: string,
 /**
  * The sentence the Director says.
  */
-text: string, findIds: Array<FindId>, };
+text: string, 
+/**
+ * The line on the Director page.
+ */
+label: string, 
+/**
+ * The question the page puts in the composer.
+ */
+prompt: string, findIds: Array<FindId>, };

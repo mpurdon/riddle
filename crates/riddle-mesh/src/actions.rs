@@ -387,6 +387,8 @@ impl Action for SaveList {
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
                 .or_else(|| prior.as_ref().and_then(|p| p.pack.clone())),
+            // The pack's to set; a hand edit of the entries keeps them.
+            kinds: prior.as_ref().map(|p| p.kinds.clone()).unwrap_or_default(),
             name: name.clone(),
         };
         repo::lists::put(&index, &list)?;

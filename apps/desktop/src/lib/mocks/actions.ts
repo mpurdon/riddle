@@ -677,7 +677,7 @@ function execute(state: MockState, action: string, args: Args): Exec {
       const name = str(args, 'name')
       const entries = ((args.entries as string[] | undefined) ?? []).map((e) => e.trim().replace(/^@/, '').toLowerCase()).filter(Boolean)
       const i = state.namedLists.findIndex((l) => l.name === name)
-      const list = { name, description: (args.description as string | undefined) ?? state.namedLists[i]?.description ?? '', entries: [...new Set(entries)], pack: state.namedLists[i]?.pack ?? null }
+      const list = { name, description: (args.description as string | undefined) ?? state.namedLists[i]?.description ?? '', entries: [...new Set(entries)], pack: state.namedLists[i]?.pack ?? null, kinds: state.namedLists[i]?.kinds ?? [] }
       if (i >= 0) state.namedLists[i] = list
       else state.namedLists.push(list)
       return { result: list, summary: `Saved list:${name} (${list.entries.length} entries)`, affected: [], undo: { state: 'not_undoable', reason: 'edit the list again' } }
@@ -689,7 +689,7 @@ function execute(state: MockState, action: string, args: Args): Exec {
         const existing = state.namedLists.find((l) => l.name === name)
         const merged = [...new Set([...(existing?.entries ?? []), ...entries.map((e) => e.trim().replace(/^@/, '').toLowerCase()).filter(Boolean)])]
         if (existing) existing.entries = merged
-        else state.namedLists.push({ name, description: '', entries: merged, pack: id })
+        else state.namedLists.push({ name, description: '', entries: merged, pack: id, kinds: [] })
       }
       state.installedPacks = [...state.installedPacks.filter((p) => p.id !== id), { id, version: 1, meshes: {}, installedAt: new Date().toISOString() }]
       return { result: { packId: id }, summary: `Installed ${id}`, affected: [], undo: { state: 'not_undoable', reason: 'remove the pack' } }

@@ -641,6 +641,23 @@ pub fn distinct_senders(store: &Store) -> Result<Vec<String>> {
     })
 }
 
+/// Received messages per sender address since a moment, lowercase, for the
+/// sender review: one query for every sender in the window.
+pub fn sender_counts_since(
+    store: &Store,
+    since: &chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<(String, u64)>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT lower(from_email), count(*) FROM messages WHERE deleted_at IS NULL AND is_sent = 0 AND date >= ?1 GROUP BY 1",
+        )?;
+        let rows = st
+            .query_map([ts(since)], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?
+            .collect();
+        rows
+    })
+}
+
 /// Sender addresses in a set of threads, plus recipients of the user's sent
 /// mail in them, for incremental People updates.
 pub fn addresses_in_threads(

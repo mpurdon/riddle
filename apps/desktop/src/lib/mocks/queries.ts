@@ -790,9 +790,9 @@ export function seriesSuggestions(state: MockState): SeriesSuggestion[] {
     const what = g.meshName ? `the ${g.meshName} Mesh` : 'this Mesh'
     const side = runs.length > 1 ? `, in ${runs.length} runs side by side` : ''
     const route = g.route ? ` route \`${g.route}\`` : ''
+    const where = g.meshName ? ` under the ${g.meshName} Mesh` : ''
     out.push({
       meshId: g.meshId,
-      meshVersion: null,
       meshName: g.meshName,
       route: g.route,
       sender: g.sender,
@@ -800,30 +800,26 @@ export function seriesSuggestions(state: MockState): SeriesSuggestion[] {
       runs: runs.length,
       sample: runs[0].sample,
       text: `${count} open Finds from ${g.sender} say the same thing, numbers aside ("${runs[0].sample}")${side}, under ${what}'s${route}. I can propose \`+ Replaces: same subject\` on that route: the newest of each run stays open and the rest close as Superseded; you would see the rule text and a simulation before anything changes.`,
+      label: `${count} Finds from ${g.sender} say the same thing. Collapse them to one?`,
+      prompt: `${count} open Finds from ${g.sender} say the same thing ("${runs[0].sample}")${where}. Propose "+ Replaces: same subject" on the route that raises them, and show me what it would do to recent mail before anything is applied.`,
       findIds: runs.flatMap((r) => r.finds),
     })
   }
   return out.sort((a, b) => b.count - a.count)
 }
 
-/** What the judge would say of a fixture sender's domain; the mock's stand-in for one judgment per domain. */
-const SENDER_KINDS: Record<string, SenderKind> = { 'cloud.example': 'cloud_or_hosting' }
-const LIST_FOR_KIND: Partial<Record<SenderKind, string>> = { cloud_or_hosting: 'engineering_vendors', domain_registrar: 'engineering_vendors', developer_tooling: 'engineering_vendors', payments_service: 'money_transfers', accounting_or_adviser: 'financial_advisors' }
-const KIND_WORDS: Record<SenderKind, string> = {
-  cloud_or_hosting: 'a cloud or hosting provider',
-  domain_registrar: 'a domain registrar',
-  developer_tooling: 'a developer tooling vendor',
-  payments_service: 'a payments service',
-  accounting_or_adviser: 'an accountant or financial adviser',
-  retailer: 'a retailer',
-  newsletter: 'a newsletter',
-  government: 'a government body',
-  person_or_other: 'a person or something else',
+/**
+ * The mock's stand-in for the judge and for the packs' list declarations:
+ * what kind of sender a fixture domain is, in the words the backend would
+ * use, and the list that declares that kind.
+ */
+const SENDER_KINDS: Record<string, { kind: SenderKind; words: string; list: string }> = {
+  'cloud.example': { kind: 'cloud_or_hosting', words: 'a cloud or hosting provider', list: 'engineering_vendors' },
 }
 
 /**
  * Senders with three or more messages in the window, on no list, whose
- * judged kind maps to a list, mirroring `riddle_agent::senders` (the
+ * judged kind a list declares, mirroring `riddle_agent::senders` (the
  * invoice and restored-promotion evidence is not modelled here).
  */
 export function senderSuggestions(state: MockState): SenderSuggestion[] {
@@ -841,17 +837,21 @@ export function senderSuggestions(state: MockState): SenderSuggestion[] {
   const onAList = (sender: string, domain: string) => state.namedLists.some((l) => l.entries.some((e) => e === sender || e === domain || domain.endsWith(`.${e}`)))
   const out: SenderSuggestion[] = []
   for (const [domain, g] of byDomain) {
-    const kind = SENDER_KINDS[domain]
-    const list = kind ? LIST_FOR_KIND[kind] : undefined
-    if (!kind || !list || g.messages < 3 || onAList(g.sender, domain)) continue
+    const judged = SENDER_KINDS[domain]
+    if (!judged || g.messages < 3 || onAList(g.sender, domain)) continue
+    const { kind, words, list } = judged
+    const why = `looks like ${words}`
     out.push({
       list,
       entry: domain,
       sender: g.sender,
       messages: g.messages,
       kind,
-      evidence: `judged ${kind} (0.90) from one message`,
-      text: `${domain} looks like ${KIND_WORDS[kind]} and is on no list (${g.messages} messages in the last four months). Add it to ${list}? I can propose the list change and show what re-deciding its mail would do.`,
+      why,
+      evidence: `judged ${kind} (0.90)`,
+      text: `${domain} ${why} and is on no list (${g.messages} messages in the last four months). Add it to ${list}? I can propose the list change and show what re-deciding its mail would do.`,
+      label: `${domain} ${why}. Add it to ${list.replaceAll('_', ' ')}?`,
+      prompt: `${domain} ${why} and has sent ${g.messages} messages in the last four months; it is on no list. Add it to the ${list} list and show me what re-deciding its mail would do before anything is applied.`,
     })
   }
   return out.sort((a, b) => b.messages - a.messages)

@@ -19,7 +19,6 @@ pub const SUGGEST_AT: usize = 3;
 pub struct OpenFindRow {
     pub find_id: FindId,
     pub mesh_id: MeshId,
-    pub mesh_version: Option<u32>,
     pub mesh_name: Option<String>,
     /// The route as written; `None` when the Mesh no longer has it.
     pub route: Option<String>,
@@ -79,11 +78,19 @@ pub fn suggest_series(rows: &[OpenFindRow]) -> Vec<SeriesSuggestion> {
         let text = format!(
             "{count} open Finds from {sender} say the same thing, numbers aside (\"{sample}\"){side}, under {what}'s{route_text}. I can propose `+ Replaces: same subject` on that route: the newest of each run stays open and the rest close as Superseded; you would see the rule text and a simulation before anything changes."
         );
+        let where_ = first
+            .mesh_name
+            .as_ref()
+            .map(|n| format!(" under the {n} Mesh"))
+            .unwrap_or_default();
         out.push(SeriesSuggestion {
             mesh_id: MeshId::from(mesh.as_str()),
-            mesh_version: first.mesh_version,
             mesh_name: first.mesh_name.clone(),
             route,
+            label: format!("{count} Finds from {sender} say the same thing. Collapse them to one?"),
+            prompt: format!(
+                "{count} open Finds from {sender} say the same thing (\"{sample}\"){where_}. Propose \"+ Replaces: same subject\" on the route that raises them, and show me what it would do to recent mail before anything is applied."
+            ),
             sender,
             count: count as u32,
             runs: runs.len() as u32,
@@ -104,7 +111,6 @@ mod tests {
         OpenFindRow {
             find_id: FindId::from(find),
             mesh_id: MeshId::from("mesh_notices"),
-            mesh_version: Some(3),
             mesh_name: Some("Account notices".into()),
             route: Some("ELSE IF account_notification@v1 > .85 → Find: Do".into()),
             replaces,

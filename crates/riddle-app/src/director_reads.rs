@@ -268,8 +268,9 @@ impl DirectorReads for AppReads {
             })).collect::<Vec<_>>(),
             "seriesSuggestions": series,
             // Senders with enough mail that are on no list and look like
-            // they belong on one.
-            "senderSuggestions": self.0.sender_suggestions(&scope.dig_ids)?,
+            // they belong on one; not about any one Mesh, so only when the
+            // read is not.
+            "senderSuggestions": if only.is_none() { self.0.sender_suggestions(&scope.dig_ids)? } else { Vec::new() },
             // Identifiers and dispositions only; the Director reads a message
             // with get_message when its content matters.
             "corrections": corrections.iter().take(50).map(|c| json!({

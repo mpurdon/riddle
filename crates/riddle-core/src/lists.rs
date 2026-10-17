@@ -33,6 +33,11 @@ pub struct NamedListDef {
     /// The pack that asked for it, if any.
     #[serde(default)]
     pub pack: Option<String>,
+    /// Kinds of sender that belong on it (`engineering_vendors`: a cloud
+    /// provider, a registrar, developer tooling), declared by the pack, so a
+    /// sender judged to be one can be offered the list.
+    #[serde(default)]
+    pub kinds: Vec<crate::suggestion::SenderKind>,
 }
 
 impl NamedListDef {
@@ -114,6 +119,7 @@ mod tests {
                 " ".into(),
             ]),
             pack: None,
+            kinds: vec![],
         }]);
         assert!(lists.contains("keep", "noreply@uber.com"));
         assert!(lists.contains("keep", "a@email.uber.com"));

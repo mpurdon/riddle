@@ -29,6 +29,7 @@ name = "engineering_vendors"
 description = "Vendors whose mail is engineering spend: a domain registrar, a cloud provider, developer tooling"
 question = "Which vendors are engineering costs for you, by domain (a registrar such as moniker.com, a cloud provider such as amazonaws.com, developer tooling)?"
 default = []
+kinds = ["cloud_or_hosting", "domain_registrar", "developer_tooling"]
 
 [[meshes]]
 band = "personal"

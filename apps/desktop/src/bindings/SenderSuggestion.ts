@@ -14,10 +14,22 @@ entry: string, sender: string,
  */
 messages: number, kind?: SenderKind, 
 /**
+ * What it looks like, for a sentence: "looks like a domain registrar".
+ */
+why: string, 
+/**
  * What the offer rests on, for the Director.
  */
 evidence: string, 
 /**
  * The sentence the Director says.
  */
-text: string, };
+text: string, 
+/**
+ * The line on the Director page.
+ */
+label: string, 
+/**
+ * The question the page puts in the composer.
+ */
+prompt: string, };

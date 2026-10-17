@@ -14,6 +14,7 @@ name = "money_transfers"
 description = "Services that send or receive money for you"
 question = "Which services tell you money arrived or left (e-Transfer, PayPal, Wise)?"
 default = ["payments.interac.ca", "paypal.com", "wise.com"]
+kinds = ["payments_service"]
 
 [[lists]]
 name = "invoice_senders"
@@ -48,6 +49,7 @@ name = "financial_advisors"
 description = "Your accountant, bookkeeper, financial planner or bank adviser"
 question = "Who looks after your money (an accountant's or adviser's firm, by domain)?"
 default = []
+kinds = ["accounting_or_adviser"]
 
 # v4: newsletters are not bills. A tech newsletter's issues scored .87 as
 # invoices and became Pay Finds; the invoice route now skips newsletters and

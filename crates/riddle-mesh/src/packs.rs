@@ -87,6 +87,10 @@ pub struct PackList {
     /// Entries the list starts with: generic ones (`linkedin.com`), never one person's.
     #[serde(default)]
     pub default: Vec<String>,
+    /// Kinds of sender that belong on it, so a sender judged to be one can
+    /// be offered the list (`riddle_agent::senders`).
+    #[serde(default)]
+    pub kinds: Vec<riddle_core::SenderKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -395,17 +399,17 @@ pub fn install(
         let answer = answers.get(&l.name);
         match repo::lists::get(index, &l.name)? {
             Some(before) => {
+                // Answers add entries; the pack's kinds are its own to set.
+                let mut after = before.clone();
                 if let Some(add) = answer {
                     let mut merged = before.entries.clone();
                     merged.extend(add.iter().cloned());
-                    let after = NamedListDef {
-                        entries: NamedListDef::normalise(&merged),
-                        ..before.clone()
-                    };
-                    if after != before {
-                        report.lists_before.push(before);
-                        repo::lists::put(index, &after)?;
-                    }
+                    after.entries = NamedListDef::normalise(&merged);
+                }
+                after.kinds = l.kinds.clone();
+                if after != before {
+                    report.lists_before.push(before);
+                    repo::lists::put(index, &after)?;
                 }
             }
             None => {
@@ -417,6 +421,7 @@ pub fn install(
                         description: l.description.clone(),
                         entries: NamedListDef::normalise(&entries),
                         pack: Some(pack.id.clone()),
+                        kinds: l.kinds.clone(),
                     },
                 )?;
                 report.lists_created.push(l.name.clone());
@@ -597,6 +602,7 @@ pub fn pack_from(
                 .map(|d| d.description.clone())
                 .unwrap_or_default(),
             question: String::new(),
+            kinds: def.as_ref().map(|d| d.kinds.clone()).unwrap_or_default(),
             default: if include_entries {
                 def.map(|d| d.entries).unwrap_or_default()
             } else {
@@ -865,6 +871,7 @@ mod tests {
                 description: "Your banks".into(),
                 entries: vec!["rbc.com".into()],
                 pack: None,
+                kinds: vec![],
             },
         )
         .unwrap();
@@ -1049,6 +1056,7 @@ mod tests {
                 description: String::new(),
                 entries: riddle_core::NamedListDef::normalise(entries),
                 pack: None,
+                kinds: vec![],
             }]);
             let lists = crate::simulate::FactsLists(&facts, &named);
             let d = crate::eval::evaluate(&running(&["developer-github"]), &facts, &[], &lists);

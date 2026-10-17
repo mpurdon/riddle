@@ -1174,6 +1174,7 @@ mod tests {
             description: String::new(),
             entries: vec!["uber.com".into()],
             pack: None,
+            kinds: vec![],
         }]);
         let decide = |sender: &str| {
             let facts = Facts {

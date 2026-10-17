@@ -102,3 +102,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 43 | feat: an engineering vendor's bill carries Engineering too; GitHub pack v3 | 5 | 0 | 0 | 0 | 0 |
 | 44 | feat: sender suggestions: a new vendor is judged once and offered its list | 44 | 0 | 0 | 0 | 0 |
 | 45 | fix: sender suggestions merge sibling subdomains and judge a frequent sender twice | 6 | 0 | 0 | 0 | 0 |
+| 46 | refactor: suggestions cost nothing idle, keep honest verdicts, and read kinds from the lists | -33 | 0 | 0 | 0 | 0 |

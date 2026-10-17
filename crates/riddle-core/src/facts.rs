@@ -437,6 +437,35 @@ pub fn free_mail_domain(domain: &str) -> bool {
         && ending.split('.').all(|l| (2..=3).contains(&l.len()))
 }
 
+/// The domain of an address, lowercase; empty when there is no `@`.
+pub fn email_domain(email: &str) -> String {
+    email
+        .rsplit_once('@')
+        .map(|(_, d)| d.trim().to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+/// The part of a domain a list entry should name: `fb02.freshbooks.com` and
+/// `fb05.freshbooks.com` are one sender, `freshbooks.com`, and a list entry
+/// matches its subdomains. The last two labels, or three under a country
+/// code's second level (`example.co.uk`); a public-suffix list would be
+/// exact and is not worth carrying for this.
+pub fn registrable_domain(domain: &str) -> String {
+    let domain = domain.trim().trim_matches('.').to_ascii_lowercase();
+    let labels: Vec<&str> = domain.split('.').collect();
+    let n = labels.len();
+    if n <= 2 {
+        return domain;
+    }
+    let country_second_level = labels[n - 1].len() == 2
+        && matches!(
+            labels[n - 2],
+            "co" | "com" | "net" | "org" | "gov" | "edu" | "ac" | "gc"
+        );
+    let keep = if country_second_level { 3 } else { 2 };
+    labels[n - keep..].join(".")
+}
+
 /// Whether an address says nobody reads replies to it: `noreply`,
 /// `no-reply`, `donotreply` anywhere in the local part
 /// (`account-noreply@`, `jobs-noreply@`), or a bare `notifications@`.
