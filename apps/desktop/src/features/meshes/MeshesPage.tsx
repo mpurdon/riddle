@@ -501,6 +501,8 @@ IF signal@vN > .80 AND has_attachments
       + Stratum: <name> + Notify
       + Replaces    newest Find from the
                     sender closes the older
+      + Replaces: same subject   one series
+                    per subject, numbers aside
       + Expires: 18h | 2d   after arrival
 ELSE IF … / ELSE
 

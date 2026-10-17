@@ -1,6 +1,6 @@
 id = "money"
 name = "Money"
-version = 7
+version = 8
 area = "Money"
 summary = "Bills, renewals and amounts due become Pay or Do Finds; transfers and credit alerts are Know Finds; receipts and charges are Filed; donation appeals are kept apart from bills."
 band = "general"
@@ -20,6 +20,13 @@ name = "invoice_senders"
 description = "Senders whose invoices you pay yourself"
 question = "Who sends you invoices you pay by hand (a domain registrar, a contractor)?"
 default = []
+
+# v8: a renewal reminder is one Find per thing renewing. A registrar's
+# "example.com Expires in 28 days" came again at 14 and 7 days, and "2 of
+# Your Domain Names Expire Soon" fifteen times, each a Do Find (16 Oct
+# 2026). The renewals route carries Replaces: same subject, so the newest
+# about one domain replaces the earlier ones about it and another domain's
+# reminder stands on its own.
 
 # v7: a known transfer sender decides before a Signal guesses. Security and
 # account alerts (core, priority 0) looked at every Interac deposit first:
@@ -132,7 +139,7 @@ WHEN NOT gmail_category = promotions AND NOT gmail_category = social
     ELSE IF subject CONTAINS "bill is ready" OR subject CONTAINS "ebill" OR subject CONTAINS "e-bill" OR subject CONTAINS "statement is ready"
         → Find: Pay + Stratum: Finance
     ELSE IF subject CONTAINS "expire soon" OR subject CONTAINS "expiring soon" OR subject CONTAINS "renewing" OR subject CONTAINS "payment date for"
-        → Find: Do + Stratum: Finance
+        → Find: Do + Stratum: Finance + Replaces: same subject
 END
 '''
 

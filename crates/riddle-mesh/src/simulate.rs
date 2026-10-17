@@ -327,7 +327,7 @@ pub fn simulate_detailed(
                     .zip(decision.output.as_ref())
                     .zip(decision.mesh_id.as_ref())
                     .and_then(|((k, o), mesh)| {
-                        effect_change(k, o, mesh, &facts.sender, || {
+                        effect_change(k, o, mesh, &facts.sender, &facts.subject, || {
                             repo::finds::for_message(&index, &id)
                                 .ok()
                                 .and_then(|fs| fs.into_iter().find_map(|f| f.series))
@@ -465,12 +465,13 @@ fn effect_change(
     output: &riddle_core::MeshOutput,
     mesh: &riddle_core::MeshId,
     sender: &str,
+    subject: &str,
     find_series: impl FnOnce() -> Option<String>,
 ) -> Option<EffectChange> {
     let is_find = matches!(current.disposition, Disposition::Find { .. });
     let series_now = output
         .replaces
-        .then(|| riddle_core::series_key(mesh, sender));
+        .then(|| riddle_core::series_key_scoped(mesh, sender, output.series_scope(), subject));
     let series_before = if is_find {
         find_series()
     } else {

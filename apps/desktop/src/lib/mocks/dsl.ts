@@ -213,7 +213,13 @@ export function parseMeshText(text: string, lookup: DigLookup = { digIdByName: (
       if (low === 'escalate') out.escalate = true
       else if (low === 'notify') out.notify = true
       else if (low === 'replaces') out.replaces = true
-      else if (low === 'filed') out.disposition = { kind: 'filed' }
+      else if (/^replaces:\s*same subject$/.test(low)) {
+        out.replaces = true
+        out.replacesScope = 'subject'
+      } else if (low.startsWith('replaces:')) {
+        fail(line, `Replaces is bare (the newest from the sender) or Replaces: same subject, not ${p}`)
+        return null
+      } else if (low === 'filed') out.disposition = { kind: 'filed' }
       else if (low === 'spoil') out.disposition = { kind: 'spoil' }
       else if (low === 'contamination') out.disposition = { kind: 'contamination' }
       else if (low === 'find') {

@@ -61,6 +61,25 @@
    ]
   },
   {
+   "name": "replaces keyed by the subject too",
+   "text": "ROUTES\nIF subject CONTAINS \"expires in\" → Find: Do + Replaces: same subject",
+   "outputs": [
+    {
+     "disposition": {
+      "kind": "find",
+      "find_type": "do"
+     },
+     "replaces": true,
+     "replacesScope": "subject"
+    }
+   ]
+  },
+  {
+   "name": "replaces with an unknown key is rejected",
+   "text": "ROUTES\nIF mailing_list → Find: Do + Replaces: same thread",
+   "error": "Replaces: same subject"
+  },
+  {
    "name": "replaces and expires on a Find",
    "text": "ROUTES\nIF subject CONTAINS \"Time to write\" → Find: Do + Replaces + Expires: 18h\nELSE IF mailing_list → Find: Know + Expires: 2 days\nELSE IF has_attachments → Find: Review + Expires: 36 hours",
    "outputs": [

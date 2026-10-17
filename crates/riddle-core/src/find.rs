@@ -194,6 +194,128 @@ pub fn series_key(mesh: &MeshId, sender: &str) -> String {
     format!("series:{mesh}:{}", sender.trim().to_ascii_lowercase())
 }
 
+/// The series a route's `+ Replaces` puts a message in: the sender's, or
+/// with `Replaces: same subject` the sender's and the subject's, read past
+/// its numbers and reply prefixes, so "example.com expires in 28 days" and
+/// "… in 14 days" are one series and two domains are two.
+pub fn series_key_scoped(
+    mesh: &MeshId,
+    sender: &str,
+    scope: crate::mesh::SeriesScope,
+    subject: &str,
+) -> String {
+    match scope {
+        crate::mesh::SeriesScope::Sender => series_key(mesh, sender),
+        crate::mesh::SeriesScope::Subject => {
+            format!("{}:{}", series_key(mesh, sender), series_subject(subject))
+        }
+    }
+}
+
+/// A subject as a series name: lower case, reply and forward prefixes
+/// dropped, every run of digits one `#`, runs of spaces one space. A
+/// reminder counts down ("in 28 days", "in 14 days") and a login notice
+/// names an address; neither makes a new series.
+pub fn series_subject(subject: &str) -> String {
+    let mut s = subject.trim().to_lowercase();
+    loop {
+        let t = s.trim_start();
+        match ["re:", "fwd:", "fw:"]
+            .iter()
+            .find_map(|p| t.strip_prefix(p))
+        {
+            Some(rest) => s = rest.trim_start().to_string(),
+            None => break,
+        }
+    }
+    let mut out = String::with_capacity(s.len());
+    let (mut in_digits, mut in_space) = (false, false);
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            if !in_digits {
+                out.push('#');
+                in_digits = true;
+            }
+            in_space = false;
+            continue;
+        }
+        in_digits = false;
+        if c.is_whitespace() {
+            if !in_space && !out.is_empty() {
+                out.push(' ');
+                in_space = true;
+            }
+            continue;
+        }
+        in_space = false;
+        out.push(c);
+    }
+    out.trim_end().to_string()
+}
+
+#[cfg(test)]
+mod series_tests {
+    use super::*;
+    use crate::mesh::SeriesScope;
+
+    #[test]
+    fn a_subject_series_reads_past_numbers_and_reply_prefixes() {
+        assert_eq!(
+            series_subject("Re: FWD: nasghoul.com Expires in 28 days"),
+            "nasghoul.com expires in # days"
+        );
+        assert_eq!(
+            series_subject("nasghoul.com expires in 14 days"),
+            series_subject("nasghoul.com  Expires in 28 days")
+        );
+        assert_ne!(
+            series_subject("nasghoul.com expires in 14 days"),
+            series_subject("iprm.net expires in 14 days")
+        );
+        assert_eq!(
+            series_subject("Login notification from 10.0.0.1 (Canada (CA))"),
+            "login notification from #.#.#.# (canada (ca))"
+        );
+    }
+
+    #[test]
+    fn a_sender_series_ignores_the_subject_and_a_subject_series_does_not() {
+        let mesh = MeshId::from("mesh_renewals");
+        let by_sender = |subject: &str| {
+            series_key_scoped(
+                &mesh,
+                "Getsupport@moniker.com ",
+                SeriesScope::Sender,
+                subject,
+            )
+        };
+        assert_eq!(
+            by_sender("a.com expires in 28 days"),
+            by_sender("b.com expires in 28 days")
+        );
+        assert_eq!(
+            by_sender("anything"),
+            series_key(&mesh, "getsupport@moniker.com")
+        );
+        let by_subject = |subject: &str| {
+            series_key_scoped(
+                &mesh,
+                "getsupport@moniker.com",
+                SeriesScope::Subject,
+                subject,
+            )
+        };
+        assert_eq!(
+            by_subject("a.com expires in 28 days"),
+            by_subject("Re: a.com expires in 14 days")
+        );
+        assert_ne!(
+            by_subject("a.com expires in 28 days"),
+            by_subject("b.com expires in 28 days")
+        );
+    }
+}
+
 /// What Sift proposes when a message deserves attention (§41). `riddle-finds`
 /// joins it to an open Find with the same `identity_key` or creates one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

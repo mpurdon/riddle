@@ -802,13 +802,21 @@ fn finish(
         .gate
         .as_deref()
         .is_some_and(|g| g.starts_with("never_hidden"));
-    // The `+ Replaces` series (Mesh and sender): a Find carries it as its
-    // FindSeries, Spoil and Filed on the classification.
+    // The `+ Replaces` series (Mesh and sender, and the subject when the
+    // route says so): a Find carries it as its FindSeries, Spoil and Filed
+    // on the classification.
     let series = draft
         .mesh_id
         .as_ref()
-        .filter(|_| draft.route.as_ref().is_some_and(|r| r.replaces))
-        .map(|mesh| series_key(mesh, &input.message.from.email));
+        .zip(draft.route.as_ref().filter(|r| r.replaces))
+        .map(|(mesh, route)| {
+            series_key_scoped(
+                mesh,
+                &input.message.from.email,
+                route.series_scope(),
+                &input.message.subject,
+            )
+        });
     let score = priority_for(&facts, &draft.evaluations, never_hidden);
     // A route's own level wins, when the route's decision is the one that
     // stood (a gate can leave its match Unresolved); the score keeps the

@@ -175,6 +175,28 @@ impl Expr {
     }
 }
 
+/// What a `+ Replaces` series is keyed by, with the Mesh: the sender alone
+/// (`+ Replaces`), or the sender and the subject read past its numbers and
+/// reply prefixes (`+ Replaces: same subject`), for a sender that runs
+/// several notices at once. A registrar sends one reminder per expiring
+/// domain; keyed by the sender alone, each replaced the others (16 Oct 2026).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SeriesScope {
+    #[default]
+    Sender,
+    Subject,
+}
+
+impl MeshOutput {
+    /// What this route's `+ Replaces` series is keyed by: the sender unless
+    /// the route says `same subject`.
+    pub fn series_scope(&self) -> SeriesScope {
+        self.replaces_scope.unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -188,6 +210,11 @@ pub struct MeshOutput {
     /// week of them. Only meaningful with a Find disposition.
     #[serde(default)]
     pub replaces: bool,
+    /// `+ Replaces: same subject`: the series is keyed by the subject too.
+    /// `None` is the sender alone, as before the option existed.
+    #[serde(default)]
+    #[ts(optional)]
+    pub replaces_scope: Option<SeriesScope>,
     /// `+ Expires:`: when the Find this route raises stops mattering, so a
     /// reminder nobody acted on does not linger. Only meaningful with a Find.
     #[serde(default)]

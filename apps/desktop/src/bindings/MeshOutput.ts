@@ -2,6 +2,7 @@
 import type { Disposition } from "./Disposition";
 import type { Expiry } from "./Expiry";
 import type { Importance } from "./Importance";
+import type { SeriesScope } from "./SeriesScope";
 
 export type MeshOutput = { disposition: Disposition | null, strata: Array<string>, notify: boolean, escalate: boolean, 
 /**
@@ -10,6 +11,11 @@ export type MeshOutput = { disposition: Disposition | null, strata: Array<string
  * week of them. Only meaningful with a Find disposition.
  */
 replaces: boolean, 
+/**
+ * `+ Replaces: same subject`: the series is keyed by the subject too.
+ * `None` is the sender alone, as before the option existed.
+ */
+replacesScope?: SeriesScope, 
 /**
  * `+ Expires:`: when the Find this route raises stops mattering, so a
  * reminder nobody acted on does not linger. Only meaningful with a Find.

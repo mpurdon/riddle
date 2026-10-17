@@ -168,7 +168,12 @@ pub fn output_words(o: &MeshOutput) -> String {
         s.push_str(", and you are told at once");
     }
     if o.replaces {
-        s.push_str("; a newer one from the same sender replaces it");
+        s.push_str(match o.series_scope() {
+            riddle_core::SeriesScope::Sender => "; a newer one from the same sender replaces it",
+            riddle_core::SeriesScope::Subject => {
+                "; a newer one from the same sender on the same subject replaces it"
+            }
+        });
     }
     match o.expires {
         Some(Expiry::After { hours }) => {

@@ -120,7 +120,10 @@ pub fn fmt_output(o: &MeshOutput) -> String {
         parts.push("Notify".into());
     }
     if o.replaces {
-        parts.push("Replaces".into());
+        parts.push(match o.series_scope() {
+            riddle_core::SeriesScope::Sender => "Replaces".into(),
+            riddle_core::SeriesScope::Subject => "Replaces: same subject".into(),
+        });
     }
     if let Some(e) = o.expires {
         parts.push(format!("Expires: {}", fmt_expiry(e)));

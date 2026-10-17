@@ -1,6 +1,6 @@
 id = "core"
 name = "Core"
-version = 3
+version = 4
 area = "Essentials"
 summary = "Never hides the people you protect, sets scams apart, surfaces mail from people you write to and real security alerts, and gives everything else a place to land."
 band = "specific"
@@ -135,9 +135,12 @@ ELSE IF meeting_related@v1 > .85 AND requires_response@v1 > .70
 # a registrar's "2 of Your Domain Names Expire Soon" as 30, Search Console's
 # indexing notices as 8 (16 Oct 2026). With Replaces the newest from a
 # sender stays open and the earlier ones close as Superseded, as Daily
-# reminders does. The series is keyed by sender address, so a different
-# notice from the same address is replaced too; one ticket reply among
-# thirty renewal notices was the only case seen.
+# reminders does.
+#
+# v4: the series is keyed by the subject too (`Replaces: same subject`),
+# read past its numbers. Keyed by the sender alone, a registrar's one
+# reminder per domain replaced the other domains', and a ticket reply
+# replaced a renewal notice; a sender runs several notices at once.
 [[meshes]]
 band = "fallback"
 rank = 4
@@ -152,7 +155,7 @@ ROUTES
 IF (automated_sender OR list_unsubscribe) AND NOT gmail_category = promotions AND (subject CONTAINS "terms of service" OR subject CONTAINS "terms of use" OR subject CONTAINS "privacy policy" OR subject CONTAINS "privacy notice" OR subject CONTAINS "legal update" OR subject CONTAINS "agreement")
     → Filed + Stratum: Notifications
 ELSE IF account_notification@v1 > .85 AND requires_action@v1 > .75 AND marketing@v1 < .70
-    → Find: Do + Stratum: Notifications + Replaces
+    → Find: Do + Stratum: Notifications + Replaces: same subject
 ELSE IF account_notification@v1 > .85 AND routine@v1 > .50
     → Filed + Stratum: Notifications
 '''

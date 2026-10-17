@@ -1,8 +1,10 @@
 //! `+ Replaces`: a daily reminder is one Find, not a week of them. The Find
 //! from the newest message of a series (one Mesh, one sender) stays open,
 //! the older one closes as Superseded, the ledger says so, and undo from
-//! Activity keeps it open for good. `+ Expires:` lets a Find nobody acted on lapse,
-//! counted from the message's date, with the same ledger and undo.
+//! Activity keeps it open for good. `+ Replaces: same subject` keys the
+//! series by the subject too, one per expiring domain. `+ Expires:` lets a
+//! Find nobody acted on lapse, counted from the message's date, with the
+//! same ledger and undo.
 
 use riddle_core::*;
 use riddle_store::repo;
@@ -349,4 +351,40 @@ async fn applying_a_replaces_rule_to_sales_already_in_spoil_supersedes_the_older
     assert_eq!(standing.len(), 1);
     assert_eq!(standing[0].id, MessageId::for_provider(&dig.id, "s3"));
     assert_eq!(spoil_list(&app, &dig, Some(true)).len(), 2);
+}
+
+/// A registrar's reminders run one per domain: the newest about a domain
+/// replaces the earlier ones about it and leaves another domain's alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_subject_series_keeps_one_find_per_domain() {
+    let (app, dig, _) = with_mesh(
+        "Mesh: Renewals\nPriority: 0\nROUTES\nIF subject CONTAINS \"expires in\" → Find: Do + Replaces: same subject",
+    )
+    .await;
+    let store = app.stores.dig(&dig.id).unwrap();
+    let notice = |pid: &str, subject: &str, hours_ago: i64| {
+        let mut m = reminder(&dig.id, pid, hours_ago);
+        m.subject = subject.into();
+        m
+    };
+    repo::messages::upsert(
+        &store,
+        &notice("a28", "nasghoul.com Expires in 28 days", 48),
+    )
+    .unwrap();
+    repo::messages::upsert(&store, &notice("b28", "iprm.net Expires in 28 days", 24)).unwrap();
+    app.sift_pass(&dig, 100, None).await.unwrap();
+    assert_eq!(series_finds(&app, FindStatus::Open).len(), 2);
+
+    repo::messages::upsert(
+        &store,
+        &notice("a14", "Re: nasghoul.com Expires in 14 days", 0),
+    )
+    .unwrap();
+    let report = app.sift_pass(&dig, 100, None).await.unwrap();
+    assert_eq!(report.finds_closed, 1);
+    assert_eq!(series_finds(&app, FindStatus::Open).len(), 2);
+    assert_eq!(find_for(&app, &dig, "a28").status, FindStatus::Superseded);
+    assert_eq!(find_for(&app, &dig, "b28").status, FindStatus::Open);
+    assert_eq!(find_for(&app, &dig, "a14").status, FindStatus::Open);
 }

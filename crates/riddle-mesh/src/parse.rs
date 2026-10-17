@@ -508,6 +508,17 @@ fn parse_output(text: &str, line: usize) -> Result<MeshOutput> {
             ("escalate", None) => out.escalate = true,
             ("notify", None) => out.notify = true,
             ("replaces", None) => out.replaces = true,
+            ("replaces", Some(t)) => {
+                if t.trim().eq_ignore_ascii_case("same subject") {
+                    out.replaces = true;
+                    out.replaces_scope = Some(riddle_core::SeriesScope::Subject);
+                } else {
+                    return Err(err(
+                        line,
+                        format!("Replaces is bare (the newest from the sender) or Replaces: same subject, not Replaces: {t}"),
+                    ));
+                }
+            }
             ("expires", t) => out.expires = Some(parse_expiry(t.unwrap_or(""), line)?),
             ("importance", Some(t)) => {
                 if out.importance.is_some() {
@@ -1048,6 +1059,36 @@ mod tests {
                 .contains("a newer one from the same sender replaces it"),
             "{}",
             m.routes[0].words
+        );
+    }
+
+    #[test]
+    fn replaces_same_subject_parses_formats_back_and_reads_as_a_sentence() {
+        let text = "Mesh: Renewals v1\n\nROUTES\n\nIF subject CONTAINS \"expires in\" → Find: Do + Replaces: same subject\n";
+        let m = parse(text).unwrap();
+        let o = &m.routes[0].output;
+        assert!(o.replaces);
+        assert_eq!(o.series_scope(), riddle_core::SeriesScope::Subject);
+        let formatted = crate::format::format(&m);
+        assert!(
+            formatted.contains("Find: Do + Replaces: same subject"),
+            "{formatted}"
+        );
+        assert_eq!(parse(&formatted).unwrap().routes[0].output, *o);
+        assert!(
+            m.routes[0]
+                .words
+                .contains("a newer one from the same sender on the same subject replaces it"),
+            "{}",
+            m.routes[0].words
+        );
+        let e =
+            parse("Mesh: X v1\n\nROUTES\n\nIF mailing_list → Find: Do + Replaces: same thread\n")
+                .unwrap_err();
+        assert!(
+            e.message.contains("Replaces: same subject"),
+            "{}",
+            e.message
         );
     }
 
