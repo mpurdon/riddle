@@ -11,7 +11,7 @@ use ts_rs::TS;
 /// What kind of organisation a sender is, judged once per domain from one
 /// of its messages, so a new vendor can be offered the list it belongs on
 /// before anyone has told Riddle about it (17 Oct 2026).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum SenderKind {
@@ -95,16 +95,28 @@ impl SenderKind {
 pub struct SenderKindVerdict {
     pub domain: String,
     pub kind: SenderKind,
-    /// The judge's probability for the kind it chose.
+    /// The judge's probability for the kind it chose; the lower of two
+    /// when two messages were judged.
     pub score: f64,
-    /// The message it was judged from.
+    /// The message it was judged from (the newest, when two were).
     pub message_id: MessageId,
     pub judged_at: DateTime<Utc>,
+    /// Whether every message judged said the same kind. A sender that
+    /// writes often is judged on two of its messages, since one message
+    /// from a mixed domain (google.com) says little about the rest; a
+    /// disagreement is kept as "unsure" and offers nothing.
+    #[serde(default = "agreed_default")]
+    pub agreed: bool,
+}
+
+fn agreed_default() -> bool {
+    true
 }
 
 impl SenderKindVerdict {
+    /// v2: two messages for a frequent sender, and `agreed`.
     pub fn key(domain: &str) -> String {
-        format!("sender_kind:v1:{}", domain.trim().to_ascii_lowercase())
+        format!("sender_kind:v2:{}", domain.trim().to_ascii_lowercase())
     }
 }
 

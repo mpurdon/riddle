@@ -31,6 +31,8 @@ pub const SENDERS_PER_PASS: usize = 8;
 const SENDER_WINDOW_DAYS: i64 = 120;
 /// Recent messages read for invoice scores, per sender.
 const RECENT_PER_SENDER: usize = 6;
+/// Messages in the window from which a sender is judged on two of them.
+const SECOND_SAMPLE_AT: u32 = 6;
 /// Free mailboxes send people's mail, not a vendor's; never judged.
 const FREE_MAILBOXES: [&str; 9] = [
     "gmail.com",
@@ -103,6 +105,7 @@ impl App {
                     &index,
                     &SenderKindVerdict::key(&domain),
                 )?
+                .filter(|v| v.agreed)
                 .map(|v| (v.kind, v.score));
                 let lists: Vec<String> = names
                     .iter()
@@ -148,49 +151,71 @@ impl App {
             if judged >= budget {
                 break;
             }
-            let Some(id) = repo::messages::ids_from_sender(&store, &row.sender)?
-                .into_iter()
-                .last()
-            else {
+            let ids = repo::messages::ids_from_sender(&store, &row.sender)?;
+            let Some(newest) = ids.last().cloned() else {
                 continue;
             };
-            let Some(message) = repo::messages::get(&store, &dig.id, &id)? else {
+            // A sender that writes often is judged on two messages, the
+            // newest and one from the middle: one message from a mixed
+            // domain says little about the rest.
+            let mut samples = vec![newest.clone()];
+            if row.messages >= SECOND_SAMPLE_AT && ids.len() >= 2 {
+                samples.push(ids[ids.len() / 2].clone());
+            }
+            let mut verdicts: Vec<(SenderKind, f64)> = Vec::new();
+            for id in &samples {
+                let Some(message) = repo::messages::get(&store, &dig.id, id)? else {
+                    continue;
+                };
+                let text: String = format!(
+                    "From: {} <{}>\nSubject: {}\n\n{}",
+                    message.from.name.clone().unwrap_or_default(),
+                    message.from.email,
+                    message.subject,
+                    message
+                        .body_text
+                        .clone()
+                        .unwrap_or_else(|| message.snippet.clone())
+                )
+                .chars()
+                .take(8_000)
+                .collect();
+                let answers = judge
+                    .evaluate(&JudgeState::new(text), std::slice::from_ref(&question))
+                    .await?;
+                if let Some(answer) = answers.into_iter().next() {
+                    let kind =
+                        SenderKind::parse(&answer.selected).unwrap_or(SenderKind::PersonOrOther);
+                    let score = answer
+                        .distribution
+                        .get(&answer.selected)
+                        .copied()
+                        .unwrap_or(0.0);
+                    verdicts.push((kind, score));
+                }
+            }
+            let Some(&(first_kind, _)) = verdicts.first() else {
                 continue;
             };
-            let text: String = format!(
-                "From: {} <{}>\nSubject: {}\n\n{}",
-                message.from.name.clone().unwrap_or_default(),
-                message.from.email,
-                message.subject,
-                message
-                    .body_text
-                    .clone()
-                    .unwrap_or_else(|| message.snippet.clone())
-            )
-            .chars()
-            .take(8_000)
-            .collect();
-            let answers = judge
-                .evaluate(&JudgeState::new(text), std::slice::from_ref(&question))
-                .await?;
-            let Some(answer) = answers.into_iter().next() else {
-                continue;
-            };
-            let kind = SenderKind::parse(&answer.selected).unwrap_or(SenderKind::PersonOrOther);
-            let score = answer
-                .distribution
-                .get(&answer.selected)
-                .copied()
-                .unwrap_or(0.0);
+            let agreed = verdicts.iter().all(|(k, _)| *k == first_kind);
+            let score = verdicts
+                .iter()
+                .map(|(_, s)| *s)
+                .fold(f64::INFINITY, f64::min);
             repo::kv::set_json(
                 &index,
                 &SenderKindVerdict::key(&row.domain),
                 &SenderKindVerdict {
                     domain: row.domain.clone(),
-                    kind,
-                    score,
-                    message_id: id,
+                    kind: if agreed {
+                        first_kind
+                    } else {
+                        SenderKind::PersonOrOther
+                    },
+                    score: if agreed { score } else { 0.0 },
+                    message_id: newest,
                     judged_at: self.services.clock.now(),
+                    agreed,
                 },
             )?;
             judged += 1;
