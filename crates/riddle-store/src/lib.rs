@@ -19,7 +19,7 @@ use riddle_errors::{ErrorKind, Result, RiddleError};
 use riddle_observability::{rdebug, rerror, rinfo, rwarn, Category};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 pub use rusqlite;
@@ -37,6 +37,37 @@ const FAULT_THRESHOLD: u32 = 3;
 
 type FaultHook = dyn Fn(Option<String>) + Send + Sync;
 
+/// How many `read` and `write` calls a store has answered since it opened.
+/// A pass reports the difference, so "the Sift path reads four rows per
+/// message" is a number in the log rather than a reading of the code.
+/// Relaxed counters: a cost gauge, not a ledger.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreStats {
+    pub reads: u64,
+    pub writes: u64,
+}
+
+impl StoreStats {
+    /// What happened between an earlier snapshot and this one.
+    pub fn since(self, earlier: StoreStats) -> StoreStats {
+        StoreStats {
+            reads: self.reads.saturating_sub(earlier.reads),
+            writes: self.writes.saturating_sub(earlier.writes),
+        }
+    }
+}
+
+impl std::ops::Add for StoreStats {
+    type Output = StoreStats;
+    fn add(self, o: StoreStats) -> StoreStats {
+        StoreStats {
+            reads: self.reads + o.reads,
+            writes: self.writes + o.writes,
+        }
+    }
+}
+
 pub struct Store {
     kind: StoreKind,
     path: Option<PathBuf>,
@@ -47,6 +78,8 @@ pub struct Store {
     consecutive_failures: AtomicU32,
     fault: Mutex<Option<String>>,
     on_fault: Mutex<Option<Arc<FaultHook>>>,
+    reads: AtomicU64,
+    writes: AtomicU64,
 }
 
 impl std::fmt::Debug for Store {
@@ -101,6 +134,8 @@ impl Store {
             consecutive_failures: AtomicU32::new(0),
             fault: Mutex::new(None),
             on_fault: Mutex::new(None),
+            reads: AtomicU64::new(0),
+            writes: AtomicU64::new(0),
         })
     }
 
@@ -119,6 +154,8 @@ impl Store {
             consecutive_failures: AtomicU32::new(0),
             fault: Mutex::new(None),
             on_fault: Mutex::new(None),
+            reads: AtomicU64::new(0),
+            writes: AtomicU64::new(0),
         })
     }
 
@@ -127,6 +164,14 @@ impl Store {
     }
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
+    }
+
+    /// Reads and writes answered since the store opened; cheap to call.
+    pub fn stats(&self) -> StoreStats {
+        StoreStats {
+            reads: self.reads.load(Ordering::Relaxed),
+            writes: self.writes.load(Ordering::Relaxed),
+        }
     }
 
     /// Size on disk including WAL, for the Developer pane's storage row.
@@ -161,6 +206,7 @@ impl Store {
 
     /// Run a read against a pooled reader (or the shared connection in memory).
     pub fn read<T>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T> {
+        self.reads.fetch_add(1, Ordering::Relaxed);
         match &self.readers {
             Some(pool) => {
                 let conn = pool.get().map_err(|e| RiddleError::store(e.to_string()))?;
@@ -179,6 +225,7 @@ impl Store {
     pub fn write<T>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T> {
         let caller = std::panic::Location::caller();
         let site = format!("{}:{}", short_file(caller.file()), caller.line());
+        self.writes.fetch_add(1, Ordering::Relaxed);
         let mut conn = self.writer.lock();
         let result = (|| {
             let tx = conn.transaction()?;
@@ -294,6 +341,32 @@ mod tests {
         assert_eq!(seen.lock().len(), 1);
         s.clear_fault();
         assert!(s.fault().is_none());
+    }
+
+    #[test]
+    fn a_store_counts_its_reads_and_writes_and_a_snapshot_gives_the_difference() {
+        let s = Store::in_memory(StoreKind::Index).unwrap();
+        let before = s.stats();
+        s.write(|c| {
+            c.execute(
+                "INSERT INTO kv (key, value, updated_at) VALUES ('a','b',0)",
+                [],
+            )
+        })
+        .unwrap();
+        let _: String = s
+            .read(|c| c.query_row("SELECT value FROM kv WHERE key='a'", [], |r| r.get(0)))
+            .unwrap();
+        let _: String = s
+            .read(|c| c.query_row("SELECT value FROM kv WHERE key='a'", [], |r| r.get(0)))
+            .unwrap();
+        assert_eq!(
+            s.stats().since(before),
+            StoreStats {
+                reads: 2,
+                writes: 1
+            }
+        );
     }
 
     #[test]

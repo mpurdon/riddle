@@ -104,6 +104,7 @@ impl SettingsStore {
     /// settings (presence flags refreshed).
     pub fn save(&self, mut next: Settings) -> Result<Settings> {
         let _guard = self.save_lock.lock();
+        next.reconcile_level();
         next.validate()?;
         next.schema_version = SETTINGS_SCHEMA_VERSION;
         let text = next.to_toml_string()?;
@@ -123,6 +124,7 @@ impl SettingsStore {
     /// person's judge and model settings on disk with the test doubles.
     pub fn override_in_memory(&self, mut next: Settings) -> Result<Settings> {
         let _guard = self.save_lock.lock();
+        next.reconcile_level();
         next.validate()?;
         next.schema_version = SETTINGS_SCHEMA_VERSION;
         apply_presence(&mut next, self.secrets.as_ref());
@@ -198,12 +200,21 @@ pub fn load_settings(path: &Path, dev: bool) -> Result<Settings> {
 /// Merge `raw` over `defaults` and deserialize.
 pub fn parse_settings(raw: &str, defaults: Settings) -> Result<Settings> {
     let file: toml::Value = toml::from_str(raw).map_err(|e| RiddleError::invalid(e.to_string()))?;
+    // A file from before the level existed says `developerMode = true` and
+    // nothing about `uiLevel`; it loads as Developer so the pages the person
+    // had stay in the rail. Once the file names a level, the level wins.
+    let flag_without_level = file.get("uiLevel").is_none()
+        && file.get("developerMode").and_then(|v| v.as_bool()) == Some(true);
     let mut base =
         toml::Value::try_from(&defaults).map_err(|e| RiddleError::internal(e.to_string()))?;
     merge(&mut base, file);
-    let settings: Settings = base
+    let mut settings: Settings = base
         .try_into()
         .map_err(|e: toml::de::Error| RiddleError::invalid(e.to_string()))?;
+    if flag_without_level {
+        settings.ui_level = riddle_core::UiLevel::Developer;
+    }
+    settings.reconcile_level();
     if settings.schema_version > SETTINGS_SCHEMA_VERSION {
         rwarn!(
             Category::App,
@@ -256,7 +267,7 @@ mod tests {
     use super::*;
     use crate::secrets::{FixedPresence, NoSecrets};
     use crate::JudgeProvider;
-    use riddle_core::{Autonomy, RecordingSink};
+    use riddle_core::{Autonomy, RecordingSink, UiLevel};
 
     fn open(dir: &Path, dev: bool) -> SettingsStore {
         SettingsStore::open(
@@ -274,16 +285,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = open(dir.path(), true);
         let mut on_disk = store.settings();
-        on_disk.developer_mode = false;
+        on_disk.ui_level = UiLevel::Everything;
         store.save(on_disk).unwrap();
         let before = std::fs::read_to_string(store.config_path()).unwrap();
         let mut scripted = store.settings();
         scripted.judge.provider = JudgeProvider::Scripted;
-        scripted.developer_mode = true;
+        scripted.ui_level = UiLevel::Developer;
+        // Subscribe before the override: a watch with no receiver keeps its
+        // old value on send, which is what let this assertion pass vacuously
+        // while the dev defaults carried the flag.
+        let rx = store.subscribe();
         let effective = store.override_in_memory(scripted).unwrap();
         assert_eq!(effective.judge.provider, JudgeProvider::Scripted);
         assert_eq!(store.settings().judge.provider, JudgeProvider::Scripted);
-        assert!(store.subscribe().borrow().developer_mode);
+        assert!(rx.borrow().developer_mode, "Developer derives the flag");
+        assert_eq!(rx.borrow().ui_level, UiLevel::Developer);
         assert_eq!(
             std::fs::read_to_string(store.config_path()).unwrap(),
             before,
@@ -316,6 +332,11 @@ mod tests {
         let raw = "developerMode = true\n[budgets]\ndailyLlmUsd = 2.5\n";
         let dev = parse_settings(raw, Settings::dev_defaults()).unwrap();
         assert!(dev.developer_mode);
+        assert_eq!(
+            dev.ui_level,
+            UiLevel::Developer,
+            "a file from before the level keeps its Developer pages"
+        );
         assert_eq!(dev.budgets.daily_llm_usd, 2.5);
         assert_eq!(dev.budgets.daily_judge_usd, 1.0);
         assert_eq!(dev.autonomy.default, Autonomy::Observe);
@@ -328,6 +349,41 @@ mod tests {
         let raw = "futureFlag = true\n[judge]\nnewKnob = 3\n";
         let s = parse_settings(raw, Settings::prod_defaults()).unwrap();
         assert_eq!(s.judge.model, "jev-1.13.0");
+    }
+
+    #[test]
+    fn a_file_without_a_level_takes_the_profile_default_and_a_named_level_wins_over_the_flag() {
+        let none = parse_settings("", Settings::prod_defaults()).unwrap();
+        assert_eq!(none.ui_level, UiLevel::Essentials);
+        assert!(!none.developer_mode);
+        let none_dev = parse_settings("", Settings::dev_defaults()).unwrap();
+        assert_eq!(none_dev.ui_level, UiLevel::Everything);
+        assert!(!none_dev.developer_mode);
+        // The file names both and they disagree: the level is the switch.
+        let raw = "developerMode = true\nuiLevel = \"everything\"\n";
+        let s = parse_settings(raw, Settings::prod_defaults()).unwrap();
+        assert_eq!(s.ui_level, UiLevel::Everything);
+        assert!(!s.developer_mode);
+        let raw = "developerMode = false\nuiLevel = \"developer\"\n";
+        let s = parse_settings(raw, Settings::prod_defaults()).unwrap();
+        assert!(s.developer_mode);
+    }
+
+    #[test]
+    fn a_save_derives_the_flag_from_the_level() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(dir.path(), false);
+        let mut next = store.settings();
+        next.ui_level = UiLevel::Developer;
+        next.developer_mode = false;
+        let saved = store.save(next).unwrap();
+        assert!(saved.developer_mode);
+        let text = std::fs::read_to_string(store.config_path()).unwrap();
+        assert!(text.contains("uiLevel = \"developer\""), "{text}");
+        assert!(text.contains("developerMode = true"), "{text}");
+        let mut back = store.settings();
+        back.ui_level = UiLevel::Essentials;
+        assert!(!store.save(back).unwrap().developer_mode);
     }
 
     #[test]

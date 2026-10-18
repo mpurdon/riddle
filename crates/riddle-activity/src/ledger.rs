@@ -11,7 +11,7 @@ use riddle_core::{
     RiddleEvent, TraceId, UndoInfo,
 };
 use riddle_errors::Result;
-use riddle_observability::{rdebug, rerror, Category};
+use riddle_observability::{rdebug, Category};
 use riddle_store::{repo, Store};
 use serde_json::Value;
 use std::sync::Arc;
@@ -165,10 +165,11 @@ impl Ledger {
         match self.append(entry) {
             Ok(a) => Some(a),
             Err(e) => {
-                rerror!(
+                riddle_observability::swallowed!(
                     Category::Actions,
-                    "could not record activity: {}",
-                    e.message
+                    "activity_append",
+                    e,
+                    "could not record activity"
                 );
                 None
             }

@@ -9,6 +9,7 @@ import { exportDiagnostics, logCategories, probeJudge, probeLlm, probeProvider, 
 import { cx, fmtBytes, fmtClockMs, fmtDuration, safeJson } from '@/lib/format'
 import { inFlightCalls, isTauri, log } from '@/lib/ipc'
 import { useDevInfo, useDigs, useSettings } from '@/lib/queries'
+import { serviceHealthLine } from '@/lib/selectors'
 import { toast, useUi } from '@/lib/stores'
 import type { ProbeResult } from '@/lib/types'
 import { useAction } from '@/lib/useAction'
@@ -121,7 +122,12 @@ function Probes() {
     return (
       <div key={key} className="flex items-center gap-2 text-xs">
         <Button size="sm" busy={r === 'running'} onClick={() => probe(key, fn)}>{label}</Button>
-        {r && r !== 'running' ? <span className={r.ok ? 'text-moss' : 'text-rust'}>{r.ok ? 'OK' : 'FAIL'} {r.latencyMs}ms · {r.message}</span> : null}
+        {r && r !== 'running' ? (
+          <span className={r.ok ? 'text-moss' : 'text-rust'}>
+            {r.ok ? 'OK' : 'FAIL'} {r.latencyMs}ms · {r.message}
+            {r.health ? <span className="text-ink-2"> · {serviceHealthLine(key === 'llm' ? 'LLM' : 'Judge', r.health)}</span> : null}
+          </span>
+        ) : null}
       </div>
     )
   }
@@ -146,17 +152,19 @@ function Diagnostics() {
           size="sm"
           icon={<Copy />}
           onClick={async () => {
-            const t = await exportDiagnostics()
+            // One JSON document: runtime, Task Centre, judge and LLM health,
+            // every account's status, settings, swallowed failures, warnings.
+            const t = JSON.stringify(await exportDiagnostics(), null, 2)
             setText(t)
             try {
               await navigator.clipboard.writeText(t)
-              toast('Diagnostics copied', { body: 'Redacted: no subjects, bodies, addresses or tokens.', kind: 'success' })
+              toast('Diagnostics copied', { body: 'Redacted: no subjects, bodies, addresses, names, tokens or keys.', kind: 'success' })
             } catch {
-              toast('Diagnostics ready', { body: 'Clipboard refused; the block is shown below.', kind: 'warn' })
+              toast('Diagnostics ready', { body: 'Clipboard refused; the bundle is shown below.', kind: 'warn' })
             }
           }}
         >
-          Copy diagnostics block
+          Copy diagnostics bundle
         </Button>
       </div>
       {text ? <pre className="mt-2 max-h-48 overflow-auto rounded border border-line bg-sand p-2 mono text-2xs selectable">{text}</pre> : null}

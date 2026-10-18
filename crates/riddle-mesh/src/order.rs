@@ -112,6 +112,7 @@ mod tests {
             shadow_started_at: None,
             created_at: chrono::Utc::now(),
             disabled: false,
+            history_days: None,
             mailbox: None,
         };
         let store = stores.dig(&dig.id).unwrap();

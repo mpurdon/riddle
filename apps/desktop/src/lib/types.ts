@@ -5,7 +5,9 @@
  */
 import type { BuildStamp } from '@/bindings/BuildStamp'
 import type { FindType } from '@/bindings/FindType'
+import type { ServiceHealth } from '@/bindings/ServiceHealth'
 import type { SimulationReport } from '@/bindings/SimulationReport'
+import type { TaskCentre } from '@/bindings/TaskCentre'
 
 export type DispositionFilter = 'find' | 'filed' | 'spoil' | 'contamination' | 'unresolved'
 
@@ -82,6 +84,15 @@ export interface StoreInfo {
   sizeBytes: number
 }
 
+/** One row of the swallowed-failure table: a bookkeeping site that logged and dropped a failure. */
+export interface SwallowedFailure {
+  category: string
+  site: string
+  count: number
+  lastAt: string
+  lastError: string
+}
+
 export interface DevInfo {
   build: BuildStamp
   dev: boolean
@@ -95,6 +106,7 @@ export interface DevInfo {
   stores: StoreInfo[]
   storeFault: string | null
   logLevel: string
+  swallowed: SwallowedFailure[]
 }
 
 export interface LogLine {
@@ -109,6 +121,24 @@ export interface ProbeResult {
   ok: boolean
   latencyMs: number
   message: string
+  /** The judge and LLM probes add the client's health after the call. */
+  health?: ServiceHealth | null
+}
+
+/** The redacted diagnostics bundle (`export_diagnostics`): one JSON document for an issue. */
+export interface DiagnosticsBundle {
+  exportedAt: string
+  redaction: string
+  runtime: DevInfo
+  taskCentre: TaskCentre
+  traceStats: TraceStats
+  judge: { identity: unknown; health: ServiceHealth } | null
+  llm: { identity: unknown; health: ServiceHealth } | null
+  digs: unknown[]
+  actions: number
+  settings: unknown
+  swallowed: SwallowedFailure[]
+  warnings: LogLine[]
 }
 
 export interface DirectorSendResult {

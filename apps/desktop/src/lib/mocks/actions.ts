@@ -1076,6 +1076,8 @@ function execute(state: MockState, action: string, args: Args): Exec {
     case 'save_settings': {
       const before = state.settings
       state.settings = { ...state.settings, ...(args.settings as object) }
+      // As the backend does: the level is the one switch and the flag follows it.
+      state.settings.developerMode = state.settings.uiLevel === 'developer'
       emitMock({ type: 'settings_changed' })
       return { result: state.settings, summary: 'You changed settings', affected: [], undo: { state: 'undoable', restore: { kind: 'settings', settings: before }, label: 'Restore the previous settings' } }
     }

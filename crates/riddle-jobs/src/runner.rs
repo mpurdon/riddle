@@ -563,11 +563,12 @@ impl Runner {
             }
         };
         if let Err(e) = finished {
-            rerror!(
+            riddle_observability::swallowed!(
                 Category::Jobs,
-                "could not record outcome for job {}: {}",
-                id,
-                e.message
+                "job_outcome",
+                e,
+                "could not record outcome for job {}",
+                id
             );
         }
         if let Some(entry) = self.running.lock().remove(&id) {

@@ -49,6 +49,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: 'go_settings', keys: 'g ,', label: 'Go to Settings', scope: 'global' },
   { id: 'settings', keys: 'mod+,', label: 'Open Settings', scope: 'global' },
   { id: 'palette', keys: 'mod+k', label: 'Command palette: every command here, with its key', scope: 'global' },
+  { id: 'toggle_level', keys: 'g e', label: 'Show everything, or back to the essentials', scope: 'global' },
   { id: 'undo', keys: 'u', label: 'Undo the last undoable action', scope: 'global' },
 
   { id: 'next', keys: 'j', also: 'arrowdown', label: 'Next row', scope: 'list' },

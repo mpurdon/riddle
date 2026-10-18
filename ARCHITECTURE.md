@@ -55,6 +55,8 @@ Examples:
 
 Digs may operate independently or participate in a unified Riddle.
 
+A Dig's first sync covers the last 90 days; how much of the history behind that it fetches afterwards is the Dig's `history_days` setting (default unlimited, the whole mailbox; set through `update_dig`), run as a backfill that never holds up "Caught up" (53).
+
 A Dig can be disabled without being removed (`set_dig_enabled`). A disabled Dig is not synced, sifted or projected, and it is left out of everything that spans Digs: lists, counts, Finds (a Find is hidden when every source is on a disabled Dig), notifications, rule previews and apply-to-history, Temporal Sift and the Director. Its store, decisions and sign-in are kept, and enabling it resumes from where it stopped. Work reads `list_enabled` / `App::list_digs`; only account management reads every Dig. Spend already recorded still counts in usage. A test account beside a real one was the case: removing it was the only way to stop it cluttering Finds and rule previews.
 
 ## Dig Group
@@ -100,6 +102,8 @@ Its job is to determine:
 - what should happen next
 
 Most mail should pass through Sift without user involvement.
+
+Sift works newest first and, within that, takes messages whose bodies have landed before those still waiting for one (53): a message is judged once, and judged on its snippet it stays judged on its snippet. During a first sync it runs beside the listing, so the newest mail is sorted within minutes of connecting an account; backfilled history joins the backlog behind the current mail.
 
 ## Mesh
 
@@ -584,7 +588,8 @@ Synced          cursor current
 Catching up     backlog being fetched
 Sifting         N remaining
 Projection      N decisions not yet written to Gmail
-Degraded        provider, judge or LLM unavailable; nothing hidden
+Degraded        provider, judge or LLM unavailable, or the judge paused by its
+                breaker (the reason names the retry time); nothing hidden
 ```
 
 ---
@@ -2218,6 +2223,8 @@ Redaction is a hard rule: logs carry identifiers only. No subjects, bodies, addr
 
 Logging never fails the work it describes. A failure to open the log directory does not stop Sift.
 
+Bookkeeping that fails is swallowed by design (an Activity row, a usage row, a Signal cache write, a job's progress row), and a swallowed failure is counted as well as logged: `swallowed!(category, site, error)` writes the warn line and increments a table keyed by category and site, holding the count, the last time and the last error's text (identifiers only, as every `RiddleError` is). `dev_info`, the Developer Failures pane and the diagnostics export read the table, so a usage row failing on every call reads as a count, not as one warn line among five thousand. The Sift pass log line carries the pass's cost: wall time, the judge and LLM time its traces carry, and the store reads and writes it made.
+
 ---
 
 # 49. Provenance Is Data
@@ -2386,11 +2393,13 @@ Sift
 
 Sync state is maintained per Dig.
 
-The poller is a `tokio::select!` on a timer and a `Notify` trigger, with exponential backoff, slowdown under rate limit, and parking on auth failure. A credential-change subscriber wakes it on sign-in.
+The loop that runs sync is the job runner (55): a 45-second tick queues an incremental sync per Dig, `refresh_now` and Demo Mode's injection queue one at interactive priority, and the runner's back-off, rate-limit pause and parking on an expired sign-in apply to sync as to every job. The crate's own poll loop had no caller once the runner took over and was removed.
 
 When the cursor has expired, sync performs a full resync: list messages newest first, reconcile labels against the expected projection (15), and report differences.
 
-Initial sync fetches metadata first and bodies lazily, newest first, and shows its progress in the Task Centre because it takes hours for a large mailbox.
+Initial sync lists the window (90 days) newest first, metadata first and bodies lazily, in bounded runs: a run lists ten pages (about a thousand messages, about a minute on Gmail), checkpoints its page token in the Dig's sync state and yields, so the queue runs a Sift of what has landed (Judge class) beside the next run (Provider class) and bodies arrive 200 a run, newest first. A restart resumes from the token; the Task Centre shows one first-sync job with done/total from the provider's estimate. An incremental sync that finds the first listing unfinished queues the first-sync job and leaves the listing to it. While the Dig's body fetch is behind its listing (`bodies_pending` in its sync state, set by a listing and cleared when nothing is left to fetch), Sift takes messages whose bodies have landed first, because a message judged on its snippet is judged for good; a body-less message is then taken only when it is older than the body window. Mail that reaches the store some other way than a sync is judged on what it has. The first sync's job stays alive, yielding, while bodies are still landing, so a large mailbox's bodies arrive at the Provider class's pace rather than the poll's. People are refreshed once per run for the addresses the run touched and rebuilt whole when a listing finishes; a page of label changes is one read and one write; the label catalogue is rewritten only when its listing changed.
+
+Caught up means the window is listed and its backlog sifted. The history behind the window is a separate job at Backfill priority (`history_backfill`, "Fetching older mail: through March 2024"): the same bounded, resumable runs listing older than the window's start, each page fetched with its bodies (older mail is judged once, with what it has), down to the mailbox start or the Dig's `history_days` setting (default unlimited; the floor is fixed on the backfill's first run because a page token belongs to one query). Backfilled mail is sifted like any other, newest first, after the current backlog. A user whose recent mail is sorted is caught up while the history fills: the backfill never counts as catching up in the Task Centre or the Summary, which may show it as a secondary line. A wake's catch-up re-arms a backfill that failed, from its token.
 
 ---
 
@@ -2488,7 +2497,7 @@ Operations:
 - the model catalog is imported from a shared settings file or listed live; no model id is hard-coded; the judge model is pinned to an exact version
 - model tiers (judge, escalation, Director, verification) record the evidence for their selection in code
 - prompt caching with a rolling checkpoint and a cache-free retry for Director and Expedition calls
-- a circuit breaker per provider (Gmail, judge, LLM) with a probe slot that cannot wedge; retrying a single call is the right answer to a blip and the wrong answer to an outage
+- a circuit breaker per provider (Gmail, judge, LLM) with a probe slot that cannot wedge; retrying a single call is the right answer to a blip and the wrong answer to an outage. The judge and the LLM client answer `health()` without making a call: the breaker (closed, open until a time, half-open), the last successful call and the last failure with its error kind. The Task Centre carries both, a Dig with mail waiting under an open judge breaker is Degraded with the retry time in its reason, and the probes and the diagnostics export say the same
 - a usage ledger with task-local attribution to Sift, Director, Expedition or Simulation; anything that cannot be priced is reported as unpriced, never as free; a usage row never fails the work
 - the model provider credential is a separate principal from the mailbox credential
 - the Director's system prompt is a versioned, runtime-editable file with placeholders, like a Signal
@@ -2788,8 +2797,14 @@ Storage      per-Dig store paths and sizes, cache and log directories,
              reveal in Finder, open config, clear caches
 Logs         live tail; filter by category, level and text; payload expansion
 IPC          in-flight commands with elapsed time
-Diagnostics  copy a redacted diagnostics block; export a redacted bundle
-Probes       run the Gmail and judge probes outside the pipeline
+Diagnostics  copy the redacted bundle: one JSON document with the runtime,
+             the Task Centre, trace statistics, the judge and LLM identity
+             and health, every account's status and reason, the settings
+             with the OAuth client reduced to present-or-absent, the
+             swallowed-failure table and the warning tail; never a key,
+             a token, an address, a subject or a body
+Probes       run the Gmail and judge probes outside the pipeline; each
+             answers with the client's health after the call
 ```
 
 Developer Mode grants no authority (91). The inspectors from 68 onward are phased after the product surfaces in 5 and 55.

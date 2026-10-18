@@ -307,6 +307,12 @@ pub trait Llm: Send + Sync {
 
     fn identity(&self) -> LlmIdentity;
 
+    /// The breaker and the last calls, without making one. The doubles keep
+    /// neither and answer `Unknown`.
+    fn health(&self) -> riddle_core::ServiceHealth {
+        riddle_core::ServiceHealth::default()
+    }
+
     /// A cheap liveness probe for the Developer pane.
     async fn probe(&self) -> Result<u64> {
         let req = LlmRequest::new(

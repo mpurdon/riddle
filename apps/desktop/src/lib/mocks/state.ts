@@ -24,6 +24,7 @@ import type { PendingAction } from '@/bindings/PendingAction'
 import type { Signal } from '@/bindings/Signal'
 import type { Stratum } from '@/bindings/Stratum'
 import type { UserProfile } from '@/bindings/UserProfile'
+import type { ServiceHealth } from '@/bindings/ServiceHealth'
 import type { DevInfo, LogLine, Settings } from '../types'
 import {
   buildActivity,
@@ -79,6 +80,9 @@ export interface MockState {
   drafts: Draft[]
   settings: Settings
   devInfo: DevInfo
+  /** The judge's and the LLM client's breaker and last calls, as the Task Centre carries them. */
+  judgeHealth: ServiceHealth | null
+  llmHealth: ServiceHealth | null
   logs: LogLine[]
   pending: Map<string, PendingAction>
   /** Agree/Disagree marks on Shadow proposals, message id → 'agreed' | 'disagreed'. */
@@ -155,6 +159,8 @@ export function buildState(): MockState {
     drafts: buildDrafts(),
     settings: buildSettings(),
     devInfo: buildDevInfo(),
+    judgeHealth: { breaker: { state: 'closed', consecutive_failures: 0 }, lastSuccessAt: new Date(Date.now() - 120_000).toISOString(), lastFailureAt: null, lastFailureKind: null },
+    llmHealth: { breaker: { state: 'closed', consecutive_failures: 0 }, lastSuccessAt: new Date(Date.now() - 3_600_000).toISOString(), lastFailureAt: null, lastFailureKind: null },
     logs: buildLogs(),
     pending: new Map(),
     shadowReviews: new Map(),

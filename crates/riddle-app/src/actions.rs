@@ -1868,11 +1868,12 @@ impl Action for ConnectGmail {
                             repo::sync_state::SYNC_FAILURE,
                         ] {
                             if let Err(e) = repo::sync_state::clear(&store, key) {
-                                rwarn!(
+                                riddle_observability::swallowed!(
                                     Category::Sync,
-                                    "sync failure of {} not cleared: {}",
-                                    id,
-                                    e.kind.as_str()
+                                    "sign_in_clears_sync_failure",
+                                    e,
+                                    "sync failure of {} not cleared",
+                                    id
                                 );
                             }
                         }
@@ -2033,6 +2034,7 @@ async fn finish_gmail_connect(
             shadow_started_at: None,
             created_at: chrono::Utc::now(),
             disabled: false,
+            history_days: None,
             mailbox: None,
         },
         ConnectTarget::Existing(dig) => dig,

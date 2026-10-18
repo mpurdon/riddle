@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { GLOSSARY } from './glossary'
+import { GLOSSARY, glossaryFor } from './glossary'
 
 describe('the glossary', () => {
   it('defines every noun the rail and the pages use', () => {
@@ -18,5 +18,16 @@ describe('the glossary', () => {
   it('marks Signal as a developer term and says each account is its own Dig', () => {
     expect(GLOSSARY.find((g) => g.term === 'Signal')!.developer).toBe(true)
     expect(GLOSSARY.find((g) => g.term === 'Account')!.meaning).toMatch(/Each account is its own Dig/)
+  })
+
+  it('shows at each level only the words met there: no Signal or Expedition at Essentials, no Signal at Everything', () => {
+    const essentials = glossaryFor('essentials').map((g) => g.term)
+    expect(essentials).not.toContain('Signal')
+    expect(essentials).not.toContain('Expedition')
+    for (const t of ['Find', 'Unresolved', 'Spoil', 'Contamination', 'Never Hidden', 'Activity', 'Director']) expect(essentials, t).toContain(t)
+    const everything = glossaryFor('everything').map((g) => g.term)
+    expect(everything).toContain('Expedition')
+    expect(everything).not.toContain('Signal')
+    expect(glossaryFor('developer').length).toBe(GLOSSARY.length)
   })
 })

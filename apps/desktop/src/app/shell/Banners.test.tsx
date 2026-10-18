@@ -52,3 +52,25 @@ describe('the sync banner', () => {
     expect(await screen.findByRole('button', { name: 'Retry now' })).toBeTruthy()
   })
 })
+
+describe('the degraded banner', () => {
+  it('says why the account is degraded and when the judge last answered', async () => {
+    resetMockState()
+    const s = mockState()
+    const reason = 'judge paused after repeated failures, retrying at 14:35; nothing hidden'
+    s.digs[0].status = { state: 'degraded', reason }
+    s.judgeHealth = {
+      breaker: { state: 'open', until: new Date(Date.now() + 300_000).toISOString() },
+      lastSuccessAt: new Date(Date.now() - 600_000).toISOString(),
+      lastFailureAt: new Date(Date.now() - 60_000).toISOString(),
+      lastFailureKind: 'judge_unavailable',
+    }
+    registerMocks()
+    show()
+    const banner = (await screen.findAllByRole('status')).find((el) => el.textContent?.includes('is degraded'))
+    expect(banner?.textContent).toContain(`${s.digs[0].name} is degraded: ${reason}.`)
+    expect(banner?.textContent).toContain('Last judge call')
+    expect(banner?.textContent).toContain('(failed: judge_unavailable)')
+    expect(screen.getByRole('button', { name: 'Open Developer Mode' })).toBeTruthy()
+  })
+})

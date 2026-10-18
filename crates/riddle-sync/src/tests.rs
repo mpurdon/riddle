@@ -1,5 +1,7 @@
-use crate::engine::{CancelFlag, SyncEngine, SyncKind, SyncOptions, SyncPhase, SyncProgress};
-use crate::poller::{run_poller, PollerConfig, PollerHooks};
+use crate::engine::{
+    CancelFlag, SyncEngine, SyncKind, SyncOptions, SyncPhase, SyncProgress, BACKFILL_DONE,
+    BACKFILL_OLDEST, BODIES_PENDING, INITIAL_LISTED, INITIAL_TOTAL,
+};
 use riddle_core::*;
 use riddle_mail::{FixtureProvider, FixtureSpec, MailProvider, ProviderRegistry};
 use riddle_projection::{enqueue_classification, OutboxProcessor, SPOIL_LABEL};
@@ -15,7 +17,22 @@ struct H {
     registry: Arc<ProviderRegistry>,
 }
 
+fn options() -> SyncOptions {
+    SyncOptions {
+        page_size: 25,
+        window_days: Some(90),
+        body_batch: 20,
+        ..Default::default()
+    }
+}
+
 fn harness(count: u32) -> H {
+    harness_with(count, 60, None, options())
+}
+
+/// A fixture mailbox of `count` messages over `days` days, a Dig with the
+/// given `history_days`, and an engine with `options`.
+fn harness_with(count: u32, days: u32, history_days: Option<u32>, options: SyncOptions) -> H {
     let stores = Arc::new(Stores::in_memory().unwrap());
     let dig = Dig {
         id: DigId::from("dig-s"),
@@ -29,6 +46,7 @@ fn harness(count: u32) -> H {
         shadow_started_at: None,
         created_at: chrono::Utc::now(),
         disabled: false,
+        history_days,
         mailbox: None,
     };
     repo::digs::upsert(&stores.index(), &dig).unwrap();
@@ -46,6 +64,7 @@ fn harness(count: u32) -> H {
         FixtureSpec {
             count,
             seed: 21,
+            days,
             ..Default::default()
         },
     ));
@@ -53,14 +72,8 @@ fn harness(count: u32) -> H {
     registry.insert_fixture(dig.id.clone(), fixture.clone());
     let events = Arc::new(RecordingSink::default());
     let engine = Arc::new(
-        SyncEngine::new(dig.clone(), fixture.clone(), stores.clone(), events.clone()).with_options(
-            SyncOptions {
-                page_size: 25,
-                window_days: Some(90),
-                body_batch: 20,
-                ..Default::default()
-            },
-        ),
+        SyncEngine::new(dig.clone(), fixture.clone(), stores.clone(), events.clone())
+            .with_options(options),
     );
     H {
         stores,
@@ -69,6 +82,31 @@ fn harness(count: u32) -> H {
         engine,
         events,
         registry,
+    }
+}
+
+impl H {
+    /// A new engine over the same stores and provider: what a restart makes.
+    fn restarted_engine(&self) -> Arc<SyncEngine> {
+        Arc::new(
+            SyncEngine::new(
+                self.dig.clone(),
+                self.fixture.clone(),
+                self.stores.clone(),
+                self.events.clone(),
+            )
+            .with_options(self.engine.options().clone()),
+        )
+    }
+
+    /// The fixture's listed messages (not spam) dated on or after `since`.
+    fn listed_since(&self, since: Option<chrono::DateTime<chrono::Utc>>) -> u64 {
+        self.fixture
+            .snapshot()
+            .iter()
+            .filter(|m| !m.labels.iter().any(|l| l == "SPAM"))
+            .filter(|m| since.is_none_or(|s| m.date >= s))
+            .count() as u64
     }
 }
 
@@ -460,68 +498,416 @@ async fn an_expired_cursor_triggers_a_full_resync_that_reports_differences_witho
 }
 
 #[tokio::test]
-async fn the_poller_syncs_on_a_trigger_reports_status_and_stops_when_cancelled() {
-    let h = harness(40);
-    let trigger = Arc::new(tokio::sync::Notify::new());
+async fn the_initial_sync_lists_pages_per_run_and_a_restarted_engine_resumes_from_its_token() {
+    let h = harness_with(
+        150,
+        60,
+        None,
+        SyncOptions {
+            pages_per_run: 2,
+            ..options()
+        },
+    );
     let cancel = CancelFlag::new();
-    let reports = Arc::new(Mutex::new(0u32));
-    let statuses = Arc::new(Mutex::new(Vec::new()));
-    let (r2, s2) = (reports.clone(), statuses.clone());
-    let hooks = PollerHooks {
-        on_report: Some(Box::new(move |_| *r2.lock().unwrap() += 1)),
-        on_status: Some(Box::new(move |s| s2.lock().unwrap().push(s))),
-        ..Default::default()
-    };
-    let config = PollerConfig {
-        interval: std::time::Duration::from_secs(3600),
-        bodies_per_cycle: 500,
-        ..Default::default()
-    };
-    let handle = tokio::spawn(run_poller(
-        h.engine.clone(),
-        trigger.clone(),
-        cancel.clone(),
-        config,
-        hooks,
-    ));
-    // The first pass runs on start; then a trigger runs another.
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while *reports.lock().unwrap() < 1 {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("first pass");
-    h.fixture.inject("custom", None, None, None).unwrap();
-    trigger.notify_one();
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while *reports.lock().unwrap() < 2 {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("triggered pass");
-    cancel.cancel();
-    tokio::time::timeout(std::time::Duration::from_secs(5), handle)
-        .await
-        .expect("poller exits")
-        .unwrap();
+    let expected = h.listed_since(None);
     let store = h.stores.dig(&h.dig.id).unwrap();
-    assert!(repo::messages::count(&store).unwrap() >= 40);
-    assert!(statuses
-        .lock()
-        .unwrap()
+    // Two pages of twenty-five, then the run ends with its token kept.
+    let first = h
+        .engine
+        .sync_once(&mut no_progress(), &cancel, &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!(first.kind, SyncKind::Initial);
+    assert!(!first.complete);
+    assert_eq!((first.added, first.listed), (50, 50));
+    assert_eq!(first.total, Some(expected), "the provider's estimate");
+    assert!(!h.engine.initial_sync_done().unwrap());
+    assert_eq!(
+        repo::sync_state::get(&store, INITIAL_LISTED)
+            .unwrap()
+            .as_deref(),
+        Some("50")
+    );
+    assert_eq!(
+        repo::sync_state::get(&store, INITIAL_TOTAL)
+            .unwrap()
+            .as_deref(),
+        Some(expected.to_string().as_str())
+    );
+    // A restart: a new engine over the same stores goes on from the token.
+    let second = h
+        .restarted_engine()
+        .sync_once(&mut no_progress(), &cancel, &mut |_| {})
+        .await
+        .unwrap();
+    assert!(!second.complete);
+    assert_eq!((second.added, second.listed), (50, 100));
+    let third = h
+        .restarted_engine()
+        .sync_once(&mut no_progress(), &cancel, &mut |_| {})
+        .await
+        .unwrap();
+    assert!(third.complete);
+    assert_eq!(third.listed, expected);
+    assert_eq!(first.added + second.added + third.added, expected);
+    assert_eq!(repo::messages::count(&store).unwrap(), expected);
+    assert_eq!(h.fixture.call_count("list"), 6, "no page listed twice");
+    assert!(h.engine.initial_sync_done().unwrap());
+    // Steady state from here.
+    let next = h
+        .engine
+        .sync_once(&mut no_progress(), &cancel, &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!(next.kind, SyncKind::Incremental);
+}
+
+#[tokio::test]
+async fn people_follow_each_run_of_the_first_sync_and_are_rebuilt_when_it_finishes() {
+    let h = harness_with(
+        150,
+        60,
+        None,
+        SyncOptions {
+            pages_per_run: 2,
+            ..options()
+        },
+    );
+    let cancel = CancelFlag::new();
+    let index = h.stores.index();
+    let listed: Vec<Message> = h
+        .fixture
+        .snapshot()
+        .into_iter()
+        .filter(|m| !m.labels.iter().any(|l| l == "SPAM"))
+        .collect();
+    let senders = |msgs: &[Message]| -> Vec<String> {
+        let mut v: Vec<String> = msgs
+            .iter()
+            .filter(|m| !m.is_sent)
+            .map(|m| m.from.email.to_lowercase())
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    let first_run = senders(&listed[..50]);
+    // Anyone the first run's pages mention at all: a recipient of the
+    // user's sent mail there is refreshed too.
+    let mentioned: Vec<String> = listed[..50]
         .iter()
-        .any(|s| matches!(s, DigStatus::Synced)));
+        .flat_map(|m| {
+            std::iter::once(&m.from)
+                .chain(m.to.iter())
+                .chain(m.cc.iter())
+                .map(|a| a.email.to_lowercase())
+        })
+        .collect();
+    let later_only: Vec<String> = senders(&listed[50..])
+        .into_iter()
+        .filter(|s| !mentioned.contains(s))
+        .collect();
+    assert!(
+        !later_only.is_empty(),
+        "the fixture has senders beyond the first run"
+    );
+    let writes_before = index.stats().writes;
+    let first = h
+        .engine
+        .sync_once(&mut no_progress(), &cancel, &mut |_| {})
+        .await
+        .unwrap();
+    assert!(!first.complete);
+    // The run's senders have People, from one batch at the end of the run,
+    // not one refresh per page; a sender of later pages has none yet.
+    for s in &first_run {
+        assert!(riddle_people::lookup(&index, s).unwrap().is_some(), "{s}");
+    }
+    for s in &later_only {
+        assert!(riddle_people::lookup(&index, s).unwrap().is_none(), "{s}");
+    }
+    let people_writes = index.stats().writes - writes_before;
+    assert!(
+        people_writes <= first_run.len() as u64 + 2,
+        "one write per Person of the run, not per page: {people_writes}"
+    );
+    while !h
+        .engine
+        .sync_once(&mut no_progress(), &cancel, &mut |_| {})
+        .await
+        .unwrap()
+        .complete
+    {}
+    for s in senders(&listed) {
+        assert!(riddle_people::lookup(&index, &s).unwrap().is_some(), "{s}");
+    }
+}
+
+#[tokio::test]
+async fn bodies_are_pending_from_a_listing_until_the_fetch_has_nothing_left() {
+    let h = harness_with(
+        60,
+        60,
+        None,
+        SyncOptions {
+            pages_per_run: 1,
+            ..options()
+        },
+    );
+    let store = h.stores.dig(&h.dig.id).unwrap();
+    let cancel = CancelFlag::new();
+    let pending = || {
+        repo::sync_state::get(&store, BODIES_PENDING)
+            .unwrap()
+            .is_some()
+    };
+    assert!(!pending(), "nothing listed yet");
+    let first = h
+        .engine
+        .sync_once(&mut no_progress(), &cancel, &mut |_| {})
+        .await
+        .unwrap();
+    assert!(!first.complete);
+    assert!(
+        pending(),
+        "a page of headers landed; their bodies are to come"
+    );
+    // Twenty of the twenty-five: still behind.
+    assert_eq!(
+        h.engine
+            .fetch_bodies(20, &mut no_progress(), &cancel)
+            .await
+            .unwrap(),
+        20
+    );
+    assert!(pending());
+    // The rest of this page: nothing left, for now.
+    h.engine
+        .fetch_bodies(100, &mut no_progress(), &cancel)
+        .await
+        .unwrap();
+    assert!(!pending(), "the fetch caught up with the listing");
+    // The next page of headers sets it again.
+    run_initial(&h).await;
+    assert!(pending());
+    h.engine
+        .fetch_bodies(500, &mut no_progress(), &cancel)
+        .await
+        .unwrap();
+    assert!(!pending());
+    assert_eq!(repo::messages::count_without_body(&store).unwrap(), 0);
+}
+
+/// The first sync to completion, however many runs it takes.
+async fn run_initial(h: &H) {
+    let cancel = CancelFlag::new();
+    while !h
+        .engine
+        .sync_once(&mut no_progress(), &cancel, &mut |_| {})
+        .await
+        .unwrap()
+        .complete
+    {}
+}
+
+#[tokio::test]
+async fn the_history_backfill_extends_the_window_backwards_and_stops_at_the_setting() {
+    let now = chrono::Utc::now();
+    // Four hundred days of mail, a ninety-day window, history to 200 days.
+    let h = harness_with(
+        200,
+        400,
+        Some(200),
+        SyncOptions {
+            pages_per_run: 2,
+            ..options()
+        },
+    );
+    let store = h.stores.dig(&h.dig.id).unwrap();
+    run_initial(&h).await;
+    let in_window = h.listed_since(Some(now - chrono::Duration::days(90)));
+    let to_floor = h.listed_since(Some(now - chrono::Duration::days(200)));
+    assert_eq!(repo::messages::count(&store).unwrap(), in_window);
+    assert!(
+        to_floor > in_window,
+        "the fixture has mail before the window"
+    );
+    assert!(h.engine.backfill_pending().unwrap());
+    let cancel = CancelFlag::new();
+    let mut steps = Vec::new();
+    let mut progress = |p: SyncProgress| {
+        if p.phase == SyncPhase::Backfill {
+            steps.push(p.step);
+        }
+    };
+    let first = h
+        .engine
+        .backfill_history(&mut progress, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(first.kind, SyncKind::Backfill);
+    assert!(!first.complete, "two pages a run");
+    assert_eq!(first.added, 50);
+    let oldest_after_first = repo::sync_state::get(&store, BACKFILL_OLDEST)
+        .unwrap()
+        .unwrap();
+    assert!(
+        steps.iter().any(|s| s.starts_with("through ")),
+        "the step says how far back it has come: {steps:?}"
+    );
+    // Newest first, so every backfilled message so far has its body.
     assert_eq!(
         repo::messages::count_without_body(&store).unwrap(),
-        0,
-        "bodies caught up within the cycles"
+        in_window,
+        "the window's bodies come separately; the backfill's come with the page"
+    );
+    // The rest, each run from a new engine, as after a restart.
+    while !h
+        .restarted_engine()
+        .backfill_history(&mut no_progress(), &cancel)
+        .await
+        .unwrap()
+        .complete
+    {}
+    assert_eq!(repo::messages::count(&store).unwrap(), to_floor);
+    assert!(
+        repo::sync_state::get(&store, BACKFILL_OLDEST)
+            .unwrap()
+            .unwrap()
+            < oldest_after_first,
+        "it went on backwards"
+    );
+    assert_eq!(
+        repo::sync_state::get(&store, BACKFILL_DONE)
+            .unwrap()
+            .as_deref(),
+        Some("1")
+    );
+    assert!(!h.engine.backfill_pending().unwrap());
+    let again = h
+        .engine
+        .backfill_history(&mut no_progress(), &cancel)
+        .await
+        .unwrap();
+    assert_eq!((again.added, again.complete), (0, true), "done is done");
+    assert!(
+        riddle_people::lookup(&h.stores.index(), "priya@example.com")
+            .unwrap()
+            .unwrap()
+            .messages_from
+            > 0
+    );
+
+    // No setting: the whole mailbox.
+    let all = harness_with(200, 400, None, options());
+    let store = all.stores.dig(&all.dig.id).unwrap();
+    run_initial(&all).await;
+    while !all
+        .engine
+        .backfill_history(&mut no_progress(), &CancelFlag::new())
+        .await
+        .unwrap()
+        .complete
+    {}
+    assert_eq!(
+        repo::messages::count(&store).unwrap(),
+        all.listed_since(None)
+    );
+
+    // Nothing before the window: done at once, without a listing.
+    let short = harness_with(60, 30, None, options());
+    run_initial(&short).await;
+    let lists = short.fixture.call_count("list");
+    let r = short
+        .engine
+        .backfill_history(&mut no_progress(), &CancelFlag::new())
+        .await
+        .unwrap();
+    assert!(r.complete);
+    assert_eq!(
+        short.fixture.call_count("list") - lists,
+        1,
+        "one empty page"
     );
 }
 
 #[tokio::test]
-async fn refresh_now_wakes_the_dig_poller() {
+async fn a_page_of_label_changes_is_one_write_and_an_unchanged_label_list_is_not_rewritten() {
+    let h = harness(60);
+    let cancel = CancelFlag::new();
+    // Through `sync_once`: the label listing is refreshed on the way in.
+    run_initial(&h).await;
+    let store = h.stores.dig(&h.dig.id).unwrap();
+    let labels_synced_at = || -> i64 {
+        store
+            .read(|c| {
+                c.query_row("SELECT max(synced_at) FROM provider_labels", [], |r| {
+                    r.get(0)
+                })
+            })
+            .unwrap()
+    };
+    let written = labels_synced_at();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    // A quiet poll: the label listing is unchanged and not rewritten.
+    let before = store.stats().writes;
+    let quiet = h
+        .engine
+        .sync_once(&mut no_progress(), &cancel, &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!((quiet.kind, quiet.added), (SyncKind::Incremental, 0));
+    let quiet_writes = store.stats().writes - before;
+    assert_eq!(labels_synced_at(), written, "unchanged listing, no rewrite");
+    // Three messages archived from the phone, in however many threads.
+    let inbox: Vec<Message> = h
+        .fixture
+        .snapshot()
+        .into_iter()
+        .filter(|m| m.labels.iter().any(|l| l == "INBOX") && !m.is_sent)
+        .take(3)
+        .collect();
+    let ids: Vec<String> = inbox.iter().map(|m| m.provider_id.clone()).collect();
+    h.fixture
+        .modify_labels(&ids, &[], &["INBOX".into()])
+        .await
+        .unwrap();
+    let threads: std::collections::HashSet<&ThreadId> =
+        inbox.iter().map(|m| &m.thread_id).collect();
+    let before = store.stats().writes;
+    let report = h
+        .engine
+        .sync_once(&mut no_progress(), &cancel, &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!((report.label_changes, report.updated), (3, 3));
+    let writes = store.stats().writes - before;
+    assert_eq!(
+        writes - quiet_writes,
+        1 + threads.len() as u64,
+        "one write for the labels and one Thread State per thread touched"
+    );
+    for m in &inbox {
+        assert!(!repo::messages::labels_of(&store, &m.id)
+            .unwrap()
+            .contains(&"INBOX".to_string()));
+    }
+    // A changed listing is written.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    h.fixture.ensure_label("Receipts").await.unwrap();
+    h.engine
+        .sync_once(&mut no_progress(), &cancel, &mut |_| {})
+        .await
+        .unwrap();
+    assert!(labels_synced_at() > written);
+    assert!(repo::provider_labels::all(&store)
+        .unwrap()
+        .iter()
+        .any(|l| l.name == "Receipts"));
+}
+
+#[tokio::test]
+async fn refresh_now_asks_for_a_sync_of_the_dig_or_of_every_dig() {
     use riddle_actions::{RuntimeBuilder, Services};
     let stores = Arc::new(Stores::in_memory().unwrap());
     let services = Arc::new(Services::new(

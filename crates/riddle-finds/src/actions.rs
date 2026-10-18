@@ -111,10 +111,11 @@ impl Action for DismissFind {
                     &store,
                     &ActivityId(activity.to_string()),
                 ) {
-                    riddle_observability::rwarn!(
+                    riddle_observability::swallowed!(
                         riddle_observability::Category::Actions,
-                        "could not retract dismiss correction: {}",
-                        e.message
+                        "dismiss_correction_retract",
+                        e,
+                        "could not retract dismiss correction"
                     );
                 }
             }
@@ -206,10 +207,11 @@ impl Action for RetypeFind {
                 .dig(&src.dig_id)
                 .and_then(|s| repo::corrections::record(&s, &correction))
             {
-                riddle_observability::rwarn!(
+                riddle_observability::swallowed!(
                     riddle_observability::Category::Actions,
-                    "could not record retype correction: {}",
-                    e.message
+                    "retype_correction",
+                    e,
+                    "could not record retype correction"
                 );
             }
         }

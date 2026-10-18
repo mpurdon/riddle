@@ -2,8 +2,12 @@
 //! aggregated from the Dig stores into the index store so identity spans
 //! Digs. Stats are recomputed from the messages rather than incremented,
 //! because a resync or an undo would otherwise drift the counts; the store
-//! does the counting in SQL (`repo::messages::address_stats`) so a refresh
-//! touches one address at a time and never loads bodies.
+//! does the counting in SQL and never loads bodies. A refresh takes a set
+//! of addresses (`refresh_addresses`): every sync page refreshed each of
+//! its addresses one at a time, seven queries with `json_extract` over
+//! every header each, which is where a 45-second poll spent most of its
+//! time (17 Oct 2026). The set goes to `address_stats_many` as one
+//! parameter, three queries per Dig store whatever its size.
 //!
 //! Relationship strength is a bounded score from what the user did (replied,
 //! wrote first) and how recently, not from volume alone: a newsletter that
@@ -20,7 +24,7 @@ use riddle_core::{Cadence, DigId, Person, PersonId, ThreadId, UserProfile};
 use riddle_errors::Result;
 use riddle_observability::{rdebug, rinfo, Category};
 use riddle_store::{repo, Store};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// A Dig store to aggregate over.
@@ -143,6 +147,10 @@ pub fn on_schedule(arrivals: &[DateTime<Utc>], timezone: Option<&str>) -> bool {
     near as f64 >= minutes.len() as f64 * 0.8
 }
 
+/// Addresses per round of the stats queries: the set travels as one JSON
+/// parameter, and a sync page's few hundred addresses fit in one round.
+const REFRESH_BATCH: usize = 500;
+
 /// Recompute one address across the given Dig stores and upsert the Person.
 pub fn refresh_address(
     index: &Store,
@@ -151,45 +159,111 @@ pub fn refresh_address(
     profile: &UserProfile,
     now: DateTime<Utc>,
 ) -> Result<Option<Person>> {
-    let email = email.to_lowercase();
-    if email.is_empty() || profile.is_me(&email) {
-        return Ok(None);
+    Ok(refresh_addresses(index, digs, &[email.to_string()], profile, now)?.pop())
+}
+
+/// What one address added up to across the Dig stores: its stats, the
+/// Digs it has mail in, and when its mail arrived (for cadence).
+struct Tally {
+    stats: repo::messages::AddressStats,
+    dig_ids: Vec<DigId>,
+    arrivals: Vec<DateTime<Utc>>,
+}
+
+/// Recompute a set of addresses across the given Dig stores and upsert
+/// their People, in the order given. The user's own addresses, empty ones
+/// and ones with no mail are skipped and not returned.
+pub fn refresh_addresses(
+    index: &Store,
+    digs: DigStores<'_>,
+    emails: &[String],
+    profile: &UserProfile,
+    now: DateTime<Utc>,
+) -> Result<Vec<Person>> {
+    let mut wanted: Vec<String> = Vec::with_capacity(emails.len());
+    for e in emails {
+        let e = e.to_lowercase();
+        if !e.is_empty() && !profile.is_me(&e) && !wanted.contains(&e) {
+            wanted.push(e);
+        }
     }
-    let mut total = repo::messages::AddressStats::default();
-    let mut dig_ids = Vec::new();
-    let mut arrivals = Vec::new();
     let since = now - Duration::days(CADENCE_WINDOW_DAYS);
-    for (dig_id, store) in digs {
-        let s = repo::messages::address_stats(store, &email)?;
-        if s.messages_from == 0 && s.messages_to == 0 {
-            continue;
+    let mut out = Vec::new();
+    for chunk in wanted.chunks(REFRESH_BATCH) {
+        let mut tallies: HashMap<String, Tally> = HashMap::new();
+        for (dig_id, store) in digs {
+            let stats = repo::messages::address_stats_many(store, chunk)?;
+            let senders: Vec<String> = stats
+                .iter()
+                .filter(|(_, s)| s.messages_from > 0)
+                .map(|(e, _)| e.clone())
+                .collect();
+            let mut arrivals = if senders.is_empty() {
+                HashMap::new()
+            } else {
+                repo::messages::arrivals_from_many(store, &senders, &since)?
+            };
+            for (email, s) in stats {
+                if s.messages_from == 0 && s.messages_to == 0 {
+                    continue;
+                }
+                let t = tallies.entry(email.clone()).or_insert_with(|| Tally {
+                    stats: repo::messages::AddressStats::default(),
+                    dig_ids: Vec::new(),
+                    arrivals: Vec::new(),
+                });
+                t.dig_ids.push(dig_id.clone());
+                if let Some(a) = arrivals.remove(&email) {
+                    t.arrivals.extend(a);
+                }
+                let total = &mut t.stats;
+                total.messages_from += s.messages_from;
+                total.messages_to += s.messages_to;
+                total.automated += s.automated;
+                total.mailing_list += s.mailing_list;
+                total.auth_failures += s.auth_failures;
+                total.spam_verdicts += s.spam_verdicts;
+                total.first_at = match (total.first_at, s.first_at) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+                total.last_at = match (total.last_at, s.last_at) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    (a, b) => a.or(b),
+                };
+                if total.name.is_none() {
+                    total.name = s.name;
+                }
+            }
         }
-        if s.messages_from > 0 {
-            arrivals.extend(repo::messages::arrivals_from(store, &email, &since)?);
-        }
-        dig_ids.push(dig_id.clone());
-        total.messages_from += s.messages_from;
-        total.messages_to += s.messages_to;
-        total.automated += s.automated;
-        total.mailing_list += s.mailing_list;
-        total.auth_failures += s.auth_failures;
-        total.spam_verdicts += s.spam_verdicts;
-        total.first_at = match (total.first_at, s.first_at) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
-        total.last_at = match (total.last_at, s.last_at) {
-            (Some(a), Some(b)) => Some(a.max(b)),
-            (a, b) => a.or(b),
-        };
-        if total.name.is_none() {
-            total.name = s.name;
+        for email in chunk {
+            let Some(mut t) = tallies.remove(email) else {
+                continue;
+            };
+            t.arrivals.sort();
+            let person = person_from(index, email, t, profile, now)?;
+            repo::people::upsert(index, &person)?;
+            out.push(person);
         }
     }
-    if dig_ids.is_empty() {
-        return Ok(None);
-    }
-    let existing = repo::people::by_email(index, &email)?;
+    Ok(out)
+}
+
+/// The Person one address adds up to, keeping the identity and the
+/// contacts flag of the one already stored.
+fn person_from(
+    index: &Store,
+    email: &str,
+    tally: Tally,
+    profile: &UserProfile,
+    now: DateTime<Utc>,
+) -> Result<Person> {
+    let Tally {
+        stats: total,
+        dig_ids,
+        arrivals,
+    } = tally;
+    let existing = repo::people::by_email(index, email)?;
     let replied = total.messages_to > 0;
     // Automated when most received mail carries list or bulk markers.
     let automated = total.messages_from > 0 && total.automated * 2 >= total.messages_from;
@@ -208,8 +282,8 @@ pub fn refresh_address(
                 .as_ref()
                 .map(|p| p.emails.clone())
                 .unwrap_or_default();
-            if !v.contains(&email) {
-                v.push(email.clone());
+            if !v.iter().any(|e| e == email) {
+                v.push(email.to_string());
             }
             v
         },
@@ -234,14 +308,13 @@ pub fn refresh_address(
         mailing_list,
         auth_failures: total.auth_failures as u32,
         spam_verdicts: total.spam_verdicts as u32,
-        in_contacts: existing.as_ref().is_some_and(|p| p.in_contacts) || profile.is_contact(&email),
+        in_contacts: existing.as_ref().is_some_and(|p| p.in_contacts) || profile.is_contact(email),
         dig_ids,
         updated_at: now,
         cadence: cadence_of(&arrivals, profile.timezone.as_deref()),
         on_schedule: on_schedule(&arrivals, profile.timezone.as_deref()),
     };
-    repo::people::upsert(index, &person)?;
-    Ok(Some(person))
+    Ok(person)
 }
 
 fn is_public_mail_domain(d: &str) -> bool {
@@ -287,12 +360,8 @@ pub fn rebuild_for_dig(
         .map(|s| s.to_lowercase())
         .collect();
     addresses.extend(repo::messages::replied_to_senders(store)?);
-    let mut n = 0;
-    for a in addresses {
-        if refresh_address(index, digs, &a, profile, now)?.is_some() {
-            n += 1;
-        }
-    }
+    let addresses: Vec<String> = addresses.into_iter().collect();
+    let n = refresh_addresses(index, digs, &addresses, profile, now)?.len();
     rinfo!(
         Category::Sync,
         "people rebuilt for dig {}: {} people",
@@ -314,13 +383,10 @@ pub fn update_for_threads(
     let Some((_, store)) = digs.iter().find(|(d, _)| d == dig) else {
         return Ok(0);
     };
-    let addresses = repo::messages::addresses_in_threads(store, threads)?;
-    let mut n = 0;
-    for a in addresses {
-        if refresh_address(index, digs, &a, profile, now)?.is_some() {
-            n += 1;
-        }
-    }
+    let addresses: Vec<String> = repo::messages::addresses_in_threads(store, threads)?
+        .into_iter()
+        .collect();
+    let n = refresh_addresses(index, digs, &addresses, profile, now)?.len();
     rdebug!(
         Category::Sync,
         "people updated for {} threads in dig {}: {} people",
@@ -419,6 +485,36 @@ mod tests {
         let after = lookup(&index, "priya@example.com").unwrap().unwrap();
         assert_eq!(before.id, after.id, "identity is stable across refreshes");
         assert_eq!(before.messages_from, after.messages_from);
+    }
+
+    #[test]
+    fn a_batch_refresh_says_what_the_single_refreshes_say_and_skips_the_user_and_strangers() {
+        let (index, store, dig, _fx, profile) = seeded();
+        let digs = vec![(dig.clone(), store.clone())];
+        let now = Utc::now();
+        let set: Vec<String> = [
+            "priya@example.com",
+            "notifications@github.com",
+            "matt@example.com",
+            "nobody@nowhere.example",
+            "PRIYA@example.com",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let people = refresh_addresses(&index, &digs, &set, &profile, now).unwrap();
+        let emails: Vec<&str> = people.iter().map(|p| p.emails[0].as_str()).collect();
+        assert_eq!(
+            emails,
+            ["priya@example.com", "notifications@github.com"],
+            "in the order asked, once each, without the user or an address with no mail"
+        );
+        for p in &people {
+            let single = refresh_address(&index, &digs, &p.emails[0], &profile, now)
+                .unwrap()
+                .unwrap();
+            assert_eq!(single, *p, "{}", p.emails[0]);
+        }
     }
 
     #[test]

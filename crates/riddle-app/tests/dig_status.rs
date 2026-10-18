@@ -28,6 +28,7 @@ fn gmail_dig(app: &App) -> Dig {
         shadow_started_at: None,
         created_at: chrono::Utc::now(),
         disabled: false,
+        history_days: None,
         mailbox: None,
     };
     repo::digs::upsert(&app.stores.index(), &dig).unwrap();

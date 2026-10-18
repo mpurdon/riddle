@@ -25,6 +25,7 @@ import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, Trash2, Undo2 } from 'lucide-react'
 import type { MessageSummary } from '@/bindings/MessageSummary'
 import { cx, num, plural } from '@/lib/format'
+import { useLevelTip } from '@/lib/level'
 import { useDigContext } from '@/lib/queries'
 import { keyHint, type ShortcutScope } from '@/lib/shortcuts'
 import { toast } from '@/lib/stores'
@@ -67,6 +68,8 @@ export function ReviewPage({ kind }: { kind: 'spoil' | 'contamination' }) {
   const actions = useAction()
   const { run } = actions
   const { addRule } = useCorrectionRule()
+  // Not Spoil and Restore are corrections; at Essentials the fifth earns the one tip that the rest exists.
+  const levelTip = useLevelTip()
   const isSpoil = kind === 'spoil'
   const never: CorrectionKind = isSpoil ? 'spoil' : 'contamination'
   const [view, setView] = useState<SpoilView>(() => (isSpoil ? readSpoilView() : 'messages'))
@@ -125,6 +128,7 @@ export function ReviewPage({ kind }: { kind: 'spoil' | 'contamination' }) {
     setBusy(true)
     try {
       await runPerDig(actions, ms, 'restore_messages')
+      levelTip('correction')
       list.clear()
       setSheetOpen(false)
     } finally {

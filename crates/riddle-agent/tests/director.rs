@@ -106,6 +106,7 @@ fn dig(id: &str, name: &str, privacy: PrivacyMode) -> Dig {
         shadow_started_at: None,
         created_at: chrono::Utc::now(),
         disabled: false,
+        history_days: None,
         mailbox: None,
     }
 }
@@ -168,6 +169,48 @@ fn event_names(events: &[RiddleEvent]) -> Vec<&'static str> {
             _ => "other",
         })
         .collect()
+}
+
+/// Claim: the person's level reaches the system prompt. At Essentials the
+/// register says "rule" and forbids a Signal proposal; Everything, the
+/// default for a Director built without a setting, keeps the full
+/// vocabulary; and a level set between turns changes the next turn alone.
+#[tokio::test]
+async fn the_register_follows_the_level_set_on_the_director() {
+    let h = harness(
+        vec![
+            ScriptedLlm::text("Nothing needs you."),
+            ScriptedLlm::text("Still nothing."),
+        ],
+        ScriptedReads::new(),
+        vec![dig("d1", "Personal", PrivacyMode::CloudReasoning)],
+    );
+    assert_eq!(h.director.ui_level(), UiLevel::Everything);
+    h.director
+        .send_and_wait(SendRequest {
+            message: "Anything for me?".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let full = h.llm.requests().remove(0);
+    assert!(full.system.contains("Everything level or above"));
+    assert!(!full.system.contains("Never propose a Signal"));
+
+    h.director.set_ui_level(UiLevel::Essentials);
+    h.director
+        .send_and_wait(SendRequest {
+            message: "And now?".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let plain = h.llm.requests().remove(1);
+    assert!(plain.system.contains("Essentials level"));
+    assert!(plain.system.contains("Never propose a Signal"));
+    assert!(plain.system.contains("propose `install_pack`"));
+    assert!(!plain.system.contains("Everything level or above"));
+    assert!(!plain.system.contains("{{"), "no placeholder leaks");
 }
 
 #[tokio::test]

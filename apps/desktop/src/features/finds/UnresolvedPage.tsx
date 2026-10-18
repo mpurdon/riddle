@@ -25,6 +25,7 @@ import type { FindType } from '@/bindings/FindType'
 import type { MessageSummary } from '@/bindings/MessageSummary'
 import { explain, qk } from '@/lib/api'
 import { cx, fmtAddress, fmtTime, num } from '@/lib/format'
+import { useLevelTip } from '@/lib/level'
 import { useDigContext } from '@/lib/queries'
 import { dispositionLabel, findTypeLabel, FIND_TYPES, FOLLOW_UP } from '@/lib/selectors'
 import { keyHint } from '@/lib/shortcuts'
@@ -82,9 +83,12 @@ export default function UnresolvedPage() {
   const { targets } = list
 
   const args = (m: MessageSummary, d: Disposition, dueAt: string | null = null) => ({ digId: m.digId, messageId: m.id, disposition: d, findType: d.kind === 'find' ? d.find_type : undefined, ...(dueAt ? { dueAt } : {}) })
+  // Every decision here is a correction; at Essentials the fifth earns the one tip that the rest exists.
+  const levelTip = useLevelTip()
   /** `dueAt` rides on a Follow Up decision: the Find opens due then. */
   const decide = async (ms: MessageSummary[], d: Disposition, dueAt: string | null = null) => {
     if (!ms.length) return
+    levelTip('correction')
     const label = dispositionLabel(d)
     const senders = new Set(ms.map((m) => senderKey(m.from.email)))
     const line = teachingLine(label, remainingFromSender(ordered, ms), senders.size === 1 ? ms[0].from.email : `these ${senders.size} senders`)

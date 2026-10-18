@@ -1,14 +1,17 @@
 /**
  * Persistent banners, until their condition clears: a store fault, an
- * update waiting for review, and sample mail. The sample-mail banner exists
- * because a test mailbox looks exactly like a real one once it has filled;
- * a reviewer resolved three Finds before noticing none of it was theirs.
+ * update waiting for review, an account that is not syncing or is degraded,
+ * and sample mail. The sample-mail banner exists because a test mailbox
+ * looks exactly like a real one once it has filled; a reviewer resolved
+ * three Finds before noticing none of it was theirs. The degraded banner
+ * carries the reason and the last judge call: the judge's breaker opened
+ * and closed for a fortnight and nothing on screen said so.
  */
 import { Link, useNavigate } from 'react-router-dom'
-import { lastSyncedPhrase, syncFailureLine } from '@/lib/selectors'
+import { lastCallPhrase, lastSyncedPhrase, syncFailureLine } from '@/lib/selectors'
 import { useAction } from '@/lib/useAction'
 import { Button } from '@/components/ui/Button'
-import { useDigs } from '@/lib/queries'
+import { useDigs, useTaskCentre } from '@/lib/queries'
 import { useBanners } from '@/lib/stores'
 import { HeldChanges, useMailboxWrites } from '@/features/developer/MailboxWrites'
 
@@ -22,11 +25,15 @@ export function Banners() {
   // An account that is not syncing says so until it syncs again: a real
   // account failed every sync for two weeks behind "Caught up".
   const failing = digs.filter((d) => d.status.state === 'sync_failing')
+  // An account whose judge is down or paused says so, with its reason.
+  const degraded = digs.filter((d) => d.status.state === 'degraded')
+  const judge = useTaskCentre().data?.judge ?? null
   const { run } = useAction()
   // A dev build on Ask: the batch of mailbox changes waits for one "Send".
   const writes = useMailboxWrites().data
   const asking = writes?.writes === 'ask' && Number(writes.held) > 0
-  if (!storeFault && !update && !sampleOnly && !asking && !failing.length) return null
+  if (!storeFault && !update && !sampleOnly && !asking && !failing.length && !degraded.length) return null
+  const judgeCall = lastCallPhrase('judge', judge)
   return (
     <div className="shrink-0">
       {storeFault ? (
@@ -69,6 +76,18 @@ export function Banners() {
                 Retry now
               </Button>
             )}
+          </div>
+        ) : null,
+      )}
+      {degraded.map((d) =>
+        d.status.state === 'degraded' ? (
+          <div key={`degraded-${d.id}`} role="status" className="flex items-center justify-between gap-3 border-b border-ochre/40 bg-ochre/10 px-4 py-1.5 text-sm">
+            <span className="min-w-0 flex-1">
+              <span className="font-semibold">{d.name} is degraded:</span> {d.status.reason}.{judgeCall ? ` ${judgeCall[0].toUpperCase()}${judgeCall.slice(1)}.` : ''}
+            </span>
+            <Button size="sm" className="shrink-0" onClick={() => nav('/developer')}>
+              Open Developer Mode
+            </Button>
           </div>
         ) : null,
       )}

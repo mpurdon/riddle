@@ -96,7 +96,7 @@ describe('per-account status chips', () => {
 })
 
 describe('the Task Centre indicator', () => {
-  const tc = (over: Partial<TaskCentre>): TaskCentre => ({ overall: 'caught_up', digs: [{ digId: 'a', name: 'Work', status: { state: 'synced' } }], jobs: [], storeFault: null, asOf: '2026-09-22T07:42:00.000Z', ...over })
+  const tc = (over: Partial<TaskCentre>): TaskCentre => ({ overall: 'caught_up', digs: [{ digId: 'a', name: 'Work', status: { state: 'synced' } }], jobs: [], storeFault: null, judge: null, llm: null, asOf: '2026-09-22T07:42:00.000Z', ...over })
   it('is Caught up when nothing is catching up and nothing is degraded', () => {
     expect(taskCentreIndicator(tc({})).label).toBe('Caught up')
   })
@@ -128,7 +128,7 @@ describe('the Task Centre indicator', () => {
 })
 
 describe('the Summary while catching up', () => {
-  const tc = (over: Partial<TaskCentre>): TaskCentre => ({ overall: 'catching_up', digs: [{ digId: 'a', name: 'Work', status: { state: 'catching_up', remaining: u64(1240), total: u64(4981) } }], jobs: [], storeFault: null, asOf: '2026-09-22T07:42:00.000Z', ...over })
+  const tc = (over: Partial<TaskCentre>): TaskCentre => ({ overall: 'catching_up', digs: [{ digId: 'a', name: 'Work', status: { state: 'catching_up', remaining: u64(1240), total: u64(4981) } }], jobs: [], storeFault: null, judge: null, llm: null, asOf: '2026-09-22T07:42:00.000Z', ...over })
   const job = (over: Partial<Job>): Job => ({ id: 'j', kind: 'catch_up', priority: 'catch_up', status: { state: 'running' }, digId: 'a', label: 'Catch-up: Work', progress: { done: u64(3741), total: u64(4981), unit: 'messages', step: 'Fetching bodies', etaSeconds: u64(248) }, checkpoint: null, cancellable: true, attempts: 1, createdAt: '', startedAt: null, finishedAt: null, updatedAt: '', ...over })
 
   it('reads fetching, sorted and Finds from numbers the page already has', () => {

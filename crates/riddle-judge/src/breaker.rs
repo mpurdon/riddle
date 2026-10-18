@@ -6,6 +6,7 @@
 //! vendor that is already struggling.
 
 use parking_lot::Mutex;
+use riddle_core::BreakerHealth;
 use serde::Serialize;
 use std::time::{Duration, Instant};
 
@@ -102,6 +103,30 @@ impl CircuitBreaker {
             },
         }
     }
+
+    /// The state as the Task Centre reads it: open until a wall-clock time,
+    /// or half-open once the cooldown has passed and the next call is the
+    /// probe. `state()` is the raw view for the error detail.
+    pub fn health(&self) -> BreakerHealth {
+        let i = self.inner.lock();
+        match i.opened_at {
+            None => BreakerHealth::Closed {
+                consecutive_failures: i.consecutive_failures,
+            },
+            Some(at) => {
+                let elapsed = at.elapsed();
+                if elapsed < self.cooldown {
+                    let remaining = chrono::Duration::from_std(self.cooldown - elapsed)
+                        .unwrap_or_else(|_| chrono::Duration::zero());
+                    BreakerHealth::Open {
+                        until: chrono::Utc::now() + remaining,
+                    }
+                } else {
+                    BreakerHealth::HalfOpen
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -136,5 +161,35 @@ mod tests {
             b.state(),
             BreakerState::Open { probing: false, .. }
         ));
+    }
+
+    #[test]
+    fn the_health_says_open_until_a_time_then_half_open_then_closed() {
+        let b = CircuitBreaker::new(1, Duration::from_secs(60));
+        assert_eq!(
+            b.health(),
+            BreakerHealth::Closed {
+                consecutive_failures: 0
+            }
+        );
+        b.record_failure();
+        match b.health() {
+            BreakerHealth::Open { until } => {
+                let left = until - chrono::Utc::now();
+                assert!(left > chrono::Duration::seconds(50), "{left}");
+                assert!(left <= chrono::Duration::seconds(60), "{left}");
+            }
+            other => panic!("expected Open, got {other:?}"),
+        }
+        let b = CircuitBreaker::new(1, Duration::ZERO);
+        b.record_failure();
+        assert_eq!(b.health(), BreakerHealth::HalfOpen);
+        b.record_success();
+        assert_eq!(
+            b.health(),
+            BreakerHealth::Closed {
+                consecutive_failures: 0
+            }
+        );
     }
 }

@@ -331,9 +331,11 @@ impl Runtime {
                 Err(e) => (ProposalOutcome::Failed, Some(e.message.clone()), None),
             };
             if let Err(e) = repo::pending::resolve(&index, pid, o, note, act) {
-                rerror!(
+                riddle_observability::swallowed!(
                     Category::Actions,
-                    "could not record the proposal's outcome: {e}"
+                    "proposal_outcome",
+                    e,
+                    "could not record the proposal's outcome"
                 );
             }
         }
@@ -399,9 +401,11 @@ impl Runtime {
         if meta.changes_rules {
             // Bookkeeping: Unresolved decided before now goes back to Sift.
             if let Err(e) = repo::kv::mark_rules_changed(&index, &self.services.clock.now()) {
-                rerror!(
+                riddle_observability::swallowed!(
                     Category::Actions,
-                    "could not record that the rules changed: {e}"
+                    "rules_changed_mark",
+                    e,
+                    "could not record that the rules changed"
                 );
             }
         }
@@ -424,7 +428,13 @@ impl Runtime {
         }
         if let Some(key) = &inv.idempotency_key {
             if let Err(e) = repo::pending::put_idempotent(&index, key, &meta.name, &result_value) {
-                rerror!(Category::Actions, "could not record idempotency key: {e}");
+                riddle_observability::swallowed!(
+                    Category::Actions,
+                    "idempotency_key",
+                    e,
+                    "could not record idempotency key for {}",
+                    meta.name
+                );
             }
         }
         Ok(ActionOutcome {

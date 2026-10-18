@@ -9,8 +9,8 @@ import { Dialog } from './ui/Dialog'
 import { Keys } from './ui/Kbd'
 import { SCOPE_LABELS, SHORTCUTS, type ShortcutScope } from '@/lib/shortcuts'
 import { useUi } from '@/lib/stores'
-import { useSettings } from '@/lib/queries'
-import { GLOSSARY } from '@/lib/glossary'
+import { shortcutShown, useLevel } from '@/lib/level'
+import { glossaryFor } from '@/lib/glossary'
 import { ACTION_HELP, CORRECTION_NOTE, type HelpGroup } from '@/lib/actionHelp'
 import { ActionHelpTable } from './ActionHelp'
 
@@ -20,8 +20,10 @@ const PALETTE_KEYS = SHORTCUTS.find((s) => s.id === 'palette')?.keys ?? 'mod+k'
 export function HelpSheet() {
   const open = useUi((s) => s.helpOpen)
   const setOpen = useUi((s) => s.setHelpOpen)
-  const developerMode = useSettings().data?.developerMode ?? false
-  const glossary = GLOSSARY.filter((g) => developerMode || !g.developer)
+  // The sheet follows the level: a go-to shortcut for a page the rail does
+  // not list is left out, and so is a word the person has not met.
+  const level = useLevel()
+  const glossary = glossaryFor(level)
   return (
     <Dialog open={open} onOpenChange={setOpen} title="Help" description="Keyboard shortcuts, the words Riddle uses, then what every button does. The ? beside a row of buttons shows the same for the account you are looking at." wide>
       <div className="max-h-[70vh] overflow-auto pr-1 selectable">
@@ -35,7 +37,7 @@ export function HelpSheet() {
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-clay">{SCOPE_LABELS[scope]}</h3>
             <table className="w-full text-sm">
               <tbody>
-                {SHORTCUTS.filter((s) => s.scope === scope).map((s) => (
+                {SHORTCUTS.filter((s) => s.scope === scope && shortcutShown(s.id, level)).map((s) => (
                   <tr key={s.id}>
                     <td className="w-28 py-0.5 align-top">
                       <Keys keys={s.keys} also={s.also} />

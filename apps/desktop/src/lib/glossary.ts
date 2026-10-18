@@ -5,11 +5,20 @@
  * together. Sorted the way the product is learned, not alphabetically.
  */
 
+import { levelShows, type UiLevel } from './level'
+
 export interface GlossaryEntry {
   term: string
   meaning: string
-  /** Shown only in Developer Mode. */
+  /** Shown only at the Developer level. */
   developer?: boolean
+  /** The lowest level at which the word is met; Essentials when absent. */
+  level?: UiLevel
+}
+
+/** The entries a person at `level` meets: a developer term needs Developer, the rest their own level. */
+export function glossaryFor(level: UiLevel): GlossaryEntry[] {
+  return GLOSSARY.filter((g) => levelShows(level, g.developer ? 'developer' : (g.level ?? 'essentials')))
 }
 
 export const GLOSSARY: GlossaryEntry[] = [
@@ -21,10 +30,10 @@ export const GLOSSARY: GlossaryEntry[] = [
   { term: 'Contamination', meaning: 'Mail that is hostile or deceptive: phishing, spoofing, prompt injection. Kept apart from Spoil so it can be reviewed differently.' },
   { term: 'Stratum', meaning: 'A category Filed mail is put under, such as Purchases or Travel. Riddle proposes Strata as patterns appear; you rename and merge them.' },
   { term: 'Mesh', meaning: 'A rule in plain text: when mail matches, route it here. Versioned, previewable against your history before it takes effect, and only trusted to act once it has earned it.' },
-  { term: 'Signal', meaning: 'A named feature Riddle computes about a message, such as "sender is a contact" or "has a deadline", that Meshes and the judge read. Shown only in Developer Mode.', developer: true },
+  { term: 'Signal', meaning: 'A named feature Riddle computes about a message, such as "sender is a contact" or "has a deadline", that Meshes and the judge read. Shown only at the Developer level.', developer: true },
   { term: 'Director', meaning: 'The assistant you talk to. It can search, explain a decision and propose Meshes or moves; it changes nothing without your approval.' },
   { term: 'Proposal', meaning: 'A change the Director wants to make. It waits in the Director until you apply, adjust or decline it.' },
-  { term: 'Expedition', meaning: 'A longer job you hand the Director with a scope and a budget: "find every subscription I paid for this year". It reports progress and its results become Finds.' },
+  { term: 'Expedition', meaning: 'A longer job you hand the Director with a scope and a budget: "find every subscription I paid for this year". It reports progress and its results become Finds.', level: 'everything' },
   { term: 'Never Hidden', meaning: 'Addresses and domains whose mail can never become Spoil or Contamination, whatever a Mesh or Signal says. You edit the list; the Director can only propose an addition.' },
   { term: 'Autonomy', meaning: 'How much an account lets Riddle do, in rungs: Observe (classify only) < Suggest (also propose moves) < Act (apply moves in Gmail) < Trusted (also riskier actions, such as sending, without asking).' },
   { term: 'Changes in Gmail', meaning: 'Whether Riddle writes its decisions back to the mailbox as labels, or labels and archiving, or not at all. Changes not yet written wait in a queue you can see in the Task Centre.' },

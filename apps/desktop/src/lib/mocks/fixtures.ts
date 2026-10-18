@@ -2099,6 +2099,7 @@ export function buildSettings(): Settings {
   return {
     schemaVersion: 3,
     developerMode: true,
+    uiLevel: 'developer',
     logLevel: 'debug',
     notifyPriorityThreshold: 70,
     notifications: { mode: 'brief', briefTimes: ['09:00', '16:00'], immediateTypes: ['pay', 'respond'], dueWithinHours: 24, neverHiddenImmediate: true },
@@ -2140,6 +2141,8 @@ export function buildDevInfo(): DevInfo {
     ],
     storeFault: null,
     logLevel: 'debug',
+    // One site that dropped a failure, so the Failures pane has a row to show.
+    swallowed: [{ category: 'llm', site: 'usage_row', count: 3, lastAt: daysAgo(0.02), lastError: 'Store: database is locked' }],
   }
 }
 

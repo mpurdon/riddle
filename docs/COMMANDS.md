@@ -80,7 +80,7 @@ permanent_delete        { digId, messageIds[] } (TypeCount; no undo)
 | command | args | returns |
 |---|---|---|
 | `summary` | `{ digId? }` | `Summary`; with `digId` the numbers cover that one Dig |
-| `task_centre` | – | `TaskCentre` |
+| `task_centre` | – | `TaskCentre`; `judge` and `llm` carry each client's `ServiceHealth` (breaker, last success, last failure), `null` when not configured |
 | `list_digs` | – | `Dig[]` |
 | `list_dig_groups` | – | `DigGroup[]` |
 | `list_messages` | `{ digId?, filter: MessageFilter (spec), page: PageRequest }` | `Page<MessageSummary>` (across Digs when `digId` absent) |
@@ -118,13 +118,13 @@ permanent_delete        { digId, messageIds[] } (TypeCount; no undo)
 | `usage_summary` | `{ sinceDays? }` | `UsageSummary` |
 | `trust_stats` | `{ digId?, sinceDays? }` | `TrustStats`: decisions, corrections, undos, what would have been archived, per-rule precision, and one offer when an account's last Spoil calls all stood |
 | `trace_stats` | `{ digId?, sinceDays? }` | `TraceStats` (spec) |
-| `dev_info` | – | `DevInfo` (spec, exists) |
+| `dev_info` | – | `DevInfo` (spec, exists); `swallowed` is the swallowed-failure table: `{ category, site, count, lastAt, lastError }[]` |
 | `dev_armed` | – | `boolean` |
-| `probe_judge` / `probe_llm` / `probe_provider {digId}` | | `{ ok, latencyMs, message }` |
+| `probe_judge` / `probe_llm` / `probe_provider {digId}` | | `{ ok, latencyMs, message, health? }`; the judge and LLM probes add the client's `ServiceHealth` after the call |
 | `read_app_logs` | `{ limit?, category?, level?, text? }` | `LogLine[]` |
 | `log_categories` | – | `string[]` |
 | `in_flight_calls` | – | `{ command, elapsedMs }[]` |
-| `export_diagnostics` | – | `string` (redacted block) |
+| `export_diagnostics` | – | the redacted diagnostics bundle, a JSON object: `{ exportedAt, redaction, runtime: DevInfo, taskCentre, traceStats, judge: { identity, health }, llm, digs: [{ id, name, provider, privacy, projection, disabled, status }], actions, settings (OAuth client as present-or-absent), swallowed, warnings }` |
 | `update_preview` | – | `UpdatePreview | null` (spec) |
 | `test_notification` | – | `{ sent }`; desktop only, shows a system notification |
 | `list_shortcuts` | – | not a command; the table lives in the UI |
@@ -140,7 +140,9 @@ interface MessageFilter {
 }
 interface Settings {
   schemaVersion: number
-  developerMode: boolean; logLevel: 'error'|'warn'|'info'|'debug'|'trace'
+  uiLevel: 'essentials'|'everything'|'developer'  // how much the app shows; the one switch
+  developerMode: boolean  // derived: true exactly when uiLevel is 'developer'
+  logLevel: 'error'|'warn'|'info'|'debug'|'trace'
   notifyPriorityThreshold: number; shadowPeriodDays: number
   priorityInbox: { strata: string[]; labels: string[]; minFindPriority: number | null; findTypes: FindType[] }
   judge: { provider: 'jev'|'null'|'scripted'; model: string; keySource: 'env'|'keychain'|'ssm'; ssmProfile?: string; ssmParameter?: string; apiKeyPresent: boolean }

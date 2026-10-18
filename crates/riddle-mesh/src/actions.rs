@@ -214,11 +214,12 @@ impl Action for UpdateMesh {
             for mid in repo::classifications::supersede_by_mesh(&store, id.as_str(), version)? {
                 if let Some(h) = &hook {
                     if let Err(e) = h.0.unproject(&dig.id, &mid) {
-                        riddle_observability::rwarn!(
+                        riddle_observability::swallowed!(
                             riddle_observability::Category::Projection,
-                            "unproject failed for {}: {}",
-                            mid,
-                            e.message
+                            "mesh_undo_unproject",
+                            e,
+                            "unproject failed for {}",
+                            mid
                         );
                     }
                 }

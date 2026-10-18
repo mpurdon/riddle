@@ -84,6 +84,9 @@ pub fn snapshot(
         digs,
         jobs,
         store_fault,
+        // The app fills these from the judge and LLM clients it holds.
+        judge: None,
+        llm: None,
         as_of: clock.now(),
     }
 }
@@ -184,6 +187,18 @@ mod tests {
             overall_status(
                 &[row(DigStatus::Synced)],
                 &[job(JobKind::CatchUp, JobStatus::Completed)],
+                None
+            ),
+            OverallStatus::CaughtUp
+        );
+    }
+
+    #[test]
+    fn a_running_history_backfill_leaves_an_account_with_its_recent_mail_sorted_caught_up() {
+        assert_eq!(
+            overall_status(
+                &[row(DigStatus::Synced)],
+                &[job(JobKind::HistoryBackfill, JobStatus::Running)],
                 None
             ),
             OverallStatus::CaughtUp

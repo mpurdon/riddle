@@ -2,6 +2,7 @@
 import type { DigStatusRow } from "./DigStatusRow";
 import type { Job } from "./Job";
 import type { OverallStatus } from "./OverallStatus";
+import type { ServiceHealth } from "./ServiceHealth";
 
 /**
  * The Task Centre snapshot (§55), a product surface.
@@ -10,4 +11,12 @@ export type TaskCentre = { overall: OverallStatus, digs: Array<DigStatusRow>, jo
 /**
  * The persistence gate fault flag (§11), when set.
  */
-storeFault: string | null, asOf: string, };
+storeFault: string | null, 
+/**
+ * The judge's breaker and last calls; `None` with no judge configured.
+ */
+judge: ServiceHealth | null, 
+/**
+ * The LLM client's breaker and last calls; `None` with no LLM.
+ */
+llm: ServiceHealth | null, asOf: string, };

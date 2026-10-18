@@ -1085,11 +1085,12 @@ pub fn persist(sift: &Sift, outcome: &mut SiftOutcome) -> Result<Option<FindProp
             if let Err(e) = hook.project_message(&dig_id, &outcome.message, &outcome.classification)
             {
                 // Bookkeeping never fails the work; the outbox will reconcile.
-                rwarn!(
+                riddle_observability::swallowed!(
                     Category::Projection,
-                    "projection of message {} failed: {}",
-                    id,
-                    e.message
+                    "sift_projection",
+                    e,
+                    "projection of message {} failed",
+                    id
                 );
             }
         }

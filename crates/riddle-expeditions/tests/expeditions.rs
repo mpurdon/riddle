@@ -33,6 +33,7 @@ fn dig(id: &str, privacy: PrivacyMode) -> Dig {
         shadow_started_at: None,
         created_at: chrono::Utc::now(),
         disabled: false,
+        history_days: None,
         mailbox: None,
     }
 }

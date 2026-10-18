@@ -76,6 +76,31 @@ impl Breaker {
         Self::state_of(c)
     }
 
+    /// One model's circuit as the Task Centre reads it: open until a
+    /// wall-clock time, half-open, or closed with its failure count.
+    pub fn health(&self, key: &str) -> riddle_core::BreakerHealth {
+        use riddle_core::BreakerHealth;
+        let map = self.circuits.lock();
+        let Some(c) = map.get(key) else {
+            return BreakerHealth::Closed {
+                consecutive_failures: 0,
+            };
+        };
+        match c.open_until {
+            Some(until) if Instant::now() < until => {
+                let remaining = chrono::Duration::from_std(until - Instant::now())
+                    .unwrap_or_else(|_| chrono::Duration::zero());
+                BreakerHealth::Open {
+                    until: chrono::Utc::now() + remaining,
+                }
+            }
+            Some(_) => BreakerHealth::HalfOpen,
+            None => BreakerHealth::Closed {
+                consecutive_failures: c.consecutive_failures,
+            },
+        }
+    }
+
     fn state_of(c: &Circuit) -> BreakerState {
         match c.open_until {
             Some(until) if Instant::now() < until => BreakerState::Open,
@@ -223,6 +248,36 @@ mod tests {
         probe.succeed();
         assert_eq!(b.state("m"), BreakerState::Closed);
         assert!(b.acquire("m").is_ok());
+    }
+
+    #[test]
+    fn the_health_of_a_circuit_follows_its_state() {
+        use riddle_core::BreakerHealth;
+        let b = breaker();
+        assert_eq!(
+            b.health("m"),
+            BreakerHealth::Closed {
+                consecutive_failures: 0
+            }
+        );
+        b.acquire("m").unwrap().fail();
+        assert_eq!(
+            b.health("m"),
+            BreakerHealth::Closed {
+                consecutive_failures: 1
+            }
+        );
+        for _ in 0..2 {
+            b.acquire("m").unwrap().fail();
+        }
+        match b.health("m") {
+            BreakerHealth::Open { until } => {
+                assert!(until - chrono::Utc::now() > chrono::Duration::seconds(50))
+            }
+            other => panic!("expected Open, got {other:?}"),
+        }
+        b.expire_cooldown("m");
+        assert_eq!(b.health("m"), BreakerHealth::HalfOpen);
     }
 
     #[test]

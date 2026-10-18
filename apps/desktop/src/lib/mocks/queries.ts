@@ -38,6 +38,7 @@ import type { Transition } from '@/bindings/Transition'
 import type { DispositionKind } from '@/bindings/DispositionKind'
 import type { UsageSummary } from '@/bindings/UsageSummary'
 import type { TrustStats } from '@/bindings/TrustStats'
+import type { DiagnosticsBundle } from '../types'
 import type { NamedList } from '@/bindings/NamedList'
 import { belowAct } from '@/features/settings/accounts/model'
 import { u64 } from '../format'
@@ -339,6 +340,8 @@ export function taskCentre(state: MockState): TaskCentre {
     digs: state.digs.map((d) => ({ digId: d.id, name: d.name, status: d.status })),
     jobs: [...state.jobs].sort((a, b) => rank(a.status.state) - rank(b.status.state) || (a.updatedAt < b.updatedAt ? 1 : -1)),
     storeFault: state.devInfo.storeFault,
+    judge: state.judgeHealth,
+    llm: state.llmHealth,
     asOf: new Date().toISOString(),
   }
 }
@@ -653,22 +656,23 @@ export function updatePreview(state: MockState): UpdatePreview | null {
   }
 }
 
-export function exportDiagnostics(state: MockState): string {
+/** The bundle as the router composes it: the same sections, the OAuth client reduced to present-or-absent. */
+export function exportDiagnostics(state: MockState): DiagnosticsBundle {
   const tc = taskCentre(state)
-  return [
-    `Riddle ${state.devInfo.build.version} (${state.devInfo.build.gitSha}${state.devInfo.build.dirty ? '-dirty' : ''}) ${state.devInfo.build.profile}`,
-    `OS ${state.devInfo.os} ${state.devInfo.arch}; uptime ${state.devInfo.uptimeSeconds}s; log level ${state.devInfo.logLevel}`,
-    `Data dir: ${state.devInfo.dataDir}`,
-    `Stores: ${state.devInfo.stores.map((s) => `${s.label} ${(s.sizeBytes / 1024 / 1024).toFixed(1)} MB`).join(', ')}`,
-    `Digs: ${state.digs.map((d) => `${d.id} provider=${d.provider} privacy=${d.privacy} projection=${d.projection} status=${d.status.state}`).join('; ')}`,
-    `Task Centre: ${tc.overall}; jobs ${tc.jobs.map((j) => `${j.kind}:${j.status.state}`).join(', ')}`,
-    `Judge: ${state.settings.judge.provider} ${state.settings.judge.model} key=${state.settings.judge.apiKeyPresent ? 'present' : 'absent'} (${state.settings.judge.keySource})`,
-    `LLM: ${state.settings.llm.provider} ${state.settings.llm.region} escalation=${state.settings.llm.escalationModel} director=${state.settings.llm.directorModel}`,
-    `Gmail client: ${state.settings.gmail.clientId ? 'configured' : 'absent'}; secret ${state.settings.gmail.clientSecretPresent ? 'present' : 'absent'}`,
-    `Store fault: ${state.devInfo.storeFault ?? 'none'}`,
-    `Recent errors: ${state.logs.filter((l) => l.level === 'error').length}`,
-    '[redacted: no subjects, bodies, addresses or tokens]',
-  ].join('\n')
+  return {
+    exportedAt: new Date().toISOString(),
+    redaction: 'identifiers only: no subjects, bodies, addresses, names, tokens or keys',
+    runtime: state.devInfo,
+    taskCentre: tc,
+    traceStats: traceStats(state, {}),
+    judge: { identity: { provider: state.settings.judge.provider, modelId: state.settings.judge.model }, health: tc.judge ?? { breaker: { state: 'unknown' }, lastSuccessAt: null, lastFailureAt: null, lastFailureKind: null } },
+    llm: state.settings.llm.provider === 'null' || !tc.llm ? null : { identity: { provider: state.settings.llm.provider, modelId: state.settings.llm.escalationModel }, health: tc.llm },
+    digs: state.digs.map((d) => ({ id: d.id, name: d.name, provider: d.provider, privacy: d.privacy, projection: d.projection, disabled: d.disabled, status: d.status })),
+    actions: 0,
+    settings: { ...state.settings, gmail: { ...state.settings.gmail, clientId: state.settings.gmail.clientId ? 'configured' : 'absent' } },
+    swallowed: state.devInfo.swallowed,
+    warnings: state.logs.filter((l) => l.level === 'error' || l.level === 'warn').slice(-50),
+  }
 }
 
 export function readLogs(state: MockState, args: { limit?: number | null; category?: string | null; level?: string | null; text?: string | null }): LogLine[] {

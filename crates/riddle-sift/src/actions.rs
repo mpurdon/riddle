@@ -210,11 +210,12 @@ fn classify_as_user(
     });
     if let Some(hook) = projection(ctx) {
         if let Err(e) = hook.project(dig, &k) {
-            rwarn!(
+            riddle_observability::swallowed!(
                 Category::Projection,
-                "projection of {} failed: {}",
-                message_id,
-                e.message
+                "correction_projection",
+                e,
+                "projection of {} failed",
+                message_id
             );
         }
     }
@@ -346,11 +347,12 @@ async fn restore(ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
                 });
                 if let Some(h) = &hook {
                     if let Err(e) = h.project(&dig, &p) {
-                        rwarn!(
+                        riddle_observability::swallowed!(
                             Category::Projection,
-                            "projection of {} failed on undo: {}",
-                            id,
-                            e.message
+                            "undo_projection",
+                            e,
+                            "projection of {} failed on undo",
+                            id
                         );
                     }
                 }
@@ -359,11 +361,12 @@ async fn restore(ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
                 repo::classifications::supersede_current(&store, &id)?;
                 if let Some(h) = &hook {
                     if let Err(e) = h.unproject(&dig, &id) {
-                        rwarn!(
+                        riddle_observability::swallowed!(
                             Category::Projection,
-                            "unproject of {} failed on undo: {}",
-                            id,
-                            e.message
+                            "undo_unproject",
+                            e,
+                            "unproject of {} failed on undo",
+                            id
                         );
                     }
                 }
@@ -417,11 +420,12 @@ fn restore_due_date(ctx: &ActionContext, item: &Value) {
         ctx.services.events.clone(),
     );
     if let Err(e) = svc.set_due(&FindId(find_id.to_string()), prior) {
-        rwarn!(
+        riddle_observability::swallowed!(
             Category::Actions,
-            "could not restore the due date of find {} on undo: {}",
-            find_id,
-            e.message
+            "undo_due_date",
+            e,
+            "could not restore the due date of find {} on undo",
+            find_id
         );
     }
 }
@@ -714,12 +718,13 @@ fn find_for_user_decision(
 /// Bookkeeping: a failed demotion check never fails the correction.
 fn check_demotion(ctx: &ActionContext, store: &Store, mesh: &(MeshId, u32)) {
     if let Err(e) = demote_if_reversed_often(ctx, store, &mesh.0, mesh.1) {
-        rwarn!(
+        riddle_observability::swallowed!(
             Category::Actions,
-            "demotion check failed for mesh {} v{}: {}",
+            "demotion_check",
+            e,
+            "demotion check failed for mesh {} v{}",
             mesh.0,
-            mesh.1,
-            e.message
+            mesh.1
         );
     }
 }
@@ -820,11 +825,12 @@ impl Action for ReviewShadow {
             repo::shadow_reviews::set(&store, &id, ShadowReview::Agreed)?;
             if let Some(mid) = &shadow.mesh_id {
                 if let Err(e) = riddle_mesh::shadow::record_agreement(&index, mid) {
-                    rwarn!(
+                    riddle_observability::swallowed!(
                         Category::Mesh,
-                        "agreement not counted for {}: {}",
-                        mid,
-                        e.message
+                        "shadow_agreement",
+                        e,
+                        "agreement not counted for {}",
+                        mid
                     );
                 }
             }
@@ -857,11 +863,12 @@ impl Action for ReviewShadow {
         repo::shadow_reviews::set(&store, &id, ShadowReview::Disagreed)?;
         if let Some(mid) = &shadow.mesh_id {
             if let Err(e) = riddle_mesh::shadow::record_disagreement(&index, mid) {
-                rwarn!(
+                riddle_observability::swallowed!(
                     Category::Mesh,
-                    "disagreement not counted for {}: {}",
-                    mid,
-                    e.message
+                    "shadow_disagreement",
+                    e,
+                    "disagreement not counted for {}",
+                    mid
                 );
             }
         }

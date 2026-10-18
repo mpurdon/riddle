@@ -23,6 +23,12 @@ shadowStartedAt: string | null, createdAt: string,
  */
 disabled: boolean, 
 /**
+ * How far back the history backfill fetches after the first sync, in
+ * days from now; `None` is the whole mailbox (§53). The first sync
+ * itself covers the sync window (90 days) whatever this says.
+ */
+historyDays?: number, 
+/**
  * Computed at read time from the account's settings and the build;
  * never stored. `None` only for a Dig read straight from the store.
  */

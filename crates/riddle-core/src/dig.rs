@@ -178,6 +178,12 @@ pub struct Dig {
     /// fixture account could stop cluttering the real one without that.
     #[serde(default)]
     pub disabled: bool,
+    /// How far back the history backfill fetches after the first sync, in
+    /// days from now; `None` is the whole mailbox (§53). The first sync
+    /// itself covers the sync window (90 days) whatever this says.
+    #[serde(default)]
+    #[ts(optional)]
+    pub history_days: Option<u32>,
     /// Computed at read time from the account's settings and the build;
     /// never stored. `None` only for a Dig read straight from the store.
     #[serde(default)]

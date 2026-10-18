@@ -25,7 +25,7 @@ import { PRIVACY_OPTIONS, detailOf, labelOf } from '@/features/settings/accounts
 import { fmtDuration, fmtInt, fmtRelative, num } from '@/lib/format'
 import { toRiddleError } from '@/lib/ipc'
 import { useSummary, useDigContext, useSettings, useTaskCentre } from '@/lib/queries'
-import { catchUpJob, catchUpLine, jobKindLabel, jobProgressPct, summaryCopy } from '@/lib/selectors'
+import { backfillLine, catchUpJob, catchUpLine, historyBackfillJob, jobKindLabel, jobProgressPct, summaryCopy } from '@/lib/selectors'
 import { useAction, useLastUndoable } from '@/lib/useAction'
 import { useUi } from '@/lib/stores'
 import { TrustCard } from './TrustCard'
@@ -67,6 +67,7 @@ export default function SummaryPage() {
           ) : null}
         </p>
         {!s.caughtUp && !c.firstRun ? <CatchUp s={s} tc={tc.data} digId={digId} /> : null}
+        <HistoryBackfill tc={tc.data} digId={digId} />
         {s.degraded.length ? (
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
             <Chip tone="bad">Degraded</Chip>
@@ -155,6 +156,21 @@ export default function SummaryPage() {
         ) : null}
       </div>
     </div>
+  )
+}
+
+/**
+ * Older mail filling in behind the window, as one secondary line: a user
+ * whose recent mail is sorted is caught up while the history fetches, so
+ * this never takes the catch-up section's place or its tone.
+ */
+function HistoryBackfill({ tc, digId }: { tc: TaskCentre | undefined; digId: string | null }) {
+  const job = historyBackfillJob(tc, digId)
+  if (!job) return null
+  return (
+    <p aria-label="Fetching older mail" className="mt-2 text-xs text-ink-2">
+      {backfillLine(job)}
+    </p>
   )
 }
 

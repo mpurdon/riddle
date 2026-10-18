@@ -3,7 +3,7 @@
 use crate::state::AppState;
 use riddle_core::BuildStamp;
 use riddle_errors::{Result, RiddleError};
-use riddle_observability::{record, tail, Category, LogLine};
+use riddle_observability::{record, tail, Category, LogLine, SwallowedFailure};
 use serde::Serialize;
 use tauri::State;
 
@@ -30,6 +30,8 @@ pub struct DevInfo {
     pub stores: Vec<StoreInfo>,
     pub store_fault: Option<String>,
     pub log_level: String,
+    /// Bookkeeping failures logged and dropped since launch, by site.
+    pub swallowed: Vec<SwallowedFailure>,
 }
 
 #[tauri::command]
@@ -67,6 +69,7 @@ pub async fn dev_info(state: State<'_, AppState>) -> Result<DevInfo> {
         stores,
         store_fault: stores_ref.any_fault(),
         log_level: log::max_level().to_string(),
+        swallowed: riddle_observability::swallowed_failures(),
     })
 }
 
@@ -111,58 +114,25 @@ fn _assert_error_is_serializable(e: RiddleError) -> String {
     serde_json::to_string(&e).unwrap_or_default()
 }
 
-/// A redacted diagnostics block safe to paste into an issue: build, OS,
-/// directories, store sizes, fault state, and the last warnings. No
-/// identifiers that could carry content, no settings values that are secrets.
+/// The redacted diagnostics bundle, from the shared router so the desktop,
+/// the bridge and the CLI export the same document; the desktop's own
+/// directories ride along, which the router does not know. A JSON object:
+/// the pane pretty-prints it for the clipboard.
 #[tauri::command]
-pub async fn export_diagnostics(state: State<'_, AppState>) -> Result<String> {
-    let info = dev_info(state.clone()).await?;
-    let mut out = String::new();
-    out.push_str(&format!(
-        "Riddle {} ({}{}) built {} [{}]\n",
-        info.build.version,
-        info.build.git_sha,
-        if info.build.dirty { "-dirty" } else { "" },
-        info.build.built_at,
-        info.build.profile
-    ));
-    out.push_str(&format!(
-        "OS {} {}; uptime {}s; log level {}\n",
-        info.os, info.arch, info.uptime_seconds, info.log_level
-    ));
-    out.push_str(&format!("data {}\nlogs {}\n", info.data_dir, info.log_dir));
-    for s in &info.stores {
-        out.push_str(&format!("store {} {} KB\n", s.label, s.size_bytes / 1024));
+pub async fn export_diagnostics(state: State<'_, AppState>) -> Result<serde_json::Value> {
+    let mut bundle =
+        riddle_app::dispatch::call(&state.app, "export_diagnostics", serde_json::json!({})).await?;
+    if let Some(runtime) = bundle.get_mut("runtime").and_then(|r| r.as_object_mut()) {
+        runtime.insert(
+            "logDir".into(),
+            serde_json::json!(state.dirs.logs.display().to_string()),
+        );
+        runtime.insert(
+            "cacheDir".into(),
+            serde_json::json!(state.dirs.cache.display().to_string()),
+        );
     }
-    if let Some(f) = &info.store_fault {
-        out.push_str(&format!("STORE FAULT: {f}\n"));
-    }
-    match state.app.list_digs() {
-        Ok(digs) => out.push_str(&format!(
-            "digs {} ({})\n",
-            digs.len(),
-            digs.iter()
-                .map(|d| format!("{:?}/{:?}", d.provider, d.status))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-        Err(e) => out.push_str(&format!("digs unavailable: {}\n", e.kind.as_str())),
-    }
-    out.push_str(&format!(
-        "actions {}\n",
-        state.runtime().list_actions().len()
-    ));
-    out.push_str("recent warnings:\n");
-    for l in tail(50, None, Some(log::Level::Warn), None) {
-        out.push_str(&format!(
-            "  [{}][{}][{}] {}\n",
-            l.at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            l.level,
-            l.category,
-            l.message
-        ));
-    }
-    Ok(out)
+    Ok(bundle)
 }
 
 /// Drop derived caches (the in-memory log tail keeps its lines; SQLite

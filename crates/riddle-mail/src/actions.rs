@@ -233,11 +233,12 @@ impl Action for DeleteDraft {
         if let Some(pid) = &draft.provider_id {
             let registry = ctx.services.require::<ProviderRegistry>()?;
             if let Err(e) = registry.provider_for(&dig)?.delete_draft(pid).await {
-                rwarn!(
+                riddle_observability::swallowed!(
                     Category::Actions,
-                    "provider draft for {} not deleted: {}",
-                    id,
-                    e.kind.as_str()
+                    "provider_draft_delete",
+                    e,
+                    "provider draft for {} not deleted",
+                    id
                 );
             }
         }
@@ -337,11 +338,12 @@ impl Action for SendMessage {
             .await
         {
             if let Err(e) = repo::messages::upsert(&store, &m) {
-                rwarn!(
+                riddle_observability::swallowed!(
                     Category::Actions,
-                    "sent message {} not cached: {}",
-                    message_id,
-                    e.kind.as_str()
+                    "sent_message_cache",
+                    e,
+                    "sent message {} not cached",
+                    message_id
                 );
             } else {
                 ctx.services.emit(RiddleEvent::MessagesChanged {
@@ -400,6 +402,7 @@ impl Action for AddFixtureDig {
             shadow_started_at: None,
             created_at: now,
             disabled: false,
+            history_days: None,
             mailbox: None,
         };
         repo::digs::upsert(&index, &dig)?;
@@ -496,11 +499,12 @@ impl Action for RemoveDig {
         }
         if let Some(creds) = ctx.services.get::<riddle_credentials::Credentials>() {
             if let Err(e) = creds.delete(&riddle_credentials::gmail_refresh_token_key(&dig.id)) {
-                rwarn!(
+                riddle_observability::swallowed!(
                     Category::Actions,
-                    "credential purge for dig {} failed: {}",
-                    dig.id,
-                    e.kind.as_str()
+                    "credential_purge",
+                    e,
+                    "credential purge for dig {} failed",
+                    dig.id
                 );
             }
         }

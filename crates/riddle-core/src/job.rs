@@ -26,6 +26,11 @@ pub enum JobKind {
     InitialSync,
     CatchUp,
     IncrementalSync,
+    /// Older mail than the first sync's window, fetched after it in bounded
+    /// runs until the mailbox start or the Dig's `history_days`. Never a
+    /// catch-up: an account with its recent mail sorted is caught up while
+    /// its history fills (§53).
+    HistoryBackfill,
     Sift,
     HistoricalSift,
     SignalBackfill,
@@ -47,7 +52,8 @@ impl JobKind {
             JobKind::Sift | JobKind::IncrementalSync | JobKind::TemporalSift => Priority::Incoming,
             JobKind::CatchUp | JobKind::InitialSync => Priority::CatchUp,
             JobKind::Projection => Priority::Projection,
-            JobKind::HistoricalSift
+            JobKind::HistoryBackfill
+            | JobKind::HistoricalSift
             | JobKind::SignalBackfill
             | JobKind::Embeddings
             | JobKind::Maintenance
@@ -60,6 +66,7 @@ impl JobKind {
             JobKind::InitialSync => "initial_sync",
             JobKind::CatchUp => "catch_up",
             JobKind::IncrementalSync => "incremental_sync",
+            JobKind::HistoryBackfill => "history_backfill",
             JobKind::Sift => "sift",
             JobKind::HistoricalSift => "historical_sift",
             JobKind::SignalBackfill => "signal_backfill",
@@ -165,5 +172,11 @@ pub struct TaskCentre {
     pub jobs: Vec<Job>,
     /// The persistence gate fault flag (§11), when set.
     pub store_fault: Option<String>,
+    /// The judge's breaker and last calls; `None` with no judge configured.
+    #[serde(default)]
+    pub judge: Option<crate::traits::ServiceHealth>,
+    /// The LLM client's breaker and last calls; `None` with no LLM.
+    #[serde(default)]
+    pub llm: Option<crate::traits::ServiceHealth>,
     pub as_of: DateTime<Utc>,
 }

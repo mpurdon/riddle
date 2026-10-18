@@ -922,6 +922,246 @@ pub fn thread_decisions(
     })
 }
 
+/// Messages with no current classification of either kind dated on or
+/// after `since`: the backlog of the sync window alone, so an account whose
+/// recent mail is sorted reads as caught up while the history backfill's
+/// older mail waits its turn (§53). An index range on `messages_unsifted`.
+pub fn unclassified_count_since(
+    store: &Store,
+    since: &chrono::DateTime<chrono::Utc>,
+) -> Result<u64> {
+    store.read(|c| {
+        c.query_row(
+            "SELECT count(*) FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL AND shadow_sifted_at IS NULL AND date >= ?1",
+            [ts(since)], |r| r.get::<_, i64>(0),
+        ).map(|n| n as u64)
+    })
+}
+
+/// The Sift backlog, newest first, preferring messages whose body has
+/// landed. Bodies arrive a cycle behind the listing, and a message judged
+/// on its snippet is judged for good (§53), so a body-less message fills
+/// the batch only when it is older than `bodyless_before`: the start of the
+/// body window, mail the body fetch does not cover and that is judged on
+/// what it has. Once nothing is left to fetch (`count_without_body` is 0,
+/// a missing body stored as "") this is `unclassified_ids`. Both queries
+/// walk the `messages_unsifted` index.
+pub fn unclassified_ids_preferring_bodies(
+    store: &Store,
+    limit: u32,
+    shadow_decides: bool,
+    bodyless_before: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<Vec<MessageId>> {
+    let shadow = if shadow_decides {
+        " AND shadow_sifted_at IS NULL"
+    } else {
+        ""
+    };
+    store.read(|c| {
+        let mut st = c.prepare(&format!(
+            "SELECT id FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL{shadow}
+             AND (body_text IS NOT NULL OR body_html IS NOT NULL)
+             ORDER BY date DESC LIMIT ?1"
+        ))?;
+        let mut ids: Vec<MessageId> = st
+            .query_map([limit], |r| Ok(MessageId(r.get(0)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let room = (limit as usize).saturating_sub(ids.len());
+        if let (Some(before), true) = (bodyless_before, room > 0) {
+            let mut st = c.prepare(&format!(
+                "SELECT id FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL{shadow}
+                 AND body_text IS NULL AND body_html IS NULL AND date < ?1
+                 ORDER BY date DESC LIMIT ?2"
+            ))?;
+            let older = st
+                .query_map(params![ts(&before), room as u32], |r| {
+                    Ok(MessageId(r.get(0)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            ids.extend(older);
+        }
+        Ok(ids)
+    })
+}
+
+/// Each live message's thread and labels for a set of ids, from one query
+/// and without bodies: what applying a label change needs. The incremental
+/// sync read the whole row, body included, per changed message.
+pub fn labels_for_ids(
+    store: &Store,
+    ids: &[MessageId],
+) -> Result<Vec<(MessageId, ThreadId, Vec<String>)>> {
+    if ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let list: Vec<&str> = ids.iter().map(|id| id.as_str()).collect();
+    let json = serde_json::to_string(&list).unwrap_or_else(|_| "[]".into());
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT id, thread_id, labels_json FROM messages
+             WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?1))",
+        )?;
+        let rows = st
+            .query_map([json], |r| {
+                Ok((
+                    MessageId(r.get(0)?),
+                    ThreadId(r.get(1)?),
+                    from_json::<Vec<String>>(r.get(2)?)?,
+                ))
+            })?
+            .collect();
+        rows
+    })
+}
+
+/// Several messages' labels in one transaction.
+pub fn set_labels_many(store: &Store, rows: &[(MessageId, Vec<String>)]) -> Result<()> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    store.write(|c| {
+        let mut st = c.prepare("UPDATE messages SET labels_json = ?2 WHERE id = ?1")?;
+        for (id, labels) in rows {
+            st.execute(params![id.as_str(), to_json(labels)?])?;
+        }
+        Ok(())
+    })
+}
+
+/// `address_stats` for a set of addresses (lowercase) in three queries:
+/// one conditional-sum pass over the set's mail, one over the user's sent
+/// mail to them with the recipients exploded once, and one for the newest
+/// display name. The per-address version ran seven queries each, with
+/// `json_extract` on every header, for every address a sync page touched
+/// (17 Oct 2026). Addresses with no mail are left out.
+pub fn address_stats_many(
+    store: &Store,
+    emails: &[String],
+) -> Result<std::collections::HashMap<String, AddressStats>> {
+    let mut out = std::collections::HashMap::new();
+    if emails.is_empty() {
+        return Ok(out);
+    }
+    let set = serde_json::to_string(emails).unwrap_or_else(|_| "[]".into());
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT from_email,
+                    sum(is_sent = 0),
+                    min(CASE WHEN is_sent = 0 THEN date END),
+                    max(CASE WHEN is_sent = 0 THEN date END),
+                    sum(is_sent = 0 AND (
+                      json_extract(headers_json, '$.listId') IS NOT NULL OR json_extract(headers_json, '$.listUnsubscribe') IS NOT NULL
+                      OR json_extract(headers_json, '$.autoSubmitted') IS NOT NULL OR lower(json_extract(headers_json, '$.precedence')) IN ('bulk', 'list', 'junk'))),
+                    sum(is_sent = 0 AND (json_extract(headers_json, '$.listId') IS NOT NULL OR lower(json_extract(headers_json, '$.precedence')) = 'list')),
+                    sum(json_extract(headers_json, '$.authentication.spf') = 'fail' OR json_extract(headers_json, '$.authentication.dkim') = 'fail' OR json_extract(headers_json, '$.authentication.dmarc') = 'fail'),
+                    sum(EXISTS (SELECT 1 FROM json_each(labels_json) WHERE value = 'SPAM'))
+             FROM messages WHERE deleted_at IS NULL AND from_email IN (SELECT value FROM json_each(?1))
+             GROUP BY from_email",
+        )?;
+        for row in st.query_map([&set], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                r.get::<_, Option<i64>>(2)?,
+                r.get::<_, Option<i64>>(3)?,
+                r.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                r.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                r.get::<_, Option<i64>>(6)?.unwrap_or(0),
+                r.get::<_, Option<i64>>(7)?.unwrap_or(0),
+            ))
+        })? {
+            let (email, from, first, last, automated, list, auth, spam) = row?;
+            let s: &mut AddressStats = out.entry(email).or_default();
+            s.messages_from = from as u64;
+            s.first_at = first.map(from_ts);
+            s.last_at = last.map(from_ts);
+            s.automated = automated as u64;
+            s.mailing_list = list as u64;
+            s.auth_failures = auth as u64;
+            s.spam_verdicts = spam as u64;
+        }
+        let mut st = c.prepare(
+            "SELECT rcpt, count(*), min(date), max(date) FROM (
+               SELECT m.id, m.date, lower(json_extract(j.value, '$.email')) AS rcpt
+               FROM messages m, json_each(m.to_json) j WHERE m.is_sent = 1 AND m.deleted_at IS NULL
+               UNION
+               SELECT m.id, m.date, lower(json_extract(j.value, '$.email'))
+               FROM messages m, json_each(m.cc_json) j WHERE m.is_sent = 1 AND m.deleted_at IS NULL
+             ) WHERE rcpt IN (SELECT value FROM json_each(?1)) GROUP BY rcpt",
+        )?;
+        for row in st.query_map([&set], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<i64>>(2)?,
+                r.get::<_, Option<i64>>(3)?,
+            ))
+        })? {
+            let (email, to, first_to, last_to) = row?;
+            let s: &mut AddressStats = out.entry(email).or_default();
+            s.messages_to = to as u64;
+            let first_to = first_to.map(from_ts);
+            let last_to = last_to.map(from_ts);
+            s.first_at = match (s.first_at, first_to) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+            s.last_at = match (s.last_at, last_to) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                (a, b) => a.or(b),
+            };
+        }
+        let mut st = c.prepare(
+            "SELECT from_email, from_name FROM messages
+             WHERE deleted_at IS NULL AND from_name IS NOT NULL AND from_name != ''
+               AND from_email IN (SELECT value FROM json_each(?1))
+             ORDER BY date",
+        )?;
+        for row in st.query_map([&set], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })? {
+            let (email, name) = row?;
+            // Oldest first, so the last one kept is the newest.
+            if let Some(s) = out.get_mut(&email) {
+                s.name = Some(name);
+            }
+        }
+        Ok(())
+    })?;
+    Ok(out)
+}
+
+/// `arrivals_from` for a set of addresses (lowercase) in one query, each
+/// address's arrivals oldest first.
+pub fn arrivals_from_many(
+    store: &Store,
+    emails: &[String],
+    since: &chrono::DateTime<chrono::Utc>,
+) -> Result<std::collections::HashMap<String, Vec<chrono::DateTime<chrono::Utc>>>> {
+    let mut out: std::collections::HashMap<String, Vec<chrono::DateTime<chrono::Utc>>> =
+        std::collections::HashMap::new();
+    if emails.is_empty() {
+        return Ok(out);
+    }
+    let set = serde_json::to_string(emails).unwrap_or_else(|_| "[]".into());
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT from_email, date FROM messages
+             WHERE deleted_at IS NULL AND is_sent = 0 AND date >= ?1
+               AND from_email IN (SELECT value FROM json_each(?2))
+             ORDER BY date",
+        )?;
+        for row in st.query_map(params![ts(since), &set], |r| {
+            Ok((r.get::<_, String>(0)?, crate::from_ts(r.get(1)?)))
+        })? {
+            let (email, at) = row?;
+            out.entry(email).or_default().push(at);
+        }
+        Ok(())
+    })?;
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1073,10 +1313,20 @@ mod tests {
             "SELECT id FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL ORDER BY date DESC LIMIT 10",
             "SELECT id FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL AND shadow_sifted_at IS NULL ORDER BY date DESC LIMIT 10",
             "SELECT count(*) FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL AND shadow_sifted_at IS NULL",
+            "SELECT id FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL AND (body_text IS NOT NULL OR body_html IS NOT NULL) ORDER BY date DESC LIMIT 10",
+            "SELECT count(*) FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL AND shadow_sifted_at IS NULL AND date >= 5",
         ] {
             let p = plan(sql);
             assert!(p.contains("messages_unsifted"), "{sql}\n{p}");
         }
+        // The body-less fallback of the Sift batch: either partial index
+        // bounds it to the few rows that qualify.
+        let sql = "SELECT id FROM messages WHERE sifted_at IS NULL AND deleted_at IS NULL AND body_text IS NULL AND body_html IS NULL AND date < 5 ORDER BY date DESC LIMIT 10";
+        let p = plan(sql);
+        assert!(
+            p.contains("messages_unsifted") || p.contains("messages_without_body"),
+            "{sql}\n{p}"
+        );
         for sql in [
             "SELECT id FROM messages WHERE deleted_at IS NULL AND body_text IS NULL AND body_html IS NULL ORDER BY date DESC LIMIT 10",
             "SELECT count(*) FROM messages WHERE deleted_at IS NULL AND body_text IS NULL AND body_html IS NULL",
@@ -1203,5 +1453,164 @@ mod tests {
         );
         assert_eq!(recent["bob@example.com"].len(), 1);
         assert_eq!(sender_counts_since(&store, &since).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn the_sift_batch_prefers_messages_with_bodies_and_takes_older_body_less_ones_only() {
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        let dig = DigId::from("dig-1");
+        // Newest first: 1 (no body), 2 (body), 3 (no body), 4 (body), 5 (no body, old).
+        for (n, body) in [(1, false), (2, true), (3, false), (4, true)] {
+            let mut m = message(&dig, n, &[]);
+            if body {
+                m.body_text = Some("hello".into());
+            }
+            upsert(&store, &m).unwrap();
+        }
+        let mut old = message(&dig, 5, &[]);
+        old.date = chrono::Utc::now() - chrono::Duration::days(200);
+        upsert(&store, &old).unwrap();
+        let id = |n: u32| MessageId::for_provider(&dig, &format!("p{n}")).0;
+        let batch = |limit: u32, before: Option<chrono::DateTime<chrono::Utc>>| -> Vec<String> {
+            unclassified_ids_preferring_bodies(&store, limit, false, before)
+                .unwrap()
+                .into_iter()
+                .map(|m| m.0)
+                .collect()
+        };
+        // Without a body window nothing body-less is taken, however much room.
+        assert_eq!(batch(10, None), [id(2), id(4)]);
+        assert_eq!(batch(1, None), [id(2)]);
+        // Older than the body window: the old one fills the room, the recent
+        // body-less ones wait for their bodies.
+        let window = chrono::Utc::now() - chrono::Duration::days(90);
+        assert_eq!(batch(10, Some(window)), [id(2), id(4), id(5)]);
+        assert_eq!(batch(2, Some(window)), [id(2), id(4)]);
+        // A body stored as "" (the provider no longer has it) counts as landed.
+        set_body(&store, &MessageId::for_provider(&dig, "p1"), Some(""), None).unwrap();
+        assert_eq!(batch(10, None), [id(1), id(2), id(4)]);
+    }
+
+    #[test]
+    fn labels_for_a_set_of_ids_come_from_one_query_and_land_in_one_write() {
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        let dig = DigId::from("dig-1");
+        let (a, b) = (
+            message(&dig, 1, &["INBOX"]),
+            message(&dig, 2, &["INBOX", "UNREAD"]),
+        );
+        upsert(&store, &a).unwrap();
+        upsert(&store, &b).unwrap();
+        let missing = MessageId::for_provider(&dig, "nope");
+        let mut rows =
+            labels_for_ids(&store, &[a.id.clone(), b.id.clone(), missing.clone()]).unwrap();
+        rows.sort_by(|x, y| x.0.as_str().cmp(y.0.as_str()));
+        assert_eq!(
+            rows,
+            vec![
+                (a.id.clone(), a.thread_id.clone(), vec!["INBOX".to_string()]),
+                (
+                    b.id.clone(),
+                    b.thread_id.clone(),
+                    vec!["INBOX".to_string(), "UNREAD".to_string()]
+                ),
+            ]
+        );
+        let writes = store.stats().writes;
+        set_labels_many(
+            &store,
+            &[
+                (a.id.clone(), vec!["SPOIL".into()]),
+                (b.id.clone(), vec!["INBOX".into()]),
+            ],
+        )
+        .unwrap();
+        assert_eq!(store.stats().writes - writes, 1, "one transaction for both");
+        assert_eq!(labels_of(&store, &a.id).unwrap(), ["SPOIL"]);
+        assert_eq!(labels_of(&store, &b.id).unwrap(), ["INBOX"]);
+        set_labels_many(&store, &[]).unwrap();
+        assert_eq!(
+            store.stats().writes - writes,
+            1,
+            "nothing to write is no write"
+        );
+    }
+
+    #[test]
+    fn address_stats_for_a_set_of_senders_match_the_single_address_query() {
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        let dig = DigId::from("dig-1");
+        // A newsletter with list headers and a spam verdict, a colleague the
+        // user wrote to (once in To, once in Cc, once both), a phisher
+        // failing DMARC, and a stranger with no mail at all.
+        for n in 1..=4 {
+            let mut m = message(&dig, n, &["INBOX"]);
+            m.from = Address::new("news@list.example", Some("The List"));
+            m.headers.list_id = Some("<list.example>".into());
+            m.headers.precedence = Some("bulk".into());
+            if n == 1 {
+                m.labels.push("SPAM".into());
+            }
+            upsert(&store, &m).unwrap();
+        }
+        for n in 10..=12 {
+            let mut m = message(&dig, n, &["INBOX"]);
+            m.from = Address::new("Priya@Example.com", Some("Priya"));
+            upsert(&store, &m).unwrap();
+        }
+        for (n, to, cc) in [(20, true, false), (21, false, true), (22, true, true)] {
+            let mut m = message(&dig, n, &["SENT"]);
+            m.from = Address::new("me@example.com", None);
+            m.is_sent = true;
+            let priya = Address::new("priya@example.com", None);
+            if to {
+                m.to.push(priya.clone());
+            }
+            if cc {
+                m.cc.push(priya);
+            }
+            upsert(&store, &m).unwrap();
+        }
+        let mut phish = message(&dig, 30, &["INBOX"]);
+        phish.from = Address::new("security@micros0ft.example", None);
+        phish.headers.authentication.dmarc = riddle_core::AuthVerdict::Fail;
+        upsert(&store, &phish).unwrap();
+
+        let set: Vec<String> = [
+            "news@list.example",
+            "priya@example.com",
+            "security@micros0ft.example",
+            "nobody@example.com",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let many = address_stats_many(&store, &set).unwrap();
+        assert_eq!(many.len(), 3, "an address with no mail is left out");
+        for email in &set[..3] {
+            assert_eq!(
+                many[email],
+                address_stats(&store, email).unwrap(),
+                "{email}"
+            );
+        }
+        let news = &many["news@list.example"];
+        assert_eq!(
+            (news.messages_from, news.automated, news.mailing_list),
+            (4, 4, 4)
+        );
+        assert_eq!(news.spam_verdicts, 1);
+        assert_eq!(news.name.as_deref(), Some("The List"));
+        let priya = &many["priya@example.com"];
+        assert_eq!((priya.messages_from, priya.messages_to), (3, 3));
+        assert_eq!(many["security@micros0ft.example"].auth_failures, 1);
+        let since = chrono::Utc::now() - chrono::Duration::days(1);
+        let arrivals = arrivals_from_many(&store, &set, &since).unwrap();
+        assert_eq!(arrivals["priya@example.com"].len(), 3);
+        assert_eq!(
+            arrivals["priya@example.com"],
+            arrivals_from(&store, "priya@example.com", &since).unwrap()
+        );
+        assert!(!arrivals.contains_key("nobody@example.com"));
     }
 }

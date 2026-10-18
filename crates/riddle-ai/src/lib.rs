@@ -44,7 +44,7 @@ pub use catalog::{ModelCatalog, ModelPrice, ModelTier};
 pub use llm::{
     ContentBlock, Llm, LlmIdentity, LlmMessage, LlmRequest, LlmResponse, Role, StopReason, ToolSpec,
 };
-pub use prompts::{Prompt, PromptName, PromptSource, PromptStore};
+pub use prompts::{director_register, Prompt, PromptName, PromptSource, PromptStore};
 pub use refiner::{BedrockRefiner, LlmRefiner, ScriptedRefiner};
 pub use scripted::{ScriptedLlm, ScriptedResponse};
 pub use usage::{record_usage, UsageRecorder};

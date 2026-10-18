@@ -67,6 +67,8 @@ pub struct BedrockLlm {
     catalog: Arc<ModelCatalog>,
     breaker: Arc<Breaker>,
     recorder: Option<UsageRecorder>,
+    /// When a model last answered and last failed, for `health()`.
+    calls: riddle_core::CallLog,
 }
 
 impl BedrockLlm {
@@ -78,6 +80,7 @@ impl BedrockLlm {
             catalog,
             breaker,
             recorder: None,
+            calls: riddle_core::CallLog::default(),
         }
     }
 
@@ -166,6 +169,7 @@ impl BedrockLlm {
         match &outcome {
             Ok(resp) => {
                 permit.succeed();
+                self.calls.succeeded(chrono::Utc::now());
                 record_usage(
                     self.recorder.as_ref(),
                     "bedrock",
@@ -191,6 +195,7 @@ impl BedrockLlm {
             }
             Err(e) => {
                 permit.fail();
+                self.calls.failed(chrono::Utc::now(), e.kind.as_str());
                 record_usage(
                     self.recorder.as_ref(),
                     "bedrock",
@@ -416,6 +421,13 @@ impl Llm for BedrockLlm {
             provider: "bedrock".into(),
             model_id: self.config.default_model.clone(),
         }
+    }
+
+    /// The default model's circuit; the breaker is per model, and the
+    /// default is the one Sift's escalation and the Director call.
+    fn health(&self) -> riddle_core::ServiceHealth {
+        self.calls
+            .health(self.breaker.health(&self.config.default_model))
     }
 }
 

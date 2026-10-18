@@ -224,12 +224,13 @@ pub async fn cached_or_evaluate(
             });
             if let Err(err) = put {
                 // Bookkeeping never fails the work: the evaluations are still used.
-                rwarn!(
+                riddle_observability::swallowed!(
                     Category::Judge,
-                    "could not cache {} evaluations for message {}: {}",
+                    "signal_cache_write",
+                    err,
+                    "could not cache {} evaluations for message {}",
                     fresh.len(),
-                    message_id,
-                    err.message
+                    message_id
                 );
             }
         }

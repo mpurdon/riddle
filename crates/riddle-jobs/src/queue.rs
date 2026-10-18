@@ -18,7 +18,7 @@ use crate::spec::{payload_hash, JobEnvelope, JobSpec, PauseReason, USER_PAUSE};
 use parking_lot::Mutex;
 use riddle_core::{Clock, EventSink, Job, JobId, JobStatus, Priority, Progress, RiddleEvent};
 use riddle_errors::{Result, RiddleError};
-use riddle_observability::{rdebug, rerror, rinfo, rwarn, Category};
+use riddle_observability::{rdebug, rinfo, rwarn, Category};
 use riddle_store::{repo, Store};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -255,11 +255,12 @@ impl JobQueue {
     /// a store error is logged and the in-memory state still moves on.
     fn commit(&self, inner: &mut Inner, job: Job) {
         if let Err(e) = repo::jobs::upsert(&self.store, &job) {
-            rerror!(
+            riddle_observability::swallowed!(
                 Category::Jobs,
-                "could not persist job {}: {}",
-                job.id,
-                e.message
+                "job_persist",
+                e,
+                "could not persist job {}",
+                job.id
             );
         }
         let visible = self.visible_locked(inner, &job);
@@ -313,10 +314,11 @@ impl JobQueue {
         let snapshot = job.clone();
         drop(inner);
         if let Err(e) = repo::jobs::upsert(&self.store, &snapshot) {
-            rerror!(
+            riddle_observability::swallowed!(
                 Category::Jobs,
-                "could not persist progress for job {id}: {}",
-                e.message
+                "job_progress_persist",
+                e,
+                "could not persist progress for job {id}"
             );
         }
         self.events.emit(RiddleEvent::JobProgress {

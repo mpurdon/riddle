@@ -84,7 +84,7 @@ fn a_save_round_trips_every_field_and_stamps_the_schema_version() {
     let store = open(dir.path(), false);
     let mut s = Settings::prod_defaults();
     s.schema_version = 0;
-    s.developer_mode = true;
+    s.ui_level = riddle_core::UiLevel::Developer;
     s.log_level = LogLevel::Trace;
     s.notify_priority_threshold = 42;
     s.judge.ssm_profile = None;
@@ -106,6 +106,7 @@ fn a_save_round_trips_every_field_and_stamps_the_schema_version() {
     assert!(text.starts_with("# Riddle settings"), "{text}");
     let reloaded = open(dir.path(), false).settings();
     assert_eq!(reloaded, saved);
+    assert!(reloaded.developer_mode, "Developer derives the flag");
     assert_eq!(reloaded.judge.ssm_profile, None);
     assert_eq!(
         reloaded.autonomy.per_action["archive_messages"],

@@ -2,7 +2,9 @@
  * The Task Centre (§55): a status indicator, per-account status, the job
  * list with honest progress, ETA, pause and cancel, and an onboarding view
  * for the multi-hour initial sync. With no account it says so, rather than
- * "Caught up", which a first run read as a result.
+ * "Caught up", which a first run read as a result. The judge and LLM lines
+ * say what each client's breaker is doing and when it last answered: the
+ * judge's breaker opened and closed for a fortnight behind "Sifting".
  */
 import * as Popover from '@radix-ui/react-popover'
 import { Link } from 'react-router-dom'
@@ -13,7 +15,7 @@ import { ProgressBar } from '@/components/ui/Progress'
 import { Tip } from '@/components/ui/Tooltip'
 import { fmtDuration, fmtInt, fmtRelative, num } from '@/lib/format'
 import { cx } from '@/lib/format'
-import { digPipeline, digStatusChip, isJobActive, jobKindLabel, jobPriorityLabel, jobProgressPct, taskCentreIndicator, type StageState } from '@/lib/selectors'
+import { digPipeline, digStatusChip, isJobActive, jobKindLabel, jobPriorityLabel, jobProgressPct, serviceHealthLine, serviceHealthTone, taskCentreIndicator, type StageState } from '@/lib/selectors'
 import { useTaskCentre } from '@/lib/queries'
 import { useUi } from '@/lib/stores'
 import { useAction } from '@/lib/useAction'
@@ -64,6 +66,12 @@ export function TaskCentrePopover() {
             </div>
           </div>
           {tc.data?.storeFault ? <div className="mt-2 rounded border border-rust/40 bg-rust/10 px-2 py-1 text-xs text-rust">Store fault: {tc.data.storeFault}. Riddle has stopped writing until it clears.</div> : null}
+          {tc.data?.judge || tc.data?.llm ? (
+            <ul className="mt-2 flex flex-col gap-0.5 text-xs" aria-label="Services">
+              {tc.data.judge ? <li className={serviceHealthTone(tc.data.judge) === 'bad' ? 'text-rust' : 'text-ink-2'}>{serviceHealthLine('Judge', tc.data.judge)}</li> : null}
+              {tc.data.llm ? <li className={serviceHealthTone(tc.data.llm) === 'bad' ? 'text-rust' : 'text-ink-2'}>{serviceHealthLine('LLM', tc.data.llm)}</li> : null}
+            </ul>
+          ) : null}
           {noAccounts ? (
             <p className="mt-3 text-xs text-ink-2">
               No account is connected, so there is nothing to sync.{' '}

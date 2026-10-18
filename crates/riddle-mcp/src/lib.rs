@@ -404,6 +404,7 @@ mod tests {
             shadow_started_at: None,
             created_at: chrono::Utc::now(),
             disabled: false,
+            history_days: None,
             mailbox: None,
         };
         riddle_store::repo::digs::upsert(&s.app.stores.index(), &dig).unwrap();

@@ -309,26 +309,7 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
                 Some(d) => vec![app.dig(&d)?],
                 None => app.list_digs()?,
             };
-            let mut total = repo::traces::TraceStats::default();
-            let mut n = 0u64;
-            for d in digs {
-                let store = app.stores.dig(&d.id)?;
-                let s = repo::traces::stats(&store, &since)?;
-                total.count += s.count;
-                total.escalated += s.escalated;
-                total.unresolved += s.unresolved;
-                total.judge_tokens += s.judge_tokens;
-                total.judge_cost_usd += s.judge_cost_usd;
-                total.llm_cost_usd += s.llm_cost_usd;
-                total.avg_total_ms += s.avg_total_ms * s.count as f64;
-                total.avg_judge_ms += s.avg_judge_ms * s.count as f64;
-                n += s.count;
-            }
-            if n > 0 {
-                total.avg_total_ms /= n as f64;
-                total.avg_judge_ms /= n as f64;
-            }
-            serde_json::to_value(total)?
+            serde_json::to_value(trace_stats(app, &digs, &since)?)?
         }
         "invoke_action" => {
             let inv: ActionInvocation = arg(&args, "invocation")?;
@@ -429,28 +410,36 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
                 }
             ))
         }
+        // A probe answers with the client's health after the call, so the
+        // pane shows the breaker the probe just closed or tripped.
         "probe_judge" => match app.services.judge() {
             Some(j) => match j.probe().await {
-                Ok(ms) => json!({ "ok": true, "latencyMs": ms, "message": j.identity().key() }),
+                Ok(ms) => {
+                    json!({ "ok": true, "latencyMs": ms, "message": j.identity().key(), "health": j.health() })
+                }
                 Err(e) => {
-                    json!({ "ok": false, "latencyMs": 0, "message": format!("{}: {}", e.kind.as_str(), e.message) })
+                    json!({ "ok": false, "latencyMs": 0, "message": format!("{}: {}", e.kind.as_str(), e.message), "health": j.health() })
                 }
             },
-            None => json!({ "ok": false, "latencyMs": 0, "message": "no judge configured" }),
+            None => {
+                json!({ "ok": false, "latencyMs": 0, "message": "no judge configured", "health": Value::Null })
+            }
         },
         "probe_llm" => match app.services.get::<crate::ai::AiServices>() {
             Some(ai) => {
                 let started = std::time::Instant::now();
                 match ai.llm.probe().await {
                     Ok(_) => {
-                        json!({ "ok": true, "latencyMs": started.elapsed().as_millis() as u64, "message": ai.llm.identity().model_id })
+                        json!({ "ok": true, "latencyMs": started.elapsed().as_millis() as u64, "message": ai.llm.identity().model_id, "health": ai.llm.health() })
                     }
                     Err(e) => {
-                        json!({ "ok": false, "latencyMs": started.elapsed().as_millis() as u64, "message": format!("{}: {}", e.kind.as_str(), e.message) })
+                        json!({ "ok": false, "latencyMs": started.elapsed().as_millis() as u64, "message": format!("{}: {}", e.kind.as_str(), e.message), "health": ai.llm.health() })
                     }
                 }
             }
-            None => json!({ "ok": false, "latencyMs": 0, "message": "no LLM configured" }),
+            None => {
+                json!({ "ok": false, "latencyMs": 0, "message": "no LLM configured", "health": Value::Null })
+            }
         },
         "probe_provider" => {
             let dig = app.dig(&arg(&args, "digId")?)?;
@@ -532,22 +521,7 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             log::log!(target: cat.as_str(), level, "{message}");
             Value::Null
         }
-        "dev_info" => {
-            let mut stores = vec![
-                json!({ "label": "index", "path": app.stores.index().path().map(|p| p.display().to_string()).unwrap_or_default(), "sizeBytes": app.stores.index().size_bytes() }),
-            ];
-            for (id, s) in app.stores.open_digs() {
-                stores.push(json!({ "label": format!("dig {id}"), "path": s.path().map(|p| p.display().to_string()).unwrap_or_default(), "sizeBytes": s.size_bytes() }));
-            }
-            json!({
-                "build": app.config.build, "dev": app.config.dev, "os": std::env::consts::OS, "arch": std::env::consts::ARCH,
-                "uptimeSeconds": app.started_at.elapsed().as_secs(),
-                "dataDir": app.config.data_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-                "logDir": app.config.data_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-                "configDir": app.config.config_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-                "cacheDir": "", "stores": stores, "storeFault": app.stores.any_fault(), "logLevel": log::max_level().to_string(),
-            })
-        }
+        "dev_info" => dev_info(app),
         "read_app_logs" => {
             let min = opt::<String>(&args, "level").and_then(|l| l.parse::<log::Level>().ok());
             serde_json::to_value(riddle_observability::tail(
@@ -561,28 +535,7 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             .iter()
             .map(|c| c.as_str())
             .collect::<Vec<_>>()),
-        "export_diagnostics" => {
-            let mut out = format!(
-                "Riddle {} ({}) [{}]\n",
-                app.config.build.version, app.config.build.git_sha, app.config.build.profile
-            );
-            out.push_str(&format!(
-                "digs {}; actions {}; fault {:?}\n",
-                app.list_digs()?.len(),
-                app.runtime.list_actions().len(),
-                app.stores.any_fault()
-            ));
-            for l in riddle_observability::tail(50, None, Some(log::Level::Warn), None) {
-                out.push_str(&format!(
-                    "[{}][{}][{}] {}\n",
-                    l.at.to_rfc3339(),
-                    l.level,
-                    l.category,
-                    l.message
-                ));
-            }
-            json!(out)
-        }
+        "export_diagnostics" => export_diagnostics(app)?,
         "clear_caches" => json!(0),
         "parse_mesh" => {
             let text: String = arg(&args, "text")?;
@@ -640,4 +593,125 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
         }
         other => return Err(RiddleError::not_found(format!("no command named {other}"))),
     })
+}
+
+/// Trace statistics over the given Digs since a moment, averages weighted
+/// by each Dig's count. Shared by `trace_stats` and the diagnostics export.
+fn trace_stats(
+    app: &App,
+    digs: &[Dig],
+    since: &chrono::DateTime<chrono::Utc>,
+) -> Result<repo::traces::TraceStats> {
+    let mut total = repo::traces::TraceStats::default();
+    let mut n = 0u64;
+    for d in digs {
+        let store = app.stores.dig(&d.id)?;
+        let s = repo::traces::stats(&store, since)?;
+        total.count += s.count;
+        total.escalated += s.escalated;
+        total.unresolved += s.unresolved;
+        total.judge_tokens += s.judge_tokens;
+        total.judge_cost_usd += s.judge_cost_usd;
+        total.llm_cost_usd += s.llm_cost_usd;
+        total.avg_total_ms += s.avg_total_ms * s.count as f64;
+        total.avg_judge_ms += s.avg_judge_ms * s.count as f64;
+        n += s.count;
+    }
+    if n > 0 {
+        total.avg_total_ms /= n as f64;
+        total.avg_judge_ms /= n as f64;
+    }
+    Ok(total)
+}
+
+/// The Developer pane's runtime row: build, directories, store sizes, the
+/// fault flag, and the swallowed-failure table (`riddle_observability`).
+fn dev_info(app: &App) -> Value {
+    let mut stores = vec![
+        json!({ "label": "index", "path": app.stores.index().path().map(|p| p.display().to_string()).unwrap_or_default(), "sizeBytes": app.stores.index().size_bytes() }),
+    ];
+    for (id, s) in app.stores.open_digs() {
+        stores.push(json!({ "label": format!("dig {id}"), "path": s.path().map(|p| p.display().to_string()).unwrap_or_default(), "sizeBytes": s.size_bytes() }));
+    }
+    json!({
+        "build": app.config.build, "dev": app.config.dev, "os": std::env::consts::OS, "arch": std::env::consts::ARCH,
+        "uptimeSeconds": app.started_at.elapsed().as_secs(),
+        "dataDir": app.config.data_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+        "logDir": app.config.data_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+        "configDir": app.config.config_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+        "cacheDir": "", "stores": stores, "storeFault": app.stores.any_fault(), "logLevel": log::max_level().to_string(),
+        "swallowed": riddle_observability::swallowed_failures(),
+    })
+}
+
+/// Settings as the export carries them. The settings file holds no secret
+/// (presence booleans only, §12), and the Gmail OAuth client id, which is
+/// not one either, still goes out as configured-or-absent: the export is
+/// for pasting into an issue, and the id has no diagnostic value.
+fn redacted_settings(s: &riddle_settings::Settings) -> Value {
+    let mut v = serde_json::to_value(s).unwrap_or(Value::Null);
+    if let Some(g) = v.get_mut("gmail").and_then(|g| g.as_object_mut()) {
+        for key in ["clientId", "client_id"] {
+            if let Some(id) = g.get_mut(key) {
+                let configured = id.as_str().is_some_and(|s| !s.trim().is_empty());
+                *id = json!(if configured { "configured" } else { "absent" });
+            }
+        }
+    }
+    v
+}
+
+/// The redacted diagnostics bundle (`APPLICATION_FEATURES.md` §4 item 5):
+/// one JSON document with the runtime, the Task Centre, trace statistics,
+/// the judge and LLM identity and health, every account's status with its
+/// reason, the settings, the swallowed-failure table and the warning tail.
+/// Identifiers only: no subjects, bodies, addresses, names, tokens or keys.
+/// It used to be the version, a Dig count and fifty warn lines, which was
+/// not enough to see that the judge's breaker had been open for a fortnight.
+fn export_diagnostics(app: &Arc<App>) -> Result<Value> {
+    let now = chrono::Utc::now();
+    let digs = app.list_all_digs()?;
+    let dig_rows: Vec<Value> = digs
+        .iter()
+        .map(|d| {
+            json!({
+                "id": d.id, "name": d.name, "provider": d.provider, "privacy": d.privacy,
+                "projection": d.projection, "disabled": d.disabled, "status": d.status,
+            })
+        })
+        .collect();
+    let enabled: Vec<Dig> = digs.iter().filter(|d| !d.disabled).cloned().collect();
+    let judge = app
+        .services
+        .judge()
+        .map(|j| json!({ "identity": j.identity(), "health": j.health() }));
+    // `llm_health` is `None` under the `null` provider, whose client is a
+    // placeholder, so the export says there is no LLM rather than naming it.
+    let llm = app.llm_health().and_then(|health| {
+        app.services
+            .get::<crate::ai::AiServices>()
+            .map(|ai| json!({ "identity": ai.llm.identity(), "health": health }))
+    });
+    let settings = app
+        .services
+        .get::<riddle_settings::SettingsStore>()
+        .map(|s| redacted_settings(&s.settings()));
+    let warnings: Vec<Value> = riddle_observability::tail(50, None, Some(log::Level::Warn), None)
+        .into_iter()
+        .map(|l| json!({ "at": l.at, "level": l.level, "category": l.category, "message": l.message }))
+        .collect();
+    Ok(json!({
+        "exportedAt": now,
+        "redaction": "identifiers only: no subjects, bodies, addresses, names, tokens or keys",
+        "runtime": dev_info(app),
+        "taskCentre": app.task_centre()?,
+        "traceStats": trace_stats(app, &enabled, &(now - chrono::Duration::days(30)))?,
+        "judge": judge,
+        "llm": llm,
+        "digs": dig_rows,
+        "actions": app.runtime.list_actions().len(),
+        "settings": settings,
+        "swallowed": riddle_observability::swallowed_failures(),
+        "warnings": warnings,
+    }))
 }

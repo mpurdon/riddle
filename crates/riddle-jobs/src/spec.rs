@@ -128,6 +128,7 @@ pub fn resource_class(kind: JobKind) -> ResourceClass {
         JobKind::InitialSync
         | JobKind::CatchUp
         | JobKind::IncrementalSync
+        | JobKind::HistoryBackfill
         | JobKind::Projection => ResourceClass::Provider,
         JobKind::Sift
         | JobKind::HistoricalSift
@@ -144,7 +145,11 @@ pub fn resource_class(kind: JobKind) -> ResourceClass {
 pub fn is_long_running(kind: JobKind) -> bool {
     matches!(
         kind,
-        JobKind::InitialSync | JobKind::HistoricalSift | JobKind::Replay | JobKind::Expedition
+        JobKind::InitialSync
+            | JobKind::HistoryBackfill
+            | JobKind::HistoricalSift
+            | JobKind::Replay
+            | JobKind::Expedition
     )
 }
 

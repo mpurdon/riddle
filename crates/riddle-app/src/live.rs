@@ -69,6 +69,14 @@ impl App {
             }
             applied.push("gmail");
         }
+        // The level changes the Director's register, not its client: tell
+        // the running Director and leave the LLM alone.
+        if prev.ui_level != next.ui_level {
+            if let Some(ai) = self.services.get::<crate::ai::AiServices>() {
+                ai.director.set_ui_level(next.ui_level);
+            }
+            applied.push("level");
+        }
         if ai_config(prev) != ai_config(next) {
             self.attach_ai(&ai_config(next));
             applied.push("llm");

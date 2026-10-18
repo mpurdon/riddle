@@ -6,8 +6,8 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getConversation, listActivity, listConversations, page, qk, readAppLogs, traceStats, usageSummary } from '@/lib/api'
-import { cx, fmtClockMs, fmtInt, fmtMs, fmtPct, fmtUsd, num, safeJson, titleCase } from '@/lib/format'
-import { useActionsMeta, useDigContext, useTaskCentre } from '@/lib/queries'
+import { cx, fmtClockMs, fmtInt, fmtMs, fmtPct, fmtRelative, fmtUsd, num, safeJson, titleCase } from '@/lib/format'
+import { useActionsMeta, useDevInfo, useDigContext, useTaskCentre } from '@/lib/queries'
 import { dispositionLabel } from '@/lib/selectors'
 import { useEventLog, usePipeline } from '@/lib/stores'
 import { Button } from '@/components/ui/Button'
@@ -253,10 +253,42 @@ export function PerformanceObservatory() {
 export function FailureInspector() {
   const traces = useRecentTraces(300)
   const logs = useQuery({ queryKey: [...qk.logs, 'errors'], queryFn: () => readAppLogs({ limit: 100, level: 'warn' }), refetchInterval: 5000 })
+  // Bookkeeping that failed and was dropped so the work could go on, counted
+  // by site: one warn line each used to be all there was.
+  const swallowed = useDevInfo().data?.swallowed ?? []
   const failed = (traces.data ?? []).filter((t) => t.escalation || t.conclusion.kind === 'unresolved')
   return (
     <div className="min-h-0 flex-1 overflow-auto p-5">
-      <div className="grid grid-cols-2 gap-8">
+      <Section title={`Swallowed failures (${swallowed.length} sites)`}>
+        {swallowed.length ? (
+          <table className="w-full text-xs" aria-label="Swallowed failures">
+            <thead className="text-left text-2xs uppercase tracking-wide text-clay">
+              <tr>
+                <th className="py-0.5 pr-2 font-medium">Category</th>
+                <th className="py-0.5 pr-2 font-medium">Site</th>
+                <th className="py-0.5 pr-2 text-right font-medium">Count</th>
+                <th className="py-0.5 pr-2 font-medium">Last</th>
+                <th className="py-0.5 font-medium">Last error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {swallowed.map((s) => (
+                <tr key={`${s.category}/${s.site}`} className="border-t border-line/40">
+                  <td className="py-0.5 pr-2">{s.category}</td>
+                  <td className="py-0.5 pr-2 mono">{s.site}</td>
+                  <td className="py-0.5 pr-2 text-right tabular-nums">{fmtInt(s.count)}</td>
+                  <td className="py-0.5 pr-2 text-ink-2">{fmtRelative(s.lastAt)}</td>
+                  <td className="py-0.5 text-ink-2">{s.lastError}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="text-xs text-clay">No bookkeeping has failed since launch.</p>
+        )}
+        <p className="mt-1 text-xs text-clay">Bookkeeping never fails the work: an Activity row, a usage row or a cache write that fails is logged, counted here and dropped.</p>
+      </Section>
+      <div className="mt-6 grid grid-cols-2 gap-8">
         <Section title={`Escalations and Unresolved (${failed.length})`}>
           <ol className="flex flex-col gap-2">
             {failed.map((t) => (

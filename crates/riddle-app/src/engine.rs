@@ -20,7 +20,7 @@ use crate::App;
 use riddle_core::*;
 use riddle_errors::{Result, RiddleError};
 use riddle_finds::temporal::TemporalOptions;
-use riddle_observability::{rdebug, rinfo, rwarn, Category, Timed};
+use riddle_observability::{rdebug, rinfo, rwarn, swallowed, Category, Timed};
 use riddle_sift::{DigContext, PeopleFacts, Sift, SiftInput};
 use riddle_store::repo;
 use riddle_sync::engine::{CancelFlag, SyncEngine, SyncProgress, SyncReport};
@@ -116,6 +116,15 @@ pub struct SiftPassReport {
     pub remaining: u64,
     pub cached_signals: u64,
     pub fresh_signals: u64,
+    /// What the pass cost: wall time, the judge and LLM time its decisions'
+    /// traces carry, and the store calls it made (the Dig store and the
+    /// index together; another pass or a read on the same stores counts
+    /// too, so these are a gauge, not a ledger).
+    pub elapsed_ms: u64,
+    pub judge_ms: u64,
+    pub llm_ms: u64,
+    pub store_reads: u64,
+    pub store_writes: u64,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize)]
@@ -331,9 +340,11 @@ impl App {
         let housekeeping = self
             .housekeeping_due(dig, &store, shadow_decides)
             .unwrap_or_else(|e| {
-                rwarn!(
+                swallowed!(
                     Category::Sift,
-                    "could not tell whether housekeeping is due for {}: {e}",
+                    "housekeeping_due",
+                    e,
+                    "could not tell whether housekeeping is due for {}",
                     dig.id
                 );
                 true
@@ -341,9 +352,11 @@ impl App {
         if housekeeping {
             // Bookkeeping: a failure to look for stale Unresolved never stops the pass.
             if let Err(e) = self.retry_stale_unresolved(dig, &store) {
-                rwarn!(
+                swallowed!(
                     Category::Sift,
-                    "could not retry stale Unresolved for {}: {e}",
+                    "retry_stale_unresolved",
+                    e,
+                    "could not retry stale Unresolved for {}",
                     dig.id
                 );
             }
@@ -353,9 +366,11 @@ impl App {
                 .review_senders(dig, crate::suggestions::SENDERS_PER_PASS)
                 .await
             {
-                rwarn!(
+                swallowed!(
                     Category::Sift,
-                    "could not review senders for {}: {e}",
+                    "review_senders",
+                    e,
+                    "could not review senders for {}",
                     dig.id
                 );
             }
@@ -364,8 +379,33 @@ impl App {
         if let Some(settings) = self.services.get::<riddle_settings::SettingsStore>() {
             sift = sift.with_budget(Arc::new(EscalationCap::new(self.stores.clone(), settings)));
         }
-        let ids = repo::messages::unclassified_ids(&store, limit, shadow_decides)?;
+        // While the sync's body fetch is behind its listing (the Dig's
+        // `bodies_pending` flag), messages whose bodies have landed come
+        // first: a message judged on its snippet is judged for good, and
+        // bodies arrive a cycle behind the listing. Mail older than the body
+        // window (the sync window; the backfill brings its bodies with it)
+        // is judged on what it has, and so is everything once nothing is
+        // left to fetch, or when the mail came some other way than a sync.
+        let bodies_pending = repo::sync_state::get(&store, riddle_sync::engine::BODIES_PENDING)?
+            .as_deref()
+            == Some("1");
+        let ids = if bodies_pending {
+            let body_window = self
+                .sync_options()
+                .window_days
+                .map(|d| self.services.clock.now() - chrono::Duration::days(d));
+            repo::messages::unclassified_ids_preferring_bodies(
+                &store,
+                limit,
+                shadow_decides,
+                body_window,
+            )?
+        } else {
+            repo::messages::unclassified_ids(&store, limit, shadow_decides)?
+        };
         let mut report = SiftPassReport::default();
+        // The store calls the pass makes, on the Dig store and the index.
+        let stats_before = store.stats() + self.stores.index().stats();
         // Grouped for the ledger: (mesh id, version, name, disposition kind) -> (ids, cached, fresh, trace of first).
         let mut groups: SiftGroups = std::collections::BTreeMap::new();
         // Finds settling closed, by the Mesh version whose route closed them.
@@ -402,6 +442,8 @@ impl App {
                     report.processed += 1;
                     report.cached_signals += outcome.cached as u64;
                     report.fresh_signals += outcome.fresh as u64;
+                    report.judge_ms += outcome.trace.timing.judge_ms;
+                    report.llm_ms += outcome.trace.timing.llm_ms;
                     if outcome.judge_unavailable {
                         report.judge_unavailable = true;
                     }
@@ -436,13 +478,22 @@ impl App {
                     }
                     if let Some(update) = &outcome.thread_state_update {
                         let profile = repo::user_profile::get(&self.stores.index())?;
-                        let _ = riddle_context::update_thread_state(
+                        // Bookkeeping: the decision stands without its Thread State.
+                        if let Err(e) = riddle_context::update_thread_state(
                             &store,
                             &dig.id,
                             &update.thread_id,
                             &profile,
                             self.services.clock.now(),
-                        );
+                        ) {
+                            swallowed!(
+                                Category::Sift,
+                                "thread_state_update",
+                                e,
+                                "thread state of {} not updated",
+                                update.thread_id
+                            );
+                        }
                     }
                     if !outcome.superseded.is_empty() {
                         report.messages_superseded += outcome.superseded.len() as u64;
@@ -474,11 +525,12 @@ impl App {
                                         .extend(applied.closed);
                                 }
                             }
-                            Err(e) => rwarn!(
+                            Err(e) => swallowed!(
                                 Category::Sift,
-                                "find proposal for {} failed: {}",
-                                id,
-                                e.kind.as_str()
+                                "find_proposal",
+                                e,
+                                "find proposal for {} failed",
+                                id
                             ),
                         }
                     }
@@ -492,7 +544,7 @@ impl App {
                 }
             }
         }
-        self.record_sift_activity(dig, groups);
+        self.record_sift_activity(dig, groups, &report);
         for (key, (finds, trace)) in closed {
             let ids: Vec<&FindId> = finds.iter().map(|f| &f.id).collect();
             self.record_rule_activity(RuleActivity {
@@ -539,8 +591,13 @@ impl App {
             });
         }
         report.remaining = repo::messages::unclassified_count(&store)?;
-        rinfo!(Category::Sift, "pass {}: processed {} ({} cached, {} fresh signals), finds +{} joined {}, unresolved {}, hidden {}, remaining {}",
-            dig.id, report.processed, report.cached_signals, report.fresh_signals, report.finds_created, report.finds_joined, report.unresolved, report.hidden, report.remaining);
+        let calls = (store.stats() + self.stores.index().stats()).since(stats_before);
+        report.store_reads = calls.reads;
+        report.store_writes = calls.writes;
+        report.elapsed_ms = _t.elapsed_ms();
+        rinfo!(Category::Sift, "pass {}: processed {} ({} cached, {} fresh signals), finds +{} joined {}, unresolved {}, hidden {}, failed {}, judge unavailable {}, remaining {}; {}ms (judge {}ms, llm {}ms), store reads {} writes {}",
+            dig.id, report.processed, report.cached_signals, report.fresh_signals, report.finds_created, report.finds_joined, report.unresolved, report.hidden, report.failed, report.judge_unavailable, report.remaining,
+            report.elapsed_ms, report.judge_ms, report.llm_ms, report.store_reads, report.store_writes);
         self.events.emit_summary();
         Ok(report)
     }
@@ -573,9 +630,25 @@ impl App {
     }
 
     /// One Activity per (Mesh version, disposition) group of a pass (§47).
-    /// Bookkeeping: a failure here is logged and never fails the pass.
-    fn record_sift_activity(&self, dig: &Dig, groups: SiftGroups) {
+    /// Bookkeeping: a failure here is logged and never fails the pass. The
+    /// note says what the pass as a whole met: how many messages failed and
+    /// whether the judge was unavailable, so an Unresolved group reads as
+    /// "the judge was down", not "the rules said so".
+    fn record_sift_activity(&self, dig: &Dig, groups: SiftGroups, report: &SiftPassReport) {
         let index = self.stores.index();
+        let pass_note = {
+            let mut parts = Vec::new();
+            if report.failed > 0 {
+                parts.push(format!(
+                    "{} failed and stay unclassified.",
+                    plural(report.failed as usize, "message")
+                ));
+            }
+            if report.judge_unavailable {
+                parts.push("The judge was unavailable; nothing was hidden for it.".to_string());
+            }
+            parts.join(" ")
+        };
         for ((mesh_id, version, mesh_name, kind), (ids, cached, fresh, trace)) in groups {
             if ids.is_empty() {
                 continue;
@@ -588,12 +661,16 @@ impl App {
                 "find" => format!("Sift surfaced {n} messages as Finds"),
                 _ => format!("Sift left {n} messages Unresolved"),
             };
-            let note = match (cached, fresh) {
+            let mut note = match (cached, fresh) {
                 (0, 0) => "No Signals were needed.".to_string(),
                 (c, 0) => format!("{c} matched on cached Signals."),
                 (0, f) => format!("{f} needed a fresh evaluation."),
                 (c, f) => format!("{c} matched on cached Signals. {f} needed a fresh evaluation."),
             };
+            if !pass_note.is_empty() {
+                note.push(' ');
+                note.push_str(&pass_note);
+            }
             let hides = matches!(kind.as_str(), "spoil" | "contamination" | "filed");
             let activity = Activity {
                 id: ActivityId::new(),
@@ -605,7 +682,7 @@ impl App {
                 } else {
                     format!("Triggered by Mesh: {mesh_name} v{version}")
                 }),
-                inputs: serde_json::json!({ "digId": dig.id, "count": n, "cached": cached, "fresh": fresh }),
+                inputs: serde_json::json!({ "digId": dig.id, "count": n, "cached": cached, "fresh": fresh, "failed": report.failed, "judgeUnavailable": report.judge_unavailable }),
                 affected: ids
                     .iter()
                     .map(|i| EntityRef::new(EntityKind::Message, i))
@@ -649,7 +726,13 @@ impl App {
             };
             match repo::activities::append(&index, &activity) {
                 Ok(()) => self.events.emit(RiddleEvent::ActivityAppended { activity }),
-                Err(e) => rwarn!(Category::Sift, "sift activity not recorded: {e}"),
+                Err(e) => swallowed!(
+                    Category::Sift,
+                    "sift_activity",
+                    e,
+                    "sift activity for {} not recorded",
+                    dig.id
+                ),
             }
         }
     }
@@ -661,14 +744,7 @@ impl App {
         cancel: &CancelFlag,
         on_progress: &mut (dyn FnMut(SyncProgress) + Send),
     ) -> Result<SyncReport> {
-        let domains = self.domains()?;
-        let provider = domains.providers.provider_for(dig)?;
-        let engine = SyncEngine::new(
-            dig.clone(),
-            provider,
-            self.stores.clone(),
-            self.events.clone(),
-        );
+        let engine = self.sync_engine(dig)?;
         let mut externals = Vec::new();
         let report = engine
             .sync_once(on_progress, cancel, &mut |m| externals.push(m))
@@ -684,6 +760,54 @@ impl App {
         self.redecide_on_spam_verdicts(dig, &externals);
         let _ = engine.fetch_bodies(200, on_progress, cancel).await;
         Ok(report)
+    }
+
+    /// One run of the history backfill for a Dig: older mail than the first
+    /// sync's window, `pages_per_run` pages with their bodies (§53).
+    pub async fn backfill_pass(
+        &self,
+        dig: &Dig,
+        cancel: &CancelFlag,
+        on_progress: &mut (dyn FnMut(SyncProgress) + Send),
+    ) -> Result<SyncReport> {
+        self.sync_engine(dig)?
+            .backfill_history(on_progress, cancel)
+            .await
+    }
+
+    /// Whether the Dig's first listing is done and its history behind the
+    /// window still has pages to fetch. Read from sync state alone, so an
+    /// account whose provider cannot be built (no sign-in yet) answers too.
+    pub fn backfill_pending(&self, dig: &Dig) -> Result<bool> {
+        use riddle_sync::engine::{BACKFILL_DONE, INITIAL_WINDOW_START};
+        let store = self.stores.dig(&dig.id)?;
+        Ok(
+            repo::sync_state::get(&store, repo::sync_state::INITIAL_SYNC_DONE)?.as_deref()
+                == Some("1")
+                && repo::sync_state::get(&store, BACKFILL_DONE)?.as_deref() != Some("1")
+                && repo::sync_state::get(&store, INITIAL_WINDOW_START)?.is_some(),
+        )
+    }
+
+    fn sync_engine(&self, dig: &Dig) -> Result<SyncEngine> {
+        let domains = self.domains()?;
+        let provider = domains.providers.provider_for(dig)?;
+        Ok(SyncEngine::new(
+            dig.clone(),
+            provider,
+            self.stores.clone(),
+            self.events.clone(),
+        )
+        .with_options(self.sync_options()))
+    }
+
+    /// The sync options this process runs with: a `SyncOptions` registered
+    /// in `Services` (tests shorten the runs), else the defaults.
+    pub fn sync_options(&self) -> riddle_sync::SyncOptions {
+        self.services
+            .get::<riddle_sync::SyncOptions>()
+            .map(|o| (*o).clone())
+            .unwrap_or_default()
     }
 
     /// Gmail's spam verdict is read when a message is sifted; a verdict that
@@ -813,17 +937,32 @@ impl App {
                 p.total.unwrap_or(0)
             );
         };
-        match self.sync_pass(&dig, cancel, &mut progress).await {
-            Ok(r) => report.sync = Some(SyncSummary::from(&r)),
-            Err(e) if e.kind.is_transient() || e.kind == riddle_errors::ErrorKind::ProviderAuth => {
-                rwarn!(
-                    Category::Sync,
-                    "sync of {} deferred: {}",
-                    dig.id,
-                    e.kind.as_str()
-                );
+        // Inline, with no queue to interleave for it: a listing with pages
+        // left runs again, a Sift of what landed between runs, until done.
+        loop {
+            match self.sync_pass(&dig, cancel, &mut progress).await {
+                Ok(r) => {
+                    let more = !r.complete && !cancel.is_cancelled();
+                    report.sync = Some(SyncSummary::from(&r));
+                    if !more {
+                        break;
+                    }
+                    self.sift_pass(&dig, sift_limit, Some(cancel)).await?;
+                }
+                Err(e)
+                    if e.kind.is_transient()
+                        || e.kind == riddle_errors::ErrorKind::ProviderAuth =>
+                {
+                    rwarn!(
+                        Category::Sync,
+                        "sync of {} deferred: {}",
+                        dig.id,
+                        e.kind.as_str()
+                    );
+                    break;
+                }
+                Err(e) => return Err(e),
             }
-            Err(e) => return Err(e),
         }
         let dig = self.dig(dig_id)?;
         report.sift = self.sift_pass(&dig, sift_limit, Some(cancel)).await?;

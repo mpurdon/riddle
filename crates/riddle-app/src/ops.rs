@@ -14,7 +14,7 @@ use riddle_jobs::{
     DigStatusSource, JobContext, JobHandler, JobOutcome, JobQueue, JobSpec, ResourceConfig,
     Resources, Runner, SleepDetector, UsageBudgetGate, WakeHook, WakeReason,
 };
-use riddle_observability::{rdebug, rinfo, rwarn, Category};
+use riddle_observability::{rdebug, rinfo, rwarn, swallowed, Category};
 use riddle_settings::{
     ArmControl, JudgeProvider, KeySource, LlmProvider, Secret, SecretPresence, Settings,
     SettingsStore,
@@ -123,7 +123,9 @@ impl AppDigStatus {
             .as_deref()
             == Some("1");
         let total = repo::messages::count(&store)?;
-        let unclassified = repo::messages::unclassified_count(&store)?;
+        // Inside the sync window only: the history backfill fills older mail
+        // behind a caught-up account, and that mail is not "remaining".
+        let unclassified = self.0.unclassified_in_window(&store)?;
         let pending = repo::outbox::pending_count(&store)?;
         // Degraded is derived below on every call, never read back from the
         // stored Dig: `refresh_dig_status` saves what this returns, so
@@ -184,10 +186,36 @@ impl AppDigStatus {
                 total,
             });
         }
-        if self.0.services.judge().is_none() && unclassified > 0 {
-            return Ok(DigStatus::Degraded {
-                reason: "judge unavailable; nothing hidden".into(),
-            });
+        // With mail waiting, no judge is Degraded, and so is a judge whose
+        // breaker is open: the breaker opened and closed for a fortnight
+        // while every Dig said "Sifting" (17 Oct 2026). The reason names
+        // the retry time in the user's zone; the Task Centre shows it.
+        if unclassified > 0 {
+            match self.0.services.judge() {
+                None => {
+                    return Ok(DigStatus::Degraded {
+                        reason: "judge unavailable; nothing hidden".into(),
+                    });
+                }
+                Some(judge) => {
+                    match judge.health().breaker {
+                        BreakerHealth::Open { until } => {
+                            return Ok(DigStatus::Degraded {
+                            reason: format!(
+                                "judge paused after repeated failures, retrying at {}; nothing hidden",
+                                self.0.local_clock(&until)
+                            ),
+                        });
+                        }
+                        BreakerHealth::HalfOpen => {
+                            return Ok(DigStatus::Degraded {
+                            reason: "judge paused after repeated failures, retrying now; nothing hidden".into(),
+                        });
+                        }
+                        BreakerHealth::Closed { .. } | BreakerHealth::Unknown => {}
+                    }
+                }
+            }
         }
         if unclassified > 0 {
             return Ok(DigStatus::Sifting {
@@ -258,16 +286,31 @@ impl JobHandler for PassHandler {
                 let mut progress_fn = {
                     let p = ctx.progress.clone();
                     move |sp: riddle_sync::engine::SyncProgress| {
-                        p.report(sp.done, sp.total, format!("{:?}", sp.phase).to_lowercase())
+                        p.report(sp.done, sp.total, sp.step)
                     }
                 };
+                if ctx.cancel.is_cancelled() {
+                    cancel.cancel();
+                }
+                if self.kind == JobKind::HistoryBackfill {
+                    return self.backfill(&dig, &ctx, &cancel, &mut progress_fn).await;
+                }
+                // Bodies the run fetched, for the yield below: a catch-up
+                // keeps running while bodies are still landing, so the Sift
+                // behind it is never waiting on the 45-second poll for them.
+                let bodies_before = self.bodies_left(&dig);
                 if matches!(
                     self.kind,
                     JobKind::InitialSync | JobKind::CatchUp | JobKind::IncrementalSync
                 ) {
-                    if ctx.cancel.is_cancelled() {
-                        cancel.cancel();
+                    // The poll during an unfinished first listing only makes
+                    // sure the first sync is queued and leaves the listing to
+                    // it, so the Task Centre shows one job with its done/total.
+                    if self.kind == JobKind::IncrementalSync && !self.app.initial_sync_done(&dig)? {
+                        self.app.enqueue_initial_sync(&dig);
+                        return Ok(JobOutcome::done());
                     }
+                    ctx.progress.set_unit("messages");
                     // A failing sync is said on the account, not only in the
                     // log: twenty thousand syncs over two weeks failed on an
                     // expired sign-in while the job reported "completed" and
@@ -276,7 +319,26 @@ impl JobHandler for PassHandler {
                     self.app
                         .record_sync_result(&dig.id, result.as_ref().err().map(|e| e.kind));
                     match result {
-                        Ok(_) => {}
+                        Ok(report) => {
+                            if !report.complete && !ctx.cancel.is_cancelled() {
+                                // Pages left: Sift what has landed while the
+                                // next run lists; the token is in sync state.
+                                self.app.enqueue_sift(&dig);
+                                self.app.refresh_dig_status(&dig.id);
+                                return Ok(JobOutcome::yield_with(serde_json::json!({
+                                    "listed": report.listed,
+                                    "total": report.total,
+                                })));
+                            }
+                            if report.kind == riddle_sync::SyncKind::Initial
+                                || self.kind == JobKind::CatchUp
+                            {
+                                // The window is listed: the history behind it
+                                // follows at Backfill priority (§53); a wake's
+                                // catch-up re-arms one that failed.
+                                self.app.enqueue_history_backfill(&dig);
+                            }
+                        }
                         Err(e)
                             if e.kind.is_transient()
                                 || e.kind == riddle_errors::ErrorKind::ProviderAuth =>
@@ -305,11 +367,18 @@ impl JobHandler for PassHandler {
                         Some(report.processed + report.remaining),
                         "sifting",
                     );
-                    if report.remaining > 0 && !ctx.cancel.is_cancelled() && report.processed > 0 {
+                    let bodies_after = self.bodies_left(&dig);
+                    let bodies_landing =
+                        matches!(self.kind, JobKind::InitialSync | JobKind::CatchUp)
+                            && bodies_after > 0
+                            && bodies_after < bodies_before;
+                    let backlog = report.remaining > 0 && report.processed > 0;
+                    if (backlog || bodies_landing) && !ctx.cancel.is_cancelled() {
                         self.app.refresh_dig_status(&dig.id);
-                        return Ok(JobOutcome::yield_with(
-                            serde_json::json!({ "remaining": report.remaining }),
-                        ));
+                        return Ok(JobOutcome::yield_with(serde_json::json!({
+                            "remaining": report.remaining,
+                            "bodiesLeft": bodies_after,
+                        })));
                     }
                 }
                 if matches!(
@@ -332,6 +401,46 @@ impl JobHandler for PassHandler {
                 Ok(JobOutcome::done())
             }
         }
+    }
+}
+
+impl PassHandler {
+    /// One run of the history backfill (§53): `pages_per_run` pages of older
+    /// mail with their bodies, then a yield so the queue sifts them and
+    /// the poll gets its turn. An error goes to the runner: transient ones
+    /// retry with back-off, and a failed job is re-armed by the next wake's
+    /// catch-up from the token kept in sync state.
+    async fn backfill(
+        &self,
+        dig: &Dig,
+        ctx: &JobContext,
+        cancel: &CancelFlag,
+        progress_fn: &mut (dyn FnMut(riddle_sync::engine::SyncProgress) + Send),
+    ) -> Result<JobOutcome> {
+        ctx.progress.set_unit("messages");
+        let report = self.app.backfill_pass(dig, cancel, progress_fn).await?;
+        if report.added > 0 {
+            // Older mail is sifted like any other, after the current
+            // backlog: the backlog query is newest first.
+            self.app.enqueue_sift(dig);
+        }
+        if !report.complete && !ctx.cancel.is_cancelled() {
+            return Ok(JobOutcome::yield_with(serde_json::json!({
+                "listed": report.listed,
+                "total": report.total,
+            })));
+        }
+        Ok(JobOutcome::done())
+    }
+
+    /// Messages of the Dig still without a body; 0 when the store cannot
+    /// say, so a store error never keeps a job yielding.
+    fn bodies_left(&self, dig: &Dig) -> u64 {
+        self.app
+            .stores
+            .dig(&dig.id)
+            .and_then(|s| repo::messages::count_without_body(&s))
+            .unwrap_or(0)
     }
 }
 
@@ -396,6 +505,7 @@ impl App {
             JobKind::InitialSync,
             JobKind::CatchUp,
             JobKind::IncrementalSync,
+            JobKind::HistoryBackfill,
             JobKind::Sift,
             JobKind::HistoricalSift,
             JobKind::Projection,
@@ -514,6 +624,63 @@ impl App {
         }
     }
 
+    /// Whether the Dig's first listing has finished.
+    pub fn initial_sync_done(&self, dig: &Dig) -> Result<bool> {
+        let store = self.stores.dig(&dig.id)?;
+        Ok(
+            repo::sync_state::get(&store, repo::sync_state::INITIAL_SYNC_DONE)?.as_deref()
+                == Some("1"),
+        )
+    }
+
+    /// Queue the Dig's first sync (one per Dig: the queue dedupes).
+    pub fn enqueue_initial_sync(&self, dig: &Dig) {
+        if let Some(ops) = self.services.get::<Ops>() {
+            let _ = ops.queue.enqueue(
+                JobSpec::new(JobKind::InitialSync, format!("First sync of {}", dig.email))
+                    .dig(dig.id.clone()),
+            );
+        }
+    }
+
+    /// Queue a Sift of the Dig's backlog, to run in the Judge class beside
+    /// a listing in the Provider class (one per Dig: the queue dedupes).
+    pub fn enqueue_sift(&self, dig: &Dig) {
+        if let Some(ops) = self.services.get::<Ops>() {
+            let _ = ops.queue.enqueue(
+                JobSpec::new(JobKind::Sift, format!("Sift {}", dig.name)).dig(dig.id.clone()),
+            );
+        }
+    }
+
+    /// Queue the history backfill when the first listing is done and older
+    /// mail is still to fetch (§53). Nothing when it is not due or already
+    /// queued; a store that cannot say is left alone.
+    pub fn enqueue_history_backfill(&self, dig: &Dig) {
+        let Some(ops) = self.services.get::<Ops>() else {
+            return;
+        };
+        match self.backfill_pending(dig) {
+            Ok(true) => {
+                let _ = ops.queue.enqueue(
+                    JobSpec::new(
+                        JobKind::HistoryBackfill,
+                        format!("Fetching older mail for {}", dig.name),
+                    )
+                    .dig(dig.id.clone()),
+                );
+            }
+            Ok(false) => {}
+            Err(e) => swallowed!(
+                Category::Sync,
+                "backfill_pending",
+                e,
+                "could not tell whether {} has history to fetch",
+                dig.id
+            ),
+        }
+    }
+
     /// Recompute and store a Dig's status; emit the change (§5).
     /// Why a sync failed, from its error and the setup: a refused Gmail
     /// sign-in with no OAuth client configured is a missing setup, not an
@@ -618,12 +785,60 @@ impl App {
     pub fn task_centre(&self) -> Result<TaskCentre> {
         let ops = self.services.require::<Ops>()?;
         let src = self.services.require::<AppDigStatus>()?;
-        Ok(riddle_jobs::snapshot(
+        let mut tc = riddle_jobs::snapshot(
             &self.stores,
             &ops.queue,
             src.as_ref(),
             self.services.clock.as_ref(),
-        ))
+        );
+        tc.judge = self.judge_health();
+        tc.llm = self.llm_health();
+        Ok(tc)
+    }
+
+    /// Unclassified mail inside the sync window (`sync_options().window_days`;
+    /// every message when there is no window). "Caught up" means the window
+    /// is listed and sifted: the history backfill fills older mail behind
+    /// it, and that mail is not what the Task Centre or the Summary count
+    /// as remaining.
+    pub fn unclassified_in_window(&self, store: &riddle_store::Store) -> Result<u64> {
+        match self.sync_options().window_days {
+            Some(days) => {
+                let since = self.services.clock.now() - chrono::Duration::days(days);
+                repo::messages::unclassified_count_since(store, &since)
+            }
+            None => repo::messages::unclassified_count(store),
+        }
+    }
+
+    /// The judge's breaker and last calls; `None` with no judge configured.
+    pub fn judge_health(&self) -> Option<ServiceHealth> {
+        self.services.judge().map(|j| j.health())
+    }
+
+    /// The LLM client's breaker and last calls; `None` with no LLM (the
+    /// `null` provider installs a client that refuses, not a dependency to
+    /// watch, so the settings say whether there is one).
+    pub fn llm_health(&self) -> Option<ServiceHealth> {
+        let configured = self
+            .services
+            .get::<SettingsStore>()
+            .is_none_or(|s| s.settings().llm.provider != LlmProvider::Null);
+        self.services
+            .get::<crate::ai::AiServices>()
+            .filter(|_| configured)
+            .map(|ai| ai.llm.health())
+    }
+
+    /// A moment as HH:MM in the user's zone (`user_zone`: the profile's
+    /// timezone, else UTC), for a status reason the person reads.
+    pub fn local_clock(&self, at: &chrono::DateTime<chrono::Utc>) -> String {
+        let zone = repo::user_profile::get(&self.stores.index())
+            .ok()
+            .and_then(|p| p.timezone);
+        at.with_timezone(&user_zone(zone.as_deref()))
+            .format("%H:%M")
+            .to_string()
     }
 
     /// The full boot: settings, domains, AI, judge, ops. Background work
@@ -681,8 +896,10 @@ impl App {
                 let mut every = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
                 loop {
                     every.tick().await;
+                    // Warn, not debug: a check that skips every six hours
+                    // for a fortnight is worth a line in the warning tail.
                     if let Err(e) = app.probe_models().await {
-                        rdebug!(
+                        rwarn!(
                             Category::Llm,
                             "model access check skipped: {}",
                             e.kind.as_str()
@@ -719,7 +936,7 @@ impl App {
             repo::user_profile::put(&index, &p)
         });
         if let Err(e) = result {
-            rwarn!(Category::App, "timezone not recorded: {}", e.kind.as_str());
+            swallowed!(Category::App, "system_timezone", e);
         }
     }
 

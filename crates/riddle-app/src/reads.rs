@@ -93,7 +93,9 @@ impl App {
             for (k, n) in repo::classifications::counts(&store, Some(&since), true)? {
                 *shadow_counts.entry(k).or_insert(0) += n;
             }
-            let un = repo::messages::unclassified_count(&store)?;
+            // Inside the sync window: older mail the history backfill is
+            // still bringing in does not keep the morning from "caught up".
+            let un = self.unclassified_in_window(&store)?;
             remaining += un;
             total_to_sift += repo::messages::count(&store)?;
             projection_pending += repo::outbox::pending_count(&store)?;

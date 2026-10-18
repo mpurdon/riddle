@@ -13,7 +13,47 @@ import type { Activity } from '@/bindings/Activity'
 import type { Disposition } from '@/bindings/Disposition'
 import type { FindType } from '@/bindings/FindType'
 import type { RiddleError } from '@/bindings/RiddleError'
+import type { ServiceHealth } from '@/bindings/ServiceHealth'
 import { fmtInt, fmtRelative, num, plural, titleCase, fmtClock } from './format'
+
+// ---------------------------------------------------------------------------
+// Judge and LLM health (§56): the breaker and the last call, as one line.
+// The judge's breaker opened and closed for a fortnight and nothing on
+// screen said so; these lines are what the Task Centre and the banner say.
+
+/** "last judge call 14:20", "last judge call 14:29 (failed: judge_unavailable)", or "no judge calls yet". */
+export function lastCallPhrase(what: string, h: ServiceHealth | null | undefined): string | null {
+  if (!h) return null
+  const success = h.lastSuccessAt ? new Date(h.lastSuccessAt).getTime() : null
+  const failure = h.lastFailureAt ? new Date(h.lastFailureAt).getTime() : null
+  if (success === null && failure === null) return `no ${what} calls yet`
+  const failedLast = failure !== null && (success === null || failure >= success)
+  const at = failedLast ? h.lastFailureAt : h.lastSuccessAt
+  if (!at) return `no ${what} calls yet`
+  return `last ${what} call ${fmtClock(at)}${failedLast && h.lastFailureKind ? ` (failed: ${h.lastFailureKind})` : ''}`
+}
+
+/** "Judge paused after repeated failures, retrying at 14:35 · last judge call 14:29 (failed: judge_unavailable)". */
+export function serviceHealthLine(label: string, h: ServiceHealth): string {
+  const b = h.breaker
+  const state =
+    b.state === 'open'
+      ? `${label} paused after repeated failures, retrying at ${fmtClock(b.until)}`
+      : b.state === 'half_open'
+        ? `${label} paused after repeated failures, retrying now`
+        : b.state === 'closed' && b.consecutive_failures > 0
+          ? `${label} answering, ${plural(b.consecutive_failures, 'recent failure')}`
+          : b.state === 'closed'
+            ? `${label} answering`
+            : label
+  const call = lastCallPhrase(label.toLowerCase(), h)
+  return call ? `${state} · ${call}` : state
+}
+
+/** Bad while the breaker refuses calls; ok otherwise. */
+export function serviceHealthTone(h: ServiceHealth): Tone {
+  return h.breaker.state === 'open' || h.breaker.state === 'half_open' ? 'bad' : 'ok'
+}
 
 // ---------------------------------------------------------------------------
 // Per-Dig status chips (ARCHITECTURE.md §5)
@@ -171,6 +211,7 @@ export function jobKindLabel(kind: Job['kind']): string {
     initial_sync: 'Initial sync',
     catch_up: 'Catch-up',
     incremental_sync: 'Incremental sync',
+    history_backfill: 'Fetching older mail',
     sift: 'Sift',
     historical_sift: 'Historical Sift',
     signal_backfill: 'Signal backfill',
@@ -294,6 +335,20 @@ export function summaryCopy(s: Summary, now: Date = new Date()): SummaryCopy {
 export function catchUpJob(tc: TaskCentre | undefined, digId: string | null): Job | null {
   const mine = (tc?.jobs ?? []).filter((j) => isJobActive(j) && (j.kind === 'initial_sync' || j.kind === 'catch_up') && (!digId || j.digId === digId))
   return mine.find((j) => j.kind === 'initial_sync' && j.status.state === 'running') ?? mine.find((j) => j.status.state === 'running') ?? mine[0] ?? null
+}
+
+/** The history backfill for this account (or any), running first: older mail filling in behind a caught-up window, never a catch-up itself. */
+export function historyBackfillJob(tc: TaskCentre | undefined, digId: string | null): Job | null {
+  const mine = (tc?.jobs ?? []).filter((j) => isJobActive(j) && j.kind === 'history_backfill' && (!digId || j.digId === digId))
+  return mine.find((j) => j.status.state === 'running') ?? mine[0] ?? null
+}
+
+/** "Fetching older mail: through March 2024 · 3,200 of 41,000": the backfill job's own step and count, as a secondary line. */
+export function backfillLine(job: Job): string {
+  const total = job.progress.total === null || job.progress.total === undefined ? null : num(job.progress.total)
+  const count = `${fmtInt(num(job.progress.done))}${total !== null ? ` of ${fmtInt(total)}` : ''}`
+  const step = job.status.state === 'queued' ? 'waiting' : job.progress.step
+  return `${jobKindLabel(job.kind)}${step ? `: ${step}` : ''} · ${count}`
 }
 
 /** Messages still to fetch for the account (or all), from each account's status; null when none is fetching. */

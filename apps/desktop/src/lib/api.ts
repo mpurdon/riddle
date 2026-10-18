@@ -50,6 +50,7 @@ import type { UsageSummary } from '@/bindings/UsageSummary'
 import type { UserProfile } from '@/bindings/UserProfile'
 import type {
   DevInfo,
+  DiagnosticsBundle,
   DirectorSendResult,
   LogLine,
   MessageFilter,
@@ -212,7 +213,8 @@ export const probeProvider = (digId: string) => call<ProbeResult>('probe_provide
 export const readAppLogs = (args: { limit?: number; category?: string | null; level?: string | null; text?: string | null } = {}) =>
   call<LogLine[]>('read_app_logs', { limit: args.limit ?? null, category: args.category ?? null, level: args.level ?? null, text: args.text ?? null })
 export const logCategories = () => call<string[]>('log_categories')
-export const exportDiagnostics = () => call<string>('export_diagnostics')
+/** The redacted diagnostics bundle, a JSON object; the pane pretty-prints it for the clipboard. */
+export const exportDiagnostics = () => call<DiagnosticsBundle>('export_diagnostics')
 export const updatePreview = () => call<UpdatePreview | null>('update_preview')
 
 // ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ pub mod stratum;
 pub mod suggestion;
 pub mod text;
 pub mod traits;
+pub mod ui_level;
 pub mod usage;
 
 pub use action::*;
@@ -58,6 +59,7 @@ pub use stratum::*;
 pub use suggestion::*;
 pub use text::*;
 pub use traits::*;
+pub use ui_level::*;
 pub use usage::*;
 
 pub use chrono::{DateTime, Utc};

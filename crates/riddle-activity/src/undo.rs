@@ -31,7 +31,7 @@ use riddle_core::{
     SkippedEntity, UndoConflict, UndoInfo, UndoPreview, UndoReport,
 };
 use riddle_errors::{Result, RiddleError};
-use riddle_observability::{rerror, rinfo, rwarn, Category};
+use riddle_observability::{rinfo, rwarn, Category};
 use riddle_store::{repo, Stores};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -244,10 +244,11 @@ impl UndoEngine {
                 entry = entry.dig(dig);
             }
             if let Err(e) = ledger.append_with_id(undo_id, entry) {
-                rerror!(
+                riddle_observability::swallowed!(
                     Category::Actions,
-                    "could not record undo activity for {id}: {}",
-                    e.message
+                    "undo_activity",
+                    e,
+                    "could not record undo activity for {id}"
                 );
             }
         }
@@ -330,10 +331,11 @@ impl UndoEngine {
             runtime.services.clock.clone(),
         );
         if let Err(e) = ledger.mark_undone(id, principal.actor(), undo_id.clone()) {
-            rerror!(
+            riddle_observability::swallowed!(
                 Category::Actions,
-                "could not mark activity {id} undone: {}",
-                e.message
+                "mark_undone",
+                e,
+                "could not mark activity {id} undone"
             );
         }
         rinfo!(

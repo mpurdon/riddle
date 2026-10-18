@@ -6,10 +6,17 @@
 //! logging never fails the work it describes. Every macro here swallows its
 //! own errors. Structured payloads are appended as ` ||PAYLOAD||<json>` so the
 //! log viewer can expand them without a second format.
+//!
+//! Bookkeeping that fails is swallowed by design (an Activity row, a usage
+//! row, a cache write), and a swallowed failure used to leave one warn line
+//! in a ring buffer of five thousand and nothing else: twenty-five such sites
+//! had no count, so a usage row failing on every call looked like one bad
+//! moment (17 Oct 2026). `swallowed!` logs the line and counts it in a table
+//! keyed by (category, site) that `dev_info` and the diagnostics export read.
 
 use parking_lot::Mutex;
 use serde::Serialize;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -177,6 +184,79 @@ macro_rules! rdebug { ($cat:expr, $($arg:tt)+) => { $crate::rlog!(::log::Level::
 #[macro_export]
 macro_rules! rtrace { ($cat:expr, $($arg:tt)+) => { $crate::rlog!(::log::Level::Trace, $cat, $($arg)+) }; }
 
+/// A failure that was logged and dropped so the work it described could go
+/// on: `swallowed!(Category::Sift, "sift_activity", err)` logs at warn and
+/// counts under (category, site); a trailing format gives the log line its
+/// identifiers (`swallowed!(cat, "retry_stale", err, "for dig {}", dig.id)`).
+/// The error's `Display` must carry identifiers only; `RiddleError`'s does.
+#[macro_export]
+macro_rules! swallowed {
+    ($cat:expr, $site:expr, $err:expr) => {
+        $crate::swallow($cat, $site, &$err, ::std::option::Option::None)
+    };
+    ($cat:expr, $site:expr, $err:expr, $($arg:tt)+) => {
+        $crate::swallow(
+            $cat,
+            $site,
+            &$err,
+            ::std::option::Option::Some(format_args!($($arg)+)),
+        )
+    };
+}
+
+/// One row of the swallowed-failure table: how often a site dropped a
+/// failure, when it last did, and what the last one said.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwallowedFailure {
+    pub category: String,
+    pub site: String,
+    pub count: u64,
+    pub last_at: chrono::DateTime<chrono::Utc>,
+    pub last_error: String,
+}
+
+type SwallowedKey = (&'static str, &'static str);
+
+static SWALLOWED: OnceLock<Mutex<BTreeMap<SwallowedKey, SwallowedFailure>>> = OnceLock::new();
+
+fn swallowed() -> &'static Mutex<BTreeMap<SwallowedKey, SwallowedFailure>> {
+    SWALLOWED.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+#[doc(hidden)]
+pub fn swallow(
+    category: Category,
+    site: &'static str,
+    err: &dyn std::fmt::Display,
+    context: Option<std::fmt::Arguments<'_>>,
+) {
+    let text = err.to_string();
+    match context {
+        Some(c) => emit(log::Level::Warn, category, format_args!("{c}: {text}")),
+        None => emit(log::Level::Warn, category, format_args!("{site}: {text}")),
+    }
+    let mut table = swallowed().lock();
+    let row = table
+        .entry((category.as_str(), site))
+        .or_insert_with(|| SwallowedFailure {
+            category: category.as_str().to_string(),
+            site: site.to_string(),
+            count: 0,
+            last_at: chrono::Utc::now(),
+            last_error: String::new(),
+        });
+    row.count += 1;
+    row.last_at = chrono::Utc::now();
+    row.last_error = text;
+}
+
+/// Every site that has swallowed a failure since launch, by category then
+/// site. Read by `dev_info`, the Failures pane and the diagnostics export.
+pub fn swallowed_failures() -> Vec<SwallowedFailure> {
+    swallowed().lock().values().cloned().collect()
+}
+
 /// Warns when an operation exceeds its budget. Drop-based so early returns
 /// and `?` are covered.
 pub struct Timed {
@@ -290,5 +370,29 @@ mod tests {
     #[test]
     fn redaction_keeps_a_prefix_and_a_length() {
         assert_eq!(redact("secret-token"), "secr…(12)");
+    }
+
+    #[test]
+    fn a_swallowed_failure_is_counted_under_its_site_and_logged_at_warn() {
+        let err = std::io::Error::other("disk full");
+        swallowed!(Category::Store, "test_site_a", err);
+        swallowed!(Category::Store, "test_site_a", err, "for dig {}", "d1");
+        let rows = swallowed_failures();
+        let row = rows
+            .iter()
+            .find(|r| r.site == "test_site_a")
+            .expect("the site is in the table");
+        assert_eq!(row.category, "store");
+        assert_eq!(row.count, 2);
+        assert_eq!(row.last_error, "disk full");
+        let logged = tail(
+            50,
+            Some("store"),
+            Some(log::Level::Warn),
+            Some("for dig d1"),
+        );
+        assert!(logged
+            .iter()
+            .any(|l| l.level == "WARN" && l.message == "for dig d1: disk full"));
     }
 }

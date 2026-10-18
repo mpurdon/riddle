@@ -2,9 +2,83 @@
 
 use crate::signal::{Distribution, Signal, SignalEvaluation, SignalPrimitive};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use riddle_errors::Result;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+
+/// A dependency's circuit breaker (§56) as the Task Centre reads it. The
+/// judge's breaker opened and closed for a fortnight and nothing read its
+/// state: every Dig said "Sifting" while every call was refused (17 Oct
+/// 2026). `Unknown` is the doubles' answer, which keep no breaker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(tag = "state", rename_all = "snake_case")]
+#[ts(export)]
+pub enum BreakerHealth {
+    #[default]
+    Unknown,
+    Closed {
+        consecutive_failures: u32,
+    },
+    /// Every call is refused until `until`.
+    Open {
+        until: DateTime<Utc>,
+    },
+    /// The cooldown has passed; the next call is the one probe.
+    HalfOpen,
+}
+
+/// What a judge or LLM client says about itself without making a call: its
+/// breaker, and when it last succeeded and last failed. The failure kind is
+/// `ErrorKind::as_str`, never the error's text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ServiceHealth {
+    pub breaker: BreakerHealth,
+    pub last_success_at: Option<DateTime<Utc>>,
+    pub last_failure_at: Option<DateTime<Utc>>,
+    pub last_failure_kind: Option<String>,
+}
+
+impl ServiceHealth {
+    /// The later of the last success and the last failure.
+    pub fn last_call_at(&self) -> Option<DateTime<Utc>> {
+        self.last_success_at.max(self.last_failure_at)
+    }
+}
+
+#[derive(Default)]
+struct CallLogInner {
+    success_at: Option<DateTime<Utc>>,
+    failure_at: Option<DateTime<Utc>>,
+    failure_kind: Option<String>,
+}
+
+/// The last-call bookkeeping behind `ServiceHealth`, shared by the judge
+/// and the LLM client so both answer the same questions the same way.
+#[derive(Default)]
+pub struct CallLog(parking_lot_lite::Mutex<CallLogInner>);
+
+impl CallLog {
+    pub fn succeeded(&self, at: DateTime<Utc>) {
+        self.0.lock().success_at = Some(at);
+    }
+    pub fn failed(&self, at: DateTime<Utc>, kind: &str) {
+        let mut g = self.0.lock();
+        g.failure_at = Some(at);
+        g.failure_kind = Some(kind.to_string());
+    }
+    pub fn health(&self, breaker: BreakerHealth) -> ServiceHealth {
+        let g = self.0.lock();
+        ServiceHealth {
+            breaker,
+            last_success_at: g.success_at,
+            last_failure_at: g.failure_at,
+            last_failure_kind: g.failure_kind.clone(),
+        }
+    }
+}
 
 /// Size-bounded state given to the judge once per Signal Set (§25).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,6 +171,11 @@ pub trait SemanticJudge: Send + Sync {
     ) -> Result<Vec<JudgeAnswer>>;
     fn limits(&self) -> JudgeLimits;
     fn identity(&self) -> JudgeIdentity;
+    /// The breaker and the last calls, without making one. The doubles keep
+    /// neither and answer `Unknown`.
+    fn health(&self) -> ServiceHealth {
+        ServiceHealth::default()
+    }
     /// A cheap liveness probe for the Developer pane and the circuit breaker.
     async fn probe(&self) -> Result<u64> {
         let s = JudgeState::new("The meeting is at noon.".into());

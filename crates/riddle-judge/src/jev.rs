@@ -18,8 +18,8 @@ use crate::ratelimit::TokenBucket;
 use crate::secret::SecretString;
 use async_trait::async_trait;
 use riddle_core::{
-    Distribution, JudgeAnswer, JudgeIdentity, JudgeLimits, JudgeQuestion, JudgeState,
-    SemanticJudge, SignalPrimitive, UsageRow, UsageTask,
+    CallLog, Distribution, JudgeAnswer, JudgeIdentity, JudgeLimits, JudgeQuestion, JudgeState,
+    SemanticJudge, ServiceHealth, SignalPrimitive, UsageRow, UsageTask,
 };
 use riddle_errors::{Result, RiddleError};
 use riddle_observability::{rdebug, rwarn, Category};
@@ -88,6 +88,8 @@ pub struct JevJudge {
     limiter: TokenBucket,
     breaker: CircuitBreaker,
     usage: Option<UsageRecorder>,
+    /// When the endpoint last answered and last failed, for `health()`.
+    calls: CallLog,
 }
 
 impl std::fmt::Debug for JevJudge {
@@ -132,6 +134,7 @@ impl JevJudge {
             key,
             config,
             usage: None,
+            calls: CallLog::default(),
         })
     }
 
@@ -375,9 +378,9 @@ impl SemanticJudge for JevJudge {
                     self.breaker.record_failure();
                     guard.resolved = true;
                     self.record_usage(estimate, latency, false);
-                    return Err(RiddleError::judge_unavailable(
-                        "Jev response has no answers",
-                    ));
+                    let e = RiddleError::judge_unavailable("Jev response has no answers");
+                    self.calls.failed(chrono::Utc::now(), e.kind.as_str());
+                    return Err(e);
                 };
                 let input_tokens = usage_tokens(&value).unwrap_or(estimate);
                 let mut out = Vec::with_capacity(questions.len());
@@ -410,6 +413,7 @@ impl SemanticJudge for JevJudge {
                 }
                 self.breaker.record_success();
                 guard.resolved = true;
+                self.calls.succeeded(chrono::Utc::now());
                 self.record_usage(input_tokens, latency, true);
                 rdebug!(
                     Category::Judge,
@@ -422,6 +426,7 @@ impl SemanticJudge for JevJudge {
             Err(e) => {
                 self.breaker.record_failure();
                 guard.resolved = true;
+                self.calls.failed(chrono::Utc::now(), e.kind.as_str());
                 self.record_usage(estimate, self.config.timeout.as_millis() as u64, false);
                 Err(e)
             }
@@ -444,6 +449,10 @@ impl SemanticJudge for JevJudge {
             model_version: self.config.model.clone(),
             price_per_mtok: self.config.price_per_mtok,
         }
+    }
+
+    fn health(&self) -> ServiceHealth {
+        self.calls.health(self.breaker.health())
     }
 }
 

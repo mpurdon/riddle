@@ -136,11 +136,11 @@ export function registerMocks(): void {
   mock('mailbox_writes', () => ({ dev: state.devInfo.dev, writes: state.writes, held: u64(state.held) }))
   mock('probe_judge', async () => {
     await new Promise((r) => setTimeout(r, 420))
-    return { ok: true, latencyMs: 184, message: 'jev-1.13.0 answered 1 question (2 choices); key from ssm dev' }
+    return { ok: true, latencyMs: 184, message: 'jev-1.13.0 answered 1 question (2 choices); key from ssm dev', health: state.judgeHealth }
   })
   mock('probe_llm', async () => {
     await new Promise((r) => setTimeout(r, 900))
-    return { ok: true, latencyMs: 812, message: 'bedrock us-east-1 us.anthropic.claude-haiku-4-5 responded; profile dev' }
+    return { ok: true, latencyMs: 812, message: 'bedrock us-east-1 us.anthropic.claude-haiku-4-5 responded; profile dev', health: state.llmHealth }
   })
   mock('test_notification', () => ({ sent: true }))
   mock('probe_provider', async (a) => {

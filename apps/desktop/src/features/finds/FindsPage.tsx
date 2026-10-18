@@ -20,6 +20,7 @@ import type { Find } from '@/bindings/Find'
 import type { FindType } from '@/bindings/FindType'
 import { explain, getFind, getThread, qk } from '@/lib/api'
 import { cx, fmtDue, fmtRelative, fmtTime, num, plural } from '@/lib/format'
+import { useLevelTip } from '@/lib/level'
 import { useDigContext } from '@/lib/queries'
 import { findTypeLabel, FIND_TYPES, importanceOfPriority } from '@/lib/selectors'
 import { keyHint } from '@/lib/shortcuts'
@@ -143,20 +144,29 @@ export default function FindsPage() {
       onFailure: () => void qc.invalidateQueries({ queryKey: qk.finds }),
     })
   }
+  // "Not important" is a correction and Why? is a question; at Essentials the fifth of either earns the one tip that the rest exists.
+  const levelTip = useLevelTip()
   const resolve = () => act(openTargets(), 'resolve_find', {}, { status: 'resolved', resolvedBy: 'user' })
-  const dismiss = () => act(openTargets(), 'dismiss_find', {}, { status: 'dismissed', resolvedBy: 'user' })
+  const dismiss = () => {
+    if (openTargets().length) levelTip('correction')
+    act(openTargets(), 'dismiss_find', {}, { status: 'dismissed', resolvedBy: 'user' })
+  }
   const snooze = (until: string) => act(openTargets(), 'snooze_find', { until }, { status: 'snoozed', snoozedUntil: until })
   const retype = (t: FindType) => current && act([current], 'retype_find', { findType: t }, { findType: t })
 
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [retypeOpen, setRetypeOpen] = useState(false)
   const [whyOpen, setWhyOpen] = useState(false)
+  const toggleWhy = () => {
+    if (!whyOpen) levelTip('why')
+    setWhyOpen(!whyOpen)
+  }
   useShortcuts('finds', {
     resolve,
     dismiss,
     snooze: () => openTargets().length && setSnoozeOpen(true),
     retype: () => current && setRetypeOpen(true),
-    why: () => setWhyOpen((v) => !v),
+    why: toggleWhy,
   })
 
   const count = selected.length
@@ -200,7 +210,7 @@ export default function FindsPage() {
       </Resizable>
       <section className="relative flex min-w-0 flex-1 flex-col">
         {current ? (
-          <FindDetail find={current} selectedCount={count} selectedOpen={selectedOpen} whyOpen={whyOpen} onWhy={() => setWhyOpen((v) => !v)} onResolve={resolve} onDismiss={dismiss} onSnooze={snooze} onRetype={retype} />
+          <FindDetail find={current} selectedCount={count} selectedOpen={selectedOpen} whyOpen={whyOpen} onWhy={toggleWhy} onResolve={resolve} onDismiss={dismiss} onSnooze={snooze} onRetype={retype} />
         ) : (
           <EmptyState
             title="Select a Find"

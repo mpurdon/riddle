@@ -21,6 +21,7 @@ import type { ToolCall } from '@/bindings/ToolCall'
 import type { Turn } from '@/bindings/Turn'
 import { directorRetry, directorSend, getConversation, listConversations, listSuggestions, qk } from '@/lib/api'
 import { cx, fmtMs, fmtRelative, fmtUsd, num } from '@/lib/format'
+import { levelShows, useLevel, useLlmConfigured, type UiLevel } from '@/lib/level'
 import { useDigContext } from '@/lib/queries'
 import { keysLabel } from '@/lib/shortcuts'
 import { useDirector } from '@/lib/stores'
@@ -36,14 +37,19 @@ import { PageHeader, useCopy } from '@/components/Bits'
 import { ProposalsPanel } from './ProposalsPanel'
 import { Resizable } from '@/components/Resizable'
 
-/** Questions to start with when nothing Riddle noticed comes first. */
-const SUGGESTIONS = [
-  'What actually needs my attention this morning?',
-  'Why did you think this was a Find?',
-  'What am I waiting for other people to respond to?',
-  'These GitHub notifications are not useful unless something fails. Handle those automatically from now on.',
-  'Find every subscription I have paid for during the last year and identify the ones I may no longer need.',
-  'Draft replies to everything that is waiting on me.',
+/**
+ * Questions to start with when nothing Riddle noticed comes first. A
+ * question that asks for a rule or a long job belongs to Everything; at
+ * Essentials the Director still answers such a question, in plain words,
+ * but the page does not lead with it.
+ */
+const SUGGESTIONS: { text: string; level?: UiLevel }[] = [
+  { text: 'What actually needs my attention this morning?' },
+  { text: 'Why did you think this was a Find?' },
+  { text: 'What am I waiting for other people to respond to?' },
+  { text: 'These GitHub notifications are not useful unless something fails. Handle those automatically from now on.', level: 'everything' },
+  { text: 'Find every subscription I have paid for during the last year and identify the ones I may no longer need.', level: 'everything' },
+  { text: 'Draft replies to everything that is waiting on me.' },
 ]
 
 function Markdown({ text }: { text: string }) {
@@ -122,6 +128,9 @@ export default function DirectorPage() {
   const nav = useNavigate()
   const qc = useQueryClient()
   const { digId, digs } = useDigContext()
+  const level = useLevel()
+  // Without an LLM the page says so instead of offering questions nobody answers.
+  const llm = useLlmConfigured()
   const convs = useQuery({ queryKey: qk.conversations, queryFn: listConversations })
   // What Riddle noticed, for the empty state only; it changes with Sift passes, not with focus.
   const hints = useQuery({ queryKey: qk.suggestions, queryFn: listSuggestions, enabled: !conversationId, staleTime: 5 * 60_000 })
@@ -197,7 +206,7 @@ export default function DirectorPage() {
 
   const turns = conv.data?.turns ?? []
   const readUntrusted = conv.data?.readUntrusted ?? false
-  const sendDisabled = working ? 'The Director is still working on the last message' : text.trim() ? null : 'Type a message'
+  const sendDisabled = !llm ? 'No model is set up; choose one under Settings → Providers' : working ? 'The Director is still working on the last message' : text.trim() ? null : 'Type a message'
   /** Said once, on the Send button and under the composer. */
   // One source for the two key labels: the button title says it in plain text, the footer as keycaps.
   const keys = { send: keysLabel('enter').join(''), newline: keysLabel('shift+enter').join('') }
@@ -236,20 +245,36 @@ export default function DirectorPage() {
       </Resizable>
       <section className="flex min-w-0 flex-1 flex-col">
         <div ref={scroller} className="min-h-0 flex-1 overflow-auto px-6 py-4">
-          {!conversationId ? (
+          {!conversationId && !llm ? (
+            <EmptyState
+              icon={<Bot />}
+              title="The Director has no model to think with."
+              body={
+                <div>
+                  <p>Riddle talks to the Director through a model you choose. None is set up, so there is nobody to ask yet. Your Finds, your mail and your rules work as before.</p>
+                </div>
+              }
+              actions={
+                <Button size="sm" variant="primary" onClick={() => nav('/settings#providers')} title="Settings → Providers: the model and its budget">
+                  Choose a model
+                </Button>
+              }
+            />
+          ) : null}
+          {!conversationId && llm ? (
             <EmptyState
               icon={<Bot />}
               title="Ask the Director."
               body={
                 <div>
-                  <p>It works with the same accounts, Finds, Strata, Meshes and drafts you do, through the same Actions. Before anything leaves the machine it shows you the real recipients and asks.</p>
+                  <p>{levelShows(level, 'everything') ? 'It works with the same accounts, Finds, Strata, Meshes and drafts you do, through the same Actions. Before anything leaves the machine it shows you the real recipients and asks.' : 'It works with the same accounts, Finds, mail and rules you do. Before anything leaves the machine it shows you the real recipients and asks.'}</p>
                   <p className="mt-2 text-xs text-clay">Pick a question to start with; edit it, then press Enter to send.</p>
                   <ul className="mt-3 flex flex-col gap-1 text-left">
                     {[
                       // What Riddle noticed first, worded by the backend; then the standing questions.
                       ...(hints.data?.series ?? []).map((h) => ({ key: `series:${h.meshId}:${h.sender}`, label: h.label, prompt: h.prompt, noticed: true })),
                       ...(hints.data?.senders ?? []).map((h) => ({ key: `sender:${h.list}:${h.entry}`, label: h.label, prompt: h.prompt, noticed: true })),
-                      ...SUGGESTIONS.map((s) => ({ key: s, label: s, prompt: s, noticed: false })),
+                      ...SUGGESTIONS.filter((s) => levelShows(level, s.level ?? 'essentials')).map((s) => ({ key: s.text, label: s.text, prompt: s.text, noticed: false })),
                     ].map((c) => (
                       <li key={c.key}>
                         <button type="button" className="rounded px-2 py-1 text-left text-sm text-ochre hover:bg-sand" onClick={() => suggest(c.prompt)} title={`${c.noticed ? 'Riddle noticed this. ' : ''}Put this in the composer; nothing is sent until you press send`}>

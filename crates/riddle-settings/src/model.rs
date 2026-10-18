@@ -11,7 +11,7 @@
 //! `docs/COMMANDS.md`; the ts-rs binding is generated from this file.
 
 use riddle_actions::policy::AutonomyPolicy;
-use riddle_core::{Autonomy, DigId, FindType, PrivacyMode, ProjectionMode};
+use riddle_core::{Autonomy, DigId, FindType, PrivacyMode, ProjectionMode, UiLevel};
 use riddle_errors::{Result, RiddleError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -340,7 +340,16 @@ impl Default for ComparisonSettings {
 #[ts(export)]
 pub struct Settings {
     pub schema_version: u32,
+    /// Derived from `ui_level`: true exactly when the level is Developer.
+    /// Kept as a field because the backend and older files read it; the
+    /// level is the one switch (see `reconcile_level`).
     pub developer_mode: bool,
+    /// How much of Riddle the person sees: Essentials, Everything or
+    /// Developer (`riddle_core::UiLevel`). The rail, the go-to shortcuts, the
+    /// help sheet and the Director's register read it; every route stays
+    /// reachable at every level.
+    #[serde(default)]
+    pub ui_level: UiLevel,
     pub log_level: LogLevel,
     /// Finds at or above this priority (0–100) interrupt in Stream mode; the rest wait.
     pub notify_priority_threshold: u32,
@@ -374,6 +383,7 @@ impl Settings {
         Self {
             schema_version: SETTINGS_SCHEMA_VERSION,
             developer_mode: false,
+            ui_level: UiLevel::Essentials,
             log_level: LogLevel::Info,
             notify_priority_threshold: 70,
             notifications: NotificationSettings::default(),
@@ -395,10 +405,14 @@ impl Settings {
         }
     }
 
-    /// Dev builds start in OBSERVE (§59) and log at debug.
+    /// Dev builds start in OBSERVE (§59), log at debug and show Everything.
+    /// Developer is not the default even here: the level is the person's
+    /// choice, and a file that already says `developerMode = true` loads as
+    /// Developer (`parse_settings`), so nobody loses the pages they had.
     pub fn dev_defaults() -> Self {
         Self {
-            developer_mode: true,
+            developer_mode: false,
+            ui_level: UiLevel::Everything,
             log_level: LogLevel::Debug,
             autonomy: AutonomySettings {
                 default: Autonomy::Observe,
@@ -414,6 +428,17 @@ impl Settings {
         } else {
             Self::prod_defaults()
         }
+    }
+
+    /// The level is the one switch: `developer_mode` is true exactly when
+    /// `ui_level` is Developer. Run on every load and every save, so a
+    /// client that sends one without the other, or a hand-edited file where
+    /// they disagree, cannot leave the rail and the Developer page reading
+    /// different answers. A file written before the level existed is the
+    /// one case where the flag speaks first, and `parse_settings` handles it
+    /// before calling this.
+    pub fn reconcile_level(&mut self) {
+        self.developer_mode = self.ui_level.is_developer();
     }
 
     /// Validation before any write. Errors are `invalid` with the field named.
@@ -646,7 +671,24 @@ mod tests {
         let s = Settings::dev_defaults();
         assert_eq!(s.autonomy.default, Autonomy::Observe);
         assert_eq!(s.log_level, LogLevel::Debug);
-        assert!(s.developer_mode);
+        assert_eq!(s.ui_level, UiLevel::Everything);
+        assert!(!s.developer_mode, "Everything is not Developer");
+    }
+
+    #[test]
+    fn production_starts_at_essentials_and_the_level_is_the_one_switch() {
+        let s = Settings::prod_defaults();
+        assert_eq!(s.ui_level, UiLevel::Essentials);
+        assert!(!s.developer_mode);
+        let mut dev = s.clone();
+        dev.ui_level = UiLevel::Developer;
+        dev.reconcile_level();
+        assert!(dev.developer_mode, "Developer implies the flag");
+        let mut disagree = s;
+        disagree.developer_mode = true;
+        disagree.ui_level = UiLevel::Everything;
+        disagree.reconcile_level();
+        assert!(!disagree.developer_mode, "the level wins over the flag");
     }
 
     #[test]

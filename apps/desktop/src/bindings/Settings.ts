@@ -10,11 +10,25 @@ import type { NotificationSettings } from "./NotificationSettings";
 import type { PriorityInboxSettings } from "./PriorityInboxSettings";
 import type { PrivacyMode } from "./PrivacyMode";
 import type { ProjectionMode } from "./ProjectionMode";
+import type { UiLevel } from "./UiLevel";
 
 /**
  * The config file (`settings.toml`). See the module header.
  */
-export type Settings = { schemaVersion: number, developerMode: boolean, logLevel: LogLevel, 
+export type Settings = { schemaVersion: number, 
+/**
+ * Derived from `ui_level`: true exactly when the level is Developer.
+ * Kept as a field because the backend and older files read it; the
+ * level is the one switch (see `reconcile_level`).
+ */
+developerMode: boolean, 
+/**
+ * How much of Riddle the person sees: Essentials, Everything or
+ * Developer (`riddle_core::UiLevel`). The rail, the go-to shortcuts, the
+ * help sheet and the Director's register read it; every route stays
+ * reachable at every level.
+ */
+uiLevel: UiLevel, logLevel: LogLevel, 
 /**
  * Finds at or above this priority (0–100) interrupt in Stream mode; the rest wait.
  */

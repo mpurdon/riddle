@@ -1,5 +1,6 @@
-//! `refresh_now`: wake the poller(s). The Notify lives in `riddle-mail`'s
-//! `RefreshTriggers` so Demo Mode's injection can wake the same loop.
+//! `refresh_now`: ask for a sync. The trigger lives in `riddle-mail`'s
+//! `RefreshTriggers`, which the app drains into sync jobs, so Demo Mode's
+//! injection asks through the same channel.
 
 use async_trait::async_trait;
 use riddle_actions::{meta, Action, ActionContext, ActionResult};

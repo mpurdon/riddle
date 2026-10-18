@@ -16,11 +16,11 @@
 use crate::reads::ReadScope;
 use crate::tool_loop::{LoopBudget, LoopEvent, LoopOutcome, LoopPrincipal, LoopRequest, ToolLoop};
 use crate::tools;
-use parking_lot::Mutex;
-use riddle_ai::{LlmMessage, PromptName, PromptStore};
+use parking_lot::{Mutex, RwLock};
+use riddle_ai::{director_register, LlmMessage, PromptName, PromptStore};
 use riddle_core::{
     Clock, Conversation, ConversationId, Dig, DigId, EventSink, PrivacyMode, RiddleEvent,
-    ToolAllowance, Turn, TurnFailure, TurnRole, UserProfile,
+    ToolAllowance, Turn, TurnFailure, TurnRole, UiLevel, UserProfile,
 };
 use riddle_errors::{Result, RiddleError};
 use riddle_observability::{rerror, rinfo, rwarn, Category, Timed};
@@ -46,6 +46,12 @@ pub struct DirectorConfig {
     pub max_tokens_per_call: u32,
     /// Prior turns replayed as context (§43: history is context, not state).
     pub history_turns: usize,
+    /// The person's level at construction; `set_ui_level` follows the
+    /// setting afterwards. At Essentials the prompt's register says "rule"
+    /// for Mesh and Signal, reaches for a pack before a hand-written Mesh
+    /// and never proposes a Signal. Everything by default, so a Director
+    /// built without a level speaks as it always has.
+    pub ui_level: UiLevel,
 }
 
 impl Default for DirectorConfig {
@@ -57,6 +63,7 @@ impl Default for DirectorConfig {
             max_turn_tokens: Some(150_000),
             max_tokens_per_call: 4096,
             history_turns: 24,
+            ui_level: UiLevel::Everything,
         }
     }
 }
@@ -82,6 +89,9 @@ pub struct Director {
     clock: Arc<dyn Clock>,
     config: DirectorConfig,
     in_flight: Mutex<HashSet<ConversationId>>,
+    /// Read at each turn, so a level saved mid-conversation changes the
+    /// next answer without rebuilding the model client.
+    ui_level: RwLock<UiLevel>,
 }
 
 impl Director {
@@ -99,6 +109,7 @@ impl Director {
             events,
             prompts,
             clock,
+            ui_level: RwLock::new(config.ui_level),
             config,
             in_flight: Mutex::new(HashSet::new()),
         }
@@ -106,6 +117,16 @@ impl Director {
 
     pub fn config(&self) -> &DirectorConfig {
         &self.config
+    }
+
+    /// The level the next turn's register is written for.
+    pub fn ui_level(&self) -> UiLevel {
+        *self.ui_level.read()
+    }
+
+    /// Follow a saved setting. Takes effect at the next turn.
+    pub fn set_ui_level(&self, level: UiLevel) {
+        *self.ui_level.write() = level;
     }
 
     pub fn tool_loop(&self) -> Arc<ToolLoop> {
@@ -301,6 +322,7 @@ impl Director {
                 ("user_profile", &profile_summary(&profile)),
                 ("digs", &dig_list(&digs)),
                 ("excluded_digs", &excluded_line(&excluded)),
+                ("register", director_register(self.ui_level())),
                 ("tools", &tools::describe_tools(&metas)),
             ],
         );
@@ -395,6 +417,7 @@ impl Director {
                 ("user_profile", &profile_summary(&profile)),
                 ("digs", &dig_list(&digs)),
                 ("excluded_digs", &excluded_line(&excluded)),
+                ("register", director_register(self.ui_level())),
                 ("tools", &tools::describe_tools(&metas)),
             ],
         );

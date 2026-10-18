@@ -17,7 +17,7 @@ use riddle_ai::scripted::ScriptedLlm;
 use riddle_ai::usage::UsageRecorder;
 use riddle_core::{PrivacyMode, SignalRefiner, UsageRow};
 use riddle_expeditions::runner::{ExpeditionConfig, ExpeditionRunner};
-use riddle_observability::{rerror, rinfo, Category};
+use riddle_observability::{rinfo, Category};
 use riddle_store::{repo, Stores};
 use std::sync::Arc;
 
@@ -64,7 +64,7 @@ pub fn store_recorder(stores: Arc<Stores>) -> UsageRecorder {
         };
         match target.and_then(|s| repo::usage::record(&s, &row)) {
             Ok(()) => {}
-            Err(e) => rerror!(Category::Llm, "usage row not recorded: {e}"),
+            Err(e) => riddle_observability::swallowed!(Category::Llm, "usage_row", e),
         }
     })
 }
@@ -143,6 +143,15 @@ impl App {
             reads,
             events.clone(),
         ));
+        // The person's level sets the Director's register. It is read from
+        // the settings store rather than carried in `AiConfig`, so a level
+        // change follows through `set_ui_level` (live.rs) and never rebuilds
+        // the model client; without a store (tests) the full register stands.
+        let ui_level = self
+            .services
+            .get::<riddle_settings::SettingsStore>()
+            .map(|s| s.settings().ui_level)
+            .unwrap_or(riddle_core::UiLevel::Everything);
         let director = Arc::new(Director::new(
             tool_loop.clone(),
             self.stores.clone(),
@@ -151,6 +160,7 @@ impl App {
             self.services.clock.clone(),
             DirectorConfig {
                 model_id: Some(cfg.director_model.clone()),
+                ui_level,
                 ..Default::default()
             },
         ));
