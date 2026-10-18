@@ -110,3 +110,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 51 | feat: packs turn on from what the mail shows, the judge key is optional, every trace says what decided and can be previewed, and a pass judges six at a time | 45 | 0 | 0 | 0 | 0 |
 | 52 | fix: a judge that could not resolve its key at start is attached again by housekeeping, not by a restart | 12 | 0 | 0 | 0 | 0 |
 | 53 | feat: an Engineering pack: the search console, the cloud, the registrar and the coding tools are Engineering, with what to do about each | 25 | 0 | 0 | 0 | 0 |
+| 54 | fix: Engineering pack v2: expiring things collapse per subject, incidents expire, a renewed certificate and a statement are Filed | 10 | 0 | 0 | 0 | 0 |

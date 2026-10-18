@@ -1,6 +1,6 @@
 id = "engineering"
 name = "Engineering"
-version = 1
+version = 2
 area = "Developer"
 summary = "Mail from the cloud, the registrar, the search console, developer tooling and AI coding tools is Engineering: an action a vendor asks for, an incident, an expiring certificate or a cost alert becomes a Find, indexing problems from the search console too; product news and routine notices are Filed; bills stay with the money rules and carry Engineering as well."
 band = "specific"
@@ -14,6 +14,16 @@ band = "specific"
 # companies (Google, Amazon, Apple, Microsoft, Meta) that are developer
 # consoles. The money rules run first and keep a vendor's bill a Pay Find
 # under Finance; the tag adds Engineering to it.
+#
+# v2 (18 Oct 2026, the same evening): applied to history, v1 gave a
+# registrar's "Expires in 41 days" a seven-day expiry instead of the
+# per-domain collapse it had, so old reminders expired at once and new
+# ones would repeat; "Your certificate is renewed" and a billing statement
+# became things to do; and a vendor's repeated subject decided by the judge
+# opened a Find each time. Expiring things now replace the last of the same
+# subject, incidents and failures expire, a renewed certificate or a
+# statement is Filed, a health event or maintenance is a Know, and the
+# judge's Do replaces the last of the same subject too.
 
 [detect]
 sender_domains = [
@@ -136,12 +146,14 @@ END
 '''
 
 # What a vendor asks for, by the subject it writes: an action with a date,
-# a deprecation or migration, an incident, a certificate or anything else
-# expiring, a cost alert. Rank 19 sits behind the money rules (a failed
-# payment is theirs) and ahead of the general security alert, so an
-# engineering account's security notice carries Engineering. A person at a
-# vendor who writes gets Respond; product news is Filed, never Spoil, so it
-# stays findable; everything else from these senders is Filed.
+# a deprecation, a retirement or a migration; anything expiring, which the
+# vendor repeats until it is done, so the newest replaces the rest; an
+# incident or a failure, which is over in a week; a cost alert. Rank 19
+# sits behind the money rules (a failed payment is theirs) and ahead of the
+# general security alert, so an engineering account's security notice
+# carries Engineering. A person at a vendor who writes gets Respond;
+# product news is Filed, never Spoil, so it stays findable; everything else
+# from these senders is Filed.
 [[meshes]]
 rank = 19
 text = '''
@@ -152,20 +164,26 @@ All Digs
 ROUTES
 
 WHEN (sender IN list:engineering_vendors OR sender IN list:engineering_senders) AND NOT gmail_category = promotions
-    IF subject CONTAINS "action required" OR subject CONTAINS "action needed" OR subject CONTAINS "deprecat" OR subject CONTAINS "end of life" OR subject CONTAINS "end-of-life" OR subject CONTAINS "will be removed" OR subject CONTAINS "will be deleted" OR subject CONTAINS "will be disabled" OR subject CONTAINS "migrat" OR subject CONTAINS "breaking change"
+    IF subject CONTAINS "action required" OR subject CONTAINS "action needed" OR subject CONTAINS "action advised" OR subject CONTAINS "deprecat" OR subject CONTAINS "end of life" OR subject CONTAINS "end-of-life" OR subject CONTAINS "will be removed" OR subject CONTAINS "will be deleted" OR subject CONTAINS "will be disabled" OR subject CONTAINS "being retired" OR subject CONTAINS "retiring" OR subject CONTAINS "sunset" OR subject CONTAINS "migrat" OR subject CONTAINS "breaking change"
         → Find: Do + Stratum: Engineering + Importance: High + Replaces: same subject
-    ELSE IF subject CONTAINS "vulnerab" OR subject CONTAINS "security advisory" OR subject CONTAINS "cve-" OR subject CONTAINS "certificate" OR subject CONTAINS "expir" OR subject CONTAINS "incident" OR subject CONTAINS "outage" OR subject CONTAINS "degraded" OR subject CONTAINS "health event" OR subject CONTAINS "maintenance" OR subject CONTAINS "failed" OR subject CONTAINS "failure"
+    ELSE IF subject CONTAINS "expir"
+        → Find: Do + Stratum: Engineering + Importance: High + Replaces: same subject
+    ELSE IF subject CONTAINS "vulnerab" OR subject CONTAINS "security advisory" OR subject CONTAINS "cve-" OR subject CONTAINS "incident" OR subject CONTAINS "outage" OR subject CONTAINS "degraded" OR subject CONTAINS "failed" OR subject CONTAINS "failure"
         → Find: Do + Stratum: Engineering + Importance: High + Expires: 7d
-    ELSE IF subject CONTAINS "budget" OR subject CONTAINS "spend cap" OR subject CONTAINS "spending" OR subject CONTAINS "usage limit" OR subject CONTAINS "quota" OR subject CONTAINS "free tier" OR subject CONTAINS "credits" OR subject CONTAINS "rate limit"
+    ELSE IF subject CONTAINS "budget" OR subject CONTAINS "spend cap" OR subject CONTAINS "spending" OR subject CONTAINS "usage limit" OR subject CONTAINS "quota" OR subject CONTAINS "free tier" OR subject CONTAINS "rate limit"
         → Find: Know + Stratum: Engineering + Importance: High
+    ELSE IF subject CONTAINS "health event" OR subject CONTAINS "maintenance" OR subject CONTAINS "credits"
+        → Find: Know + Stratum: Engineering
+    ELSE IF subject CONTAINS "statement" OR subject CONTAINS "receipt" OR subject CONTAINS "thank you for your payment" OR subject CONTAINS "payment received" OR subject CONTAINS "is renewed"
+        → Filed + Stratum: Engineering
     ELSE IF security_alert@v1 > .80 AND marketing@v1 < .70
-        → Find: Know + Stratum: Engineering + Importance: High
+        → Find: Know + Stratum: Engineering
     ELSE IF NOT automated_sender AND (requires_response@v1 > .70 OR asks_question@v1 > .75)
         → Find: Respond + Stratum: Engineering
     ELSE IF marketing@v1 > .70 OR newsletter@v1 > .70
         → Filed + Stratum: Engineering
     ELSE IF requires_action@v1 > .75
-        → Find: Do + Stratum: Engineering
+        → Find: Do + Stratum: Engineering + Replaces: same subject
     ELSE
         → Filed + Stratum: Engineering
 END
