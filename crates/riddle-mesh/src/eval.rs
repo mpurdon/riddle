@@ -17,8 +17,8 @@
 
 use crate::policy::ConfidencePolicy;
 use riddle_core::{
-    CmpOp, Disposition, DispositionKind, Expr, FactValue, Facts, Mesh, MeshId, MeshOutput,
-    MeshStatus, NamedList, SignalEvaluation, UserProfile,
+    CmpOp, Disposition, DispositionKind, Expr, FactValue, Facts, ListClauseResult, Mesh, MeshId,
+    MeshOutcome, MeshOutcomeKind, MeshOutput, MeshStatus, NamedList, SignalEvaluation, UserProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -73,6 +73,82 @@ pub struct NoLists;
 impl ListMembership for NoLists {
     fn is_member(&self, _list: NamedList) -> bool {
         false
+    }
+}
+
+/// Records every list clause an evaluation reads, so the trace can say
+/// what each list held when the decision was made (`DecisionTrace::
+/// list_results`). One entry per (list, value); a clause read twice (a
+/// guard after a route) is one line.
+struct Recording<'a> {
+    inner: &'a dyn ListMembership,
+    sender: &'a str,
+    seen: std::cell::RefCell<Vec<ListClauseResult>>,
+}
+
+impl Recording<'_> {
+    fn note(&self, list: String, value: &str, matched: bool) {
+        let mut seen = self.seen.borrow_mut();
+        if !seen.iter().any(|r| r.list == list && r.value == value) {
+            seen.push(ListClauseResult {
+                list,
+                value: value.to_string(),
+                matched,
+            });
+        }
+    }
+}
+
+impl ListMembership for Recording<'_> {
+    fn is_member(&self, list: NamedList) -> bool {
+        let on = self.inner.is_member(list);
+        self.note(list.as_str().to_string(), self.sender, on);
+        on
+    }
+    fn in_named_list(&self, list: &str) -> bool {
+        let on = self.inner.in_named_list(list);
+        self.note(format!("list:{list}"), self.sender, on);
+        on
+    }
+    fn value_in_named_list(&self, list: &str, value: &str) -> bool {
+        let on = self.inner.value_in_named_list(list, value);
+        self.note(format!("list:{list}"), value, on);
+        on
+    }
+}
+
+/// The lists as a trace recorded them, for the walk: a clause the decision
+/// read answers from the snapshot, so editing a list afterwards does not
+/// change what a stored decision says it saw. A clause the decision never
+/// read (a route after the match, a trace stored before the snapshot was
+/// kept) falls back to `fallback`.
+pub struct TraceLists<'a> {
+    pub snapshot: &'a [ListClauseResult],
+    pub sender: &'a str,
+    pub fallback: &'a dyn ListMembership,
+}
+
+impl TraceLists<'_> {
+    fn recorded(&self, list: &str, value: &str) -> Option<bool> {
+        self.snapshot
+            .iter()
+            .find(|r| r.list == list && r.value == value)
+            .map(|r| r.matched)
+    }
+}
+
+impl ListMembership for TraceLists<'_> {
+    fn is_member(&self, list: NamedList) -> bool {
+        self.recorded(list.as_str(), self.sender)
+            .unwrap_or_else(|| self.fallback.is_member(list))
+    }
+    fn in_named_list(&self, list: &str) -> bool {
+        self.recorded(&format!("list:{list}"), self.sender)
+            .unwrap_or_else(|| self.fallback.in_named_list(list))
+    }
+    fn value_in_named_list(&self, list: &str, value: &str) -> bool {
+        self.recorded(&format!("list:{list}"), value)
+            .unwrap_or_else(|| self.fallback.value_in_named_list(list, value))
     }
 }
 
@@ -339,6 +415,14 @@ pub struct MeshDecision {
     /// deciding route, added to whatever is decided, Unresolved included.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Every Mesh's outcome in the order they ran, the deciding one
+    /// `Matched` and the ones after it `NotReached`; what the trace keeps
+    /// so the "Why?" answer can say what each earlier Mesh made of it.
+    #[serde(default)]
+    pub outcomes: Vec<MeshOutcome>,
+    /// Each list clause the routes and guards read, with what it saw.
+    #[serde(default)]
+    pub list_results: Vec<ListClauseResult>,
 }
 
 impl MeshDecision {
@@ -356,6 +440,84 @@ fn lower_first(s: &str) -> String {
         Some(first) => format!("{}{}", first.to_lowercase(), chars.as_str()),
         None => String::new(),
     }
+}
+
+fn outcome_of(m: &Mesh, outcome: MeshOutcomeKind) -> MeshOutcome {
+    MeshOutcome {
+        mesh_id: m.id.clone(),
+        version: m.version,
+        name: m.name.clone(),
+        outcome,
+    }
+}
+
+/// The Signal references in a condition that have no evaluation.
+fn unscored_refs(e: &Expr, evaluations: &[SignalEvaluation]) -> Vec<String> {
+    let mut refs = Vec::new();
+    e.signal_refs(&mut refs);
+    refs.into_iter()
+        .filter(|(name, version)| {
+            !evaluations
+                .iter()
+                .any(|x| &x.signal_name == name && x.signal_version == *version)
+        })
+        .map(|(name, version)| format!("{name}@v{version}"))
+        .collect()
+}
+
+/// The Signal clause whose distance from its threshold is the route's
+/// margin, as (`name@vN`, its score, the score it would have needed to
+/// clear the policy's margin). `None`s when no single clause accounts for
+/// the margin.
+fn weakest_signal(
+    e: &Expr,
+    evaluations: &[SignalEvaluation],
+    margin: f64,
+    needed: f64,
+) -> (Option<String>, Option<f64>, Option<f64>) {
+    fn walk(e: &Expr, evaluations: &[SignalEvaluation], out: &mut Vec<(String, f64, f64, CmpOp)>) {
+        match e {
+            Expr::Signal {
+                signal,
+                version,
+                choice,
+                op,
+                threshold,
+            } => {
+                if let Some(ev) = evaluations
+                    .iter()
+                    .find(|x| &x.signal_name == signal && x.signal_version == *version)
+                {
+                    out.push((
+                        format!("{signal}@v{version}"),
+                        ev.score(choice.as_deref()),
+                        *threshold,
+                        *op,
+                    ));
+                }
+            }
+            Expr::And { items } | Expr::Or { items } => {
+                for i in items {
+                    walk(i, evaluations, out);
+                }
+            }
+            Expr::Not { item } => walk(item, evaluations, out),
+            _ => {}
+        }
+    }
+    let mut all = Vec::new();
+    walk(e, evaluations, &mut all);
+    all.into_iter()
+        .find(|(_, score, threshold, _)| ((score - threshold).abs() - margin).abs() < 1e-9)
+        .map(|(name, score, threshold, op)| {
+            let needed_score = match op {
+                CmpOp::Gt | CmpOp::Gte => threshold + needed,
+                CmpOp::Lt | CmpOp::Lte => threshold - needed,
+                _ => threshold,
+            };
+            (Some(name), Some(score), Some(needed_score))
+        })
+        .unwrap_or((None, None, None))
 }
 
 /// Order for resolution: most specific scope first, then priority, then name.
@@ -402,12 +564,24 @@ pub fn evaluate_with(
     let mut unresolved_signal_refs = Vec::new();
     let mut unknown_meshes = Vec::new();
     let mut passed_over = Vec::new();
+    let mut outcomes: Vec<MeshOutcome> = Vec::with_capacity(meshes.len());
+    // Every list clause read, with what it saw, for the trace.
+    let recording = Recording {
+        inner: lists,
+        sender: &facts.sender,
+        seen: std::cell::RefCell::new(Vec::new()),
+    };
+    let lists: &dyn ListMembership = &recording;
     // The route that decides, and the first thin match in case none does.
     let mut winner = None;
     let mut held = None;
     let mut tags: Vec<String> = Vec::new();
     let order = ordered(meshes);
     'meshes: for m in &order {
+        if winner.is_some() {
+            outcomes.push(outcome_of(m, MeshOutcomeKind::NotReached));
+            continue;
+        }
         for r in &m.routes {
             let o = eval_expr(
                 &r.condition,
@@ -444,6 +618,19 @@ pub fn evaluate_with(
                             crate::policy::shortfall_words(margin, needed)
                         ));
                         held.get_or_insert((*m, r, o.margin));
+                        let (signal, score, needed_score) =
+                            weakest_signal(&r.condition, evaluations, margin, needed);
+                        outcomes.push(outcome_of(
+                            m,
+                            MeshOutcomeKind::MarginShortfall {
+                                route: r.text.clone(),
+                                signal,
+                                score,
+                                needed_score,
+                                margin,
+                                needed,
+                            },
+                        ));
                         continue 'meshes;
                     }
                     // A borderline Find surfaced as Unresolved, which the
@@ -460,19 +647,38 @@ pub fn evaluate_with(
                         Some(Disposition::Spoil | Disposition::Contamination)
                     );
                     if buries_a_find {
+                        outcomes.push(outcome_of(
+                            m,
+                            MeshOutcomeKind::HeldForFind {
+                                route: r.text.clone(),
+                            },
+                        ));
                         continue 'meshes;
                     }
                     winner = Some((*m, r, o.margin));
-                    break 'meshes;
+                    outcomes.push(outcome_of(
+                        m,
+                        MeshOutcomeKind::Matched {
+                            route: r.text.clone(),
+                        },
+                    ));
+                    continue 'meshes;
                 }
                 Truth::False => continue,
                 Truth::Unknown => {
                     // The rest of this chain cannot be trusted; try the next Mesh.
                     unknown_meshes.push(m.key());
+                    outcomes.push(outcome_of(
+                        m,
+                        MeshOutcomeKind::Unknown {
+                            signals: unscored_refs(&r.condition, evaluations),
+                        },
+                    ));
                     continue 'meshes;
                 }
             }
         }
+        outcomes.push(outcome_of(m, MeshOutcomeKind::NoRouteMatched));
     }
     // A thin match decides only when nothing after it stood; it is then the
     // decision, held by the policy as before, not something passed over.
@@ -480,6 +686,14 @@ pub fn evaluate_with(
         (Some(w), _) => Some(w),
         (None, Some(h)) => {
             passed_over.remove(0);
+            if let Some(o) = outcomes
+                .iter_mut()
+                .find(|o| o.mesh_id == h.0.id && o.version == h.0.version)
+            {
+                o.outcome = MeshOutcomeKind::Matched {
+                    route: h.1.text.clone(),
+                };
+            }
             Some(h)
         }
         (None, None) => None,
@@ -488,6 +702,7 @@ pub fn evaluate_with(
         unresolved_signal_refs,
         unknown_meshes,
         passed_over,
+        outcomes,
         ..Default::default()
     };
     decision.tags = tags.clone();
@@ -540,6 +755,7 @@ pub fn evaluate_with(
             decision.veto_words = veto_words;
         }
     }
+    decision.list_results = recording.seen.into_inner();
     decision
 }
 
@@ -989,6 +1205,158 @@ mod tests {
             evaluate(&both, &list, &thin, &NoLists).disposition(),
             Some(&Disposition::Spoil)
         );
+    }
+
+    /// What the trace keeps: every Mesh's outcome in order, the thin one
+    /// with its numbers, and each list clause with what it saw, so the
+    /// "Why?" answer and the walk can read the decision as it was made.
+    #[test]
+    fn the_decision_records_every_meshs_outcome_and_each_list_clause_it_read() {
+        use riddle_core::NamedLists;
+        let promos = mesh(
+            "Mesh: Promos\nROUTES\nIF marketing@v1 > .70 → Spoil",
+            MeshScope::AllDigs,
+            27,
+        );
+        let banks = mesh(
+            "Mesh: Banks\nROUTES\nIF sender_domain IN list:banks AND payment_related@v1 > .60 → Filed",
+            MeshScope::AllDigs,
+            28,
+        );
+        let newsletters = mesh(
+            "Mesh: Newsletters\nROUTES\nIF mailing_list → Filed",
+            MeshScope::AllDigs,
+            30,
+        );
+        let updates = mesh(
+            "Mesh: Updates\nROUTES\nIF automated_sender → Filed",
+            MeshScope::AllDigs,
+            40,
+        );
+        let policy = ConfidencePolicy::default();
+        let facts = Facts {
+            mailing_list: true,
+            sender: "news@shop.example".into(),
+            sender_domain: "shop.example".into(),
+            ..Default::default()
+        };
+        let profile = UserProfile::default();
+        let named = NamedLists([("banks".to_string(), vec!["bank.example".to_string()])].into());
+        let lists = ProfileLists {
+            profile: &profile,
+            sender: &facts.sender,
+            facts: &facts,
+            named: &named,
+        };
+        let meshes = [promos, banks, newsletters, updates];
+        // marketing .78 clears .70 by .08 of the .15 Spoil needs; Banks has
+        // no payment_related score, so its chain is unknown; Newsletters
+        // decides; Updates is never reached.
+        let d = evaluate_with(
+            &meshes,
+            &facts,
+            &[ev("marketing", 1, 0.78)],
+            &lists,
+            Some(&policy),
+        );
+        assert_eq!(d.mesh_name.as_deref(), Some("Newsletters"));
+        let names: Vec<String> = d.outcomes.iter().map(|o| o.key()).collect();
+        assert_eq!(
+            names,
+            ["Promos v1", "Banks v1", "Newsletters v1", "Updates v1"]
+        );
+        match &d.outcomes[0].outcome {
+            MeshOutcomeKind::MarginShortfall {
+                signal,
+                score,
+                needed_score,
+                margin,
+                needed,
+                ..
+            } => {
+                assert_eq!(signal.as_deref(), Some("marketing@v1"));
+                assert!((score.unwrap() - 0.78).abs() < 1e-9);
+                assert!((needed_score.unwrap() - 0.85).abs() < 1e-9);
+                assert!((margin - 0.08).abs() < 1e-9 && (needed - 0.15).abs() < 1e-9);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(d.outcomes[0].line(), "Promos v1: marketing .78, needed .85");
+        assert!(
+            matches!(&d.outcomes[1].outcome, MeshOutcomeKind::NoRouteMatched),
+            "{:?}: the sender is not a bank, so the AND is false, not unknown",
+            d.outcomes[1]
+        );
+        assert!(matches!(
+            &d.outcomes[2].outcome,
+            MeshOutcomeKind::Matched { route } if route.contains("mailing_list")
+        ));
+        assert!(matches!(
+            &d.outcomes[3].outcome,
+            MeshOutcomeKind::NotReached
+        ));
+        assert_eq!(
+            d.list_results,
+            vec![ListClauseResult {
+                list: "list:banks".into(),
+                value: "news@shop.example".into(),
+                matched: false,
+            }]
+        );
+
+        // From a bank with no payment_related score, the Banks chain is
+        // unknown and says which Signal was not scored.
+        let bank = Facts {
+            sender: "billing@bank.example".into(),
+            sender_domain: "bank.example".into(),
+            ..Default::default()
+        };
+        let lists = ProfileLists {
+            profile: &profile,
+            sender: &bank.sender,
+            facts: &bank,
+            named: &named,
+        };
+        let d = evaluate_with(
+            &meshes,
+            &bank,
+            &[ev("marketing", 1, 0.2)],
+            &lists,
+            Some(&policy),
+        );
+        assert!(matches!(
+            &d.outcomes[1].outcome,
+            MeshOutcomeKind::Unknown { signals } if signals == &["payment_related@v1".to_string()]
+        ));
+        assert_eq!(
+            d.outcomes[1].line(),
+            "Banks v1: payment_related@v1 not scored"
+        );
+        assert!(d.list_results[0].matched);
+
+        // The walk reads the snapshot: with the sender since added to the
+        // list, the stored clause still says it was not on it.
+        let later = NamedLists([("banks".to_string(), vec!["shop.example".to_string()])].into());
+        let today = ProfileLists {
+            profile: &profile,
+            sender: &facts.sender,
+            facts: &facts,
+            named: &later,
+        };
+        let snapshot = vec![ListClauseResult {
+            list: "list:banks".into(),
+            value: "news@shop.example".into(),
+            matched: false,
+        }];
+        let pinned = TraceLists {
+            snapshot: &snapshot,
+            sender: &facts.sender,
+            fallback: &today,
+        };
+        assert!(today.in_named_list("banks"));
+        assert!(!pinned.in_named_list("banks"));
+        // A clause the decision never read falls back to today's lists.
+        assert!(pinned.value_in_named_list("banks", "shop.example"));
     }
 
     #[test]

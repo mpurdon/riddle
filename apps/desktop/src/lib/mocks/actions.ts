@@ -58,6 +58,8 @@ export const ACTIONS: Record<string, Meta> = {
   set_mesh_fallback: m('Mark a Mesh a fallback', { reversible: true }),
   remember_for_sender: m('Always decide a sender this way', { reversible: true }),
   install_pack: m('Install or update a rule pack', { reversible: true }),
+  install_detected_packs: m('Turn on the rule packs every mailbox starts with', { reversible: true, risk: 'medium', confirmation: 'two_step', minimumAutonomy: 'trusted', changesRules: true }),
+  dismiss_pack_offer: m("Decline a rule pack's offer", { reversible: true }),
   remove_pack: m('Remove an installed rule pack'),
   import_pack: m('Add a rule pack from a pack file'),
   export_pack: m('Write a rule pack as a pack file'),
@@ -699,6 +701,21 @@ function execute(state: MockState, action: string, args: Args): Exec {
       state.installedPacks = state.installedPacks.filter((p) => p.id !== id)
       return { result: { packId: id }, summary: `Removed pack ${id}`, affected: [], undo: { state: 'not_undoable', reason: 'install it again' } }
     }
+    case 'install_detected_packs': {
+      // The always packs (Core, Accounts), Active, as the first listing installs them.
+      const installed = ['core', 'accounts'].filter((id) => !state.installedPacks.some((p) => p.id === id))
+      for (const id of installed) state.installedPacks.push({ id, version: 1, meshes: {}, installedAt: new Date().toISOString() })
+      if (installed.length) emitMock({ type: 'settings_changed' })
+      return { result: { installed, status: 'active' }, summary: installed.length ? `Turned on ${installed.join(', ')}` : 'Every pack every mailbox starts with was already on', affected: [], undo: { state: 'not_undoable', reason: 'remove the packs' } }
+    }
+    case 'dismiss_pack_offer': {
+      const id = str(args, 'packId')
+      const offer = state.packOffers.find((o) => o.packId === id)
+      if (!offer) throw err('not_found', `no pack ${id}`)
+      if (!state.dismissedPackOffers.includes(id)) state.dismissedPackOffers.push(id)
+      emitMock({ type: 'settings_changed' })
+      return { result: { packId: id }, summary: `Not now: ${offer.name} is not offered again`, affected: [], undo: { state: 'not_undoable', reason: 'offer it again' } }
+    }
     case 'export_pack':
       return { result: { packId: str(args, 'packId'), fileName: `${str(args, 'packId')}.riddlepack.toml`, text: `id = "${str(args, 'packId')}"\n` }, summary: 'Pack file', affected: [], undo: { state: 'not_undoable', reason: 'nothing changed' } }
     case 'import_pack':
@@ -1058,7 +1075,7 @@ function execute(state: MockState, action: string, args: Args): Exec {
       const clientId = installed?.client_id?.trim() ?? ''
       if (!clientId.endsWith('.apps.googleusercontent.com')) throw err('invalid', 'that file has no Desktop app client in it')
       const clientSecretStored = !!installed?.client_secret?.trim()
-      state.settings = { ...state.settings, gmail: { clientId, clientSecretPresent: clientSecretStored } }
+      state.settings = { ...state.settings, gmail: { ...state.settings.gmail, clientId, clientSecretPresent: clientSecretStored } }
       emitMock({ type: 'settings_changed' })
       const projectId = (installed as { project_id?: string } | undefined)?.project_id ?? null
       return { result: { clientId, projectId, clientSecretStored, keychainService: 'riddle-dev' }, summary: 'You imported the Gmail client', inputs: { clientId, clientSecret: clientSecretStored }, undo: { state: 'not_undoable', reason: 'the previous client is not kept' } }
@@ -1067,8 +1084,11 @@ function execute(state: MockState, action: string, args: Args): Exec {
     case 'clear_secret': {
       const secret = str(args, 'secret')
       const present = action === 'set_secret'
-      if (secret === 'jev_api_key') state.settings = { ...state.settings, judge: { ...state.settings.judge, apiKeyPresent: present } }
-      else if (secret === 'gmail_client_secret') state.settings = { ...state.settings, gmail: { ...state.settings.gmail, clientSecretPresent: present } }
+      if (secret === 'jev_api_key') {
+        // As the backend: the key pasted is the key used, and the privacy a new account starts in follows it.
+        const judge = { ...state.settings.judge, apiKeyPresent: present, keySource: present ? ('keychain' as const) : state.settings.judge.keySource }
+        state.settings = { ...state.settings, judge, effectivePrivacyDefault: present ? state.settings.privacyDefault : 'local_only' }
+      } else if (secret === 'gmail_client_secret') state.settings = { ...state.settings, gmail: { ...state.settings.gmail, clientSecretPresent: present } }
       else throw err('invalid', `${JSON.stringify(secret)} is not a secret Settings can store`)
       emitMock({ type: 'settings_changed' })
       return { result: { secret }, summary: present ? `You stored ${secret} in the keychain` : `You removed ${secret} from the keychain`, inputs: { secret }, undo: { state: 'not_undoable', reason: 'the previous value is not kept' } }
@@ -1076,8 +1096,10 @@ function execute(state: MockState, action: string, args: Args): Exec {
     case 'save_settings': {
       const before = state.settings
       state.settings = { ...state.settings, ...(args.settings as object) }
-      // As the backend does: the level is the one switch and the flag follows it.
+      // As the backend does: the level is the one switch and the flag follows it,
+      // and the privacy a new account starts in follows the judge key.
       state.settings.developerMode = state.settings.uiLevel === 'developer'
+      state.settings.effectivePrivacyDefault = state.settings.judge.apiKeyPresent ? state.settings.privacyDefault : 'local_only'
       emitMock({ type: 'settings_changed' })
       return { result: state.settings, summary: 'You changed settings', affected: [], undo: { state: 'undoable', restore: { kind: 'settings', settings: before }, label: 'Restore the previous settings' } }
     }
@@ -1475,6 +1497,8 @@ function undoActivity(state: MockState, activityId: string): Exec {
 // Demo Mode: inject a fixture message and run it through a visible pipeline.
 
 function injectFixture(state: MockState, args: Args): Exec {
+  // One pass id per injected message, as a real pass stamps on its stage events.
+  const passId = `pass_${Date.now().toString(36)}`
   const digId = (args.digId as string | undefined) ?? DIG_WORK
   const template = (args.template as string | undefined) ?? 'review_request'
   const id = nextId(state, 'm_demo')
@@ -1540,7 +1564,7 @@ function injectFixture(state: MockState, args: Args): Exec {
   state.specs.set(msg.id, spec)
   state.classifications.set(msg.id, { disposition: null, strata: [], findId: null, handledByUserAt: null, shadow: false })
   emitMock({ type: 'messages_changed', dig_id: digId, count: u64(1) })
-  emitMock({ type: 'pipeline_stage', message_id: msg.id, stage: 'Message received', ms: u64(0) })
+  emitMock({ type: 'pipeline_stage', message_id: msg.id, pass_id: passId, stage: 'Message received', ms: u64(0) })
 
   // The pipeline unfolds over real time so the Live Pipeline and Demo Mode
   // can watch it; each stage writes the state a later read would see.
@@ -1597,7 +1621,7 @@ function injectFixture(state: MockState, args: Args): Exec {
   for (const [at, stage, fn] of steps) {
     setTimeout(() => {
       fn()
-      emitMock({ type: 'pipeline_stage', message_id: msg.id, stage, ms: u64(at - last) })
+      emitMock({ type: 'pipeline_stage', message_id: msg.id, pass_id: passId, stage, ms: u64(at - last) })
       last = at
     }, at)
   }

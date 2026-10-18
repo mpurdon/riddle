@@ -209,6 +209,8 @@ export const useConfirmQueue = create<ConfirmState>((set) => ({
 export interface PipelineEntry {
   at: number
   messageId: string
+  /** The Sift pass the stage belongs to, as the trace and the log lines name it. */
+  passId: string
   stage: string
   ms: number
 }

@@ -26,6 +26,11 @@ pub async fn boot_scripted(
     let mut s = Settings::dev_defaults();
     s.judge.provider = JudgeProvider::Scripted;
     s.llm.provider = LlmProvider::Null;
+    // A fixture mailbox carries only the Meshes a test installs: with the
+    // always packs on, Core's throwaway-domain rule caught every
+    // `.example` sender before the rule a test expected. A test of the
+    // install path turns it back on in `tweak`.
+    s.install_packs_on_first_sync = false;
     tweak(&mut s);
     let ops = app.boot_with(background, Some(s)).await.unwrap();
     (app, ops)

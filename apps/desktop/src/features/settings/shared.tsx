@@ -96,7 +96,11 @@ export function Probe({ probe, disabledReason }: { probe: () => Promise<ProbeRes
       <Button size="sm" busy={busy} onClick={async () => { setBusy(true); try { setResult(await probe()) } catch (e) { setResult({ ok: false, latencyMs: 0, message: toRiddleError(e).message }) } finally { setBusy(false) } }} disabledReason={disabledReason}>
         Probe
       </Button>
-      {result ? <span className={`text-xs ${result.ok ? 'text-moss' : 'text-rust'}`}>{result.ok ? 'OK' : 'Failed'} · {result.latencyMs}ms · {result.message}</span> : null}
+      {result ? (
+        <span className={`text-xs ${result.ok ? 'text-moss' : result.notSetUp ? 'text-ochre' : 'text-rust'}`}>
+          {result.ok ? 'OK' : result.notSetUp ? 'Not set up' : 'Failed'} · {result.latencyMs}ms · {result.message}
+        </span>
+      ) : null}
     </div>
   )
 }

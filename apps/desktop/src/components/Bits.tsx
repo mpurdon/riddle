@@ -342,6 +342,25 @@ function RouteWalk({ ex }: { ex: Explanation }) {
   )
 }
 
+/**
+ * The other Meshes that ran, one line each as the backend wrote them
+ * ("Bills v3: payment_related .62, needed .80"): what looked first and
+ * passed, and what looked after a borderline match and did not take it.
+ */
+function EarlierMeshes({ lines }: { lines: string[] }) {
+  if (!lines.length) return null
+  return (
+    <div className="mt-2 text-xs" data-testid="earlier-meshes">
+      <div className="font-medium text-ink-2">Other Meshes that ran</div>
+      <ul className="mt-1 flex flex-col gap-0.5 text-2xs text-ink-2 mono">
+        {lines.map((l, i) => (
+          <li key={i}>{l}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 /** Every Signal score, collapsed: the ones the routes used are shown above. */
 function OtherSignals({ ex }: { ex: Explanation }) {
   const used = new Set(ex.routes.flatMap((r) => r.clauses.flatMap((c) => (c.signal ? [c.signal] : []))))
@@ -420,7 +439,8 @@ export function ExplanationCard({
               : `Decided on Signals: ${dispositionLabel(ex.disposition)}.`
   // Words first: the decision as a person would say it, whoever made it. The grammar waits under the disclosure.
   const reason = ex.reason?.trim() || null
-  const hasDetail = ex.routes.length > 0 || ex.signals.length > 0 || !!ex.llmRationale || !!ex.matched
+  const earlier = ex.earlierMeshes ?? []
+  const hasDetail = ex.routes.length > 0 || ex.signals.length > 0 || !!ex.llmRationale || !!ex.matched || earlier.length > 0
   return (
     <div className={cx('rounded-md border border-line bg-sand selectable', compact ? 'p-2 text-xs' : 'p-3 text-sm')}>
       <div className="flex items-start gap-2">
@@ -446,6 +466,7 @@ export function ExplanationCard({
             <details className="mt-2 group">
               <summary className="cursor-pointer text-xs text-ink-2 hover:text-ink">How it was decided</summary>
               {ex.routes.length ? <RouteWalk ex={ex} /> : null}
+              <EarlierMeshes lines={earlier} />
               <OtherSignals ex={ex} />
               {ex.llmRationale ? <blockquote className="mt-2 border-l-2 border-ochre/40 pl-2 text-ink-2">{ex.llmRationale}</blockquote> : null}
               {ex.matched ? (

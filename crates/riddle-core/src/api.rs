@@ -3,7 +3,7 @@
 
 use crate::action::Autonomy;
 use crate::activity::Activity;
-use crate::classification::{DecisionMechanism, Disposition};
+use crate::classification::{Classification, DecisionMechanism, DecisionTrace, Disposition};
 use crate::dig::{DigStatus, ProjectionMode};
 use crate::find::Find;
 use crate::ids::{DigId, FindId, JobId, MeshId, MessageId, TraceId};
@@ -92,6 +92,26 @@ pub struct Summary {
     pub last_synced_at: Option<DateTime<Utc>>,
     pub projection_pending: u64,
     pub degraded: Vec<String>,
+    /// Rule packs the mailbox's mail matches that are not installed and
+    /// not declined: "Riddle recognised GitHub mail (412 messages). Turn
+    /// its rules on?" Empty when nothing is recognised.
+    #[serde(default)]
+    pub pack_offers: Vec<PackOffer>,
+}
+
+/// A rule pack whose `[detect]` block matches the mail on hand, offered
+/// until it is installed or declined. Packs marked `always` are installed
+/// when an account's first listing completes and are never offered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PackOffer {
+    pub pack_id: String,
+    pub name: String,
+    /// The offer as the Summary says it, with the count in it.
+    pub reason_in_words: String,
+    /// Messages in the detection window the pack's `[detect]` matched.
+    pub matched_messages: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -139,6 +159,38 @@ pub struct Explanation {
     #[serde(default)]
     #[ts(optional)]
     pub verification_code: Option<String>,
+    /// The other Meshes that ran, one line each in evaluation order
+    /// (`DecisionTrace::earlier_meshes`): "Bills v3: payment_related .62,
+    /// needed .80". Empty when no Mesh decided or the trace predates it.
+    #[serde(default)]
+    pub earlier_meshes: Vec<String>,
+}
+
+/// What today's rules would decide for a message, beside what stands
+/// (`decide_preview`). Nothing is written: the would-be classification and
+/// trace are returned, not stored, so the stored decision and its trace are
+/// untouched. A fresh judge call, when the Signals need one, is recorded as
+/// usage like any other.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DecisionPreview {
+    pub message_id: MessageId,
+    pub dig_id: DigId,
+    /// The current classification and its trace; `None` when the message
+    /// has not been sifted yet.
+    pub stored: Option<Classification>,
+    pub stored_trace: Option<DecisionTrace>,
+    pub would: Classification,
+    pub would_trace: DecisionTrace,
+    /// Whether the disposition, the deciding Mesh or the Strata differ.
+    pub changed: bool,
+    /// The difference in one sentence: "would be Filed by Bills v4 instead
+    /// of Spoil by Frequent promotions v2".
+    pub diff: String,
+    /// Provenance of the preview's Signals: "13 matched on cached Signals,
+    /// 1 needed a fresh evaluation".
+    pub note: String,
 }
 
 /// One route of a Mesh, checked against one message.
@@ -255,8 +307,10 @@ pub enum RiddleEvent {
         version: String,
     },
     /// Developer overlay: a Sift stage completed for a message (Live Pipeline, §82).
+    /// `pass_id` names the Sift pass, as the trace and the log lines do.
     PipelineStage {
         message_id: MessageId,
+        pass_id: String,
         stage: String,
         ms: u64,
     },

@@ -17,6 +17,7 @@ import type { Job } from '@/bindings/Job'
 import type { Activity } from '@/bindings/Activity'
 import type { Autonomy } from '@/bindings/Autonomy'
 import type { DecisionTrace } from '@/bindings/DecisionTrace'
+import type { MeshOutcome } from '@/bindings/MeshOutcome'
 import type { Facts } from '@/bindings/Facts'
 import type { SignalEvaluation } from '@/bindings/SignalEvaluation'
 import type { Conversation } from '@/bindings/Conversation'
@@ -1618,7 +1619,25 @@ export function buildTrace(s: MessageSpec, m: Message, signals: Signal[], meshes
     buildStamp: '0.1.0+3c0df07-dirty',
     shadow: !!s.shadow,
     createdAt: iso(new Date(new Date(m.date).getTime() + 209)),
+    // What decided, as the backend records it: the pass, the list clauses
+    // read, the policy in force, the winning margin and every Mesh's outcome.
+    passId: `pass_${s.dig}_${Math.floor(s.hoursAgo)}`,
+    listResults: s.facts?.senderDomain ? [{ list: 'never_hidden', value: m.from.email, matched: false }] : [],
+    policy: mesh ? { marginFind: 0.05, marginSpoil: 0.15, marginFiled: 0.05, marginContamination: 0.25, escalateNonEnglish: true } : null,
+    margin: mesh && evals.length ? round4(Math.max(...evals.map((e) => Math.abs(e.confidence - 0.5)))) : null,
+    meshOutcomes: mesh ? meshOutcomesFor(mesh, meshes, s.matchedRule ?? '') : [],
   }
+}
+
+/** Every Mesh in run order: the ones before the deciding one passed, it decided, the rest were not reached. */
+function meshOutcomesFor(decided: Mesh, meshes: Mesh[], route: string): MeshOutcome[] {
+  const seen = new Set<string>()
+  const latest = meshes.filter((x) => (seen.has(x.id) ? false : (seen.add(x.id), true))).sort((a, b) => a.priority - b.priority)
+  return latest.map((x) =>
+    x.id === decided.id
+      ? { meshId: x.id, version: decided.version, name: x.name, outcome: { kind: 'matched', route } }
+      : { meshId: x.id, version: x.version, name: x.name, outcome: x.priority < decided.priority ? { kind: 'no_route_matched' } : { kind: 'not_reached' } },
+  )
 }
 
 const round4 = (n: number) => Math.round(n * 10000) / 10000
@@ -2108,10 +2127,13 @@ export function buildSettings(): Settings {
     judge: { provider: 'jev', model: 'jev-1.13.0', keySource: 'ssm', ssmProfile: 'dev', ssmParameter: '/riddle/jev/api-key', apiKeyPresent: true },
     llm: { provider: 'bedrock', profile: 'dev', region: 'us-east-1', escalationModel: 'us.anthropic.claude-haiku-4-5', directorModel: 'us.anthropic.claude-sonnet-5' },
     budgets: { dailyJudgeUsd: 1.5, dailyLlmUsd: 4, escalationPerDigUsd: 1 },
-    gmail: { clientId: '', clientSecretPresent: false },
+    gmail: { clientId: '', clientSecretPresent: false, builtinClientAvailable: false, useBuiltinClient: true },
     autonomy: { default: 'suggest', perDig: { [DIG_WORK]: 'act', [DIG_PERSONAL]: 'act', [DIG_CONSULTING]: 'observe' }, perAction: { send_message: 'suggest' } },
     projectionDefault: 'labels_only',
     privacyDefault: 'cloud_judgment',
+    // As the backend derives it: the stored default while a judge key is present, local-only without one.
+    effectivePrivacyDefault: 'cloud_judgment',
+    installPacksOnFirstSync: true,
     launchAtLogin: false,
     closeToHide: true,
     comparison: {

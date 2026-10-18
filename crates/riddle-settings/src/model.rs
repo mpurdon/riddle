@@ -119,14 +119,44 @@ pub struct JudgeSettings {
 }
 
 impl Default for JudgeSettings {
+    /// Production: the key comes from the keychain, and there is none until
+    /// the person pastes one. The defaults used to name the owner's AWS SSM
+    /// profile, so every other install silently had no judge and no way to
+    /// see why (17 Oct 2026). Without a key Riddle sorts by rules and hides
+    /// nothing; `dev_defaults` keeps SSM for the owner's dev profile.
     fn default() -> Self {
         Self {
             provider: JudgeProvider::Jev,
             model: "jev-1.13.0".into(),
+            key_source: KeySource::Keychain,
+            ssm_profile: None,
+            ssm_parameter: None,
+            api_key_present: false,
+        }
+    }
+}
+
+impl JudgeSettings {
+    /// The dev profile's judge: the key resolved from the owner's SSM.
+    pub fn dev_defaults() -> Self {
+        Self {
             key_source: KeySource::Ssm,
             ssm_profile: Some("dev".into()),
             ssm_parameter: Some("/riddle/jev_api_key".into()),
-            api_key_present: false,
+            ..Self::default()
+        }
+    }
+
+    /// No judge can run: there is no key where the settings say to look.
+    /// An SSM or environment source is a lookup that may fail, which is a
+    /// failure, not a missing setup.
+    pub fn not_set_up(&self) -> bool {
+        match self.provider {
+            JudgeProvider::Null => true,
+            JudgeProvider::Scripted => false,
+            JudgeProvider::Jev => {
+                matches!(self.key_source, KeySource::Keychain) && !self.api_key_present
+            }
         }
     }
 }
@@ -143,13 +173,25 @@ pub struct LlmSettings {
 }
 
 impl Default for LlmSettings {
+    /// Production: Bedrock through the default AWS credential chain (an
+    /// empty profile), not the owner's named profile.
     fn default() -> Self {
         Self {
             provider: LlmProvider::Bedrock,
-            profile: "dev".into(),
+            profile: String::new(),
             region: "us-east-1".into(),
             escalation_model: "us.anthropic.claude-haiku-4-5-20251001-v1:0".into(),
             director_model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0".into(),
+        }
+    }
+}
+
+impl LlmSettings {
+    /// The dev profile's LLM: the owner's AWS profile.
+    pub fn dev_defaults() -> Self {
+        Self {
+            profile: "dev".into(),
+            ..Self::default()
         }
     }
 }
@@ -173,13 +215,104 @@ impl Default for BudgetSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+/// The Google OAuth client every Gmail account signs in through. A build
+/// can carry one (`RIDDLE_GOOGLE_CLIENT_ID` and `RIDDLE_GOOGLE_CLIENT_SECRET`
+/// at compile time; README "Google sign-in"), so a new person signs in
+/// without creating a client in Google Cloud first, which every new user
+/// had to do before (17 Oct 2026). A person's own client, imported or
+/// typed, is used instead whenever its id is set, and `use_builtin_client`
+/// off makes the built-in one count as absent: bring-your-own remains.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
 pub struct GmailSettings {
     pub client_id: String,
     /// Derived at read time from the keychain; never written to disk.
     pub client_secret_present: bool,
+    /// Derived at read time from the build; never written to disk.
+    pub builtin_client_available: bool,
+    /// Sign in through the built-in client while no own client id is set.
+    pub use_builtin_client: bool,
+}
+
+impl Default for GmailSettings {
+    fn default() -> Self {
+        Self {
+            client_id: String::new(),
+            client_secret_present: false,
+            builtin_client_available: false,
+            use_builtin_client: true,
+        }
+    }
+}
+
+/// A Google OAuth client to sign in with: the person's own, or the one
+/// baked into the build. A Desktop client's secret is not confidential
+/// (Google says so: the client is public and uses PKCE), and still never
+/// appears in a log: `Debug` says only whether there is one.
+#[derive(Clone, PartialEq, Eq)]
+pub struct GoogleClient {
+    pub client_id: String,
+    pub client_secret: Option<String>,
+    pub builtin: bool,
+}
+
+impl std::fmt::Debug for GoogleClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GoogleClient")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &self.client_secret.is_some())
+            .field("builtin", &self.builtin)
+            .finish()
+    }
+}
+
+impl GmailSettings {
+    /// The client baked into this build, when the build had one.
+    pub fn builtin_client() -> Option<GoogleClient> {
+        Self::builtin_client_from(
+            option_env!("RIDDLE_GOOGLE_CLIENT_ID"),
+            option_env!("RIDDLE_GOOGLE_CLIENT_SECRET"),
+        )
+    }
+
+    /// `builtin_client` over given values: what a build bakes in, and what
+    /// a test hands over to stand in for one.
+    pub fn builtin_client_from(id: Option<&str>, secret: Option<&str>) -> Option<GoogleClient> {
+        let id = id.map(str::trim).filter(|s| !s.is_empty())?;
+        Some(GoogleClient {
+            client_id: id.to_string(),
+            client_secret: secret
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            builtin: true,
+        })
+    }
+
+    /// The client sign-in uses: the person's own when its id is set, else
+    /// the built-in one when the build has it and it is not turned off.
+    pub fn effective_client(&self) -> Option<GoogleClient> {
+        self.effective_client_with(Self::builtin_client())
+    }
+
+    /// `effective_client` with the built-in client given, for tests.
+    pub fn effective_client_with(&self, builtin: Option<GoogleClient>) -> Option<GoogleClient> {
+        let own = self.client_id.trim();
+        if !own.is_empty() {
+            return Some(GoogleClient {
+                client_id: own.to_string(),
+                client_secret: None,
+                builtin: false,
+            });
+        }
+        builtin.filter(|_| self.use_builtin_client)
+    }
+
+    /// Whether any client can sign in: "not set up" otherwise.
+    pub fn client_configured(&self) -> bool {
+        self.effective_client().is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
@@ -364,6 +497,19 @@ pub struct Settings {
     pub autonomy: AutonomySettings,
     pub projection_default: ProjectionMode,
     pub privacy_default: PrivacyMode,
+    /// Derived at read time, never written: the privacy a new account and
+    /// the sample mailbox actually start in. `privacy_default` once a judge
+    /// key is configured, Local-only until then: the stored default is
+    /// Cloud judgment, and with no judge that promised what nothing
+    /// provided (`effective_privacy`).
+    #[serde(default)]
+    pub effective_privacy_default: PrivacyMode,
+    /// When an account's first listing completes, turn on the rule packs
+    /// every mailbox starts with (`[detect] always`), Active. On in
+    /// production and dev; test boots turn it off so a fixture mailbox
+    /// carries only the Meshes a test installs, because Core's throwaway
+    /// domain rule caught every `.example` sender first (17 Oct 2026).
+    pub install_packs_on_first_sync: bool,
     pub launch_at_login: bool,
     pub close_to_hide: bool,
     #[serde(default)]
@@ -399,26 +545,42 @@ impl Settings {
             },
             projection_default: ProjectionMode::Full,
             privacy_default: PrivacyMode::CloudJudgment,
+            effective_privacy_default: PrivacyMode::LocalOnly,
+            install_packs_on_first_sync: true,
             launch_at_login: false,
             close_to_hide: true,
             comparison: ComparisonSettings::default(),
         }
     }
 
-    /// Dev builds start in OBSERVE (§59), log at debug and show Everything.
-    /// Developer is not the default even here: the level is the person's
-    /// choice, and a file that already says `developerMode = true` loads as
-    /// Developer (`parse_settings`), so nobody loses the pages they had.
+    /// Dev builds start in OBSERVE (§59), log at debug, show Everything and
+    /// resolve the judge key and the LLM's credentials from the owner's
+    /// AWS profile. Developer is not the default even here: the level is
+    /// the person's choice, and a file that already says
+    /// `developerMode = true` loads as Developer (`parse_settings`), so
+    /// nobody loses the pages they had.
     pub fn dev_defaults() -> Self {
         Self {
             developer_mode: false,
             ui_level: UiLevel::Everything,
             log_level: LogLevel::Debug,
+            judge: JudgeSettings::dev_defaults(),
+            llm: LlmSettings::dev_defaults(),
             autonomy: AutonomySettings {
                 default: Autonomy::Observe,
                 ..Default::default()
             },
             ..Self::prod_defaults()
+        }
+    }
+
+    /// The privacy a new account starts in: the stored default once a
+    /// judge key is configured, Local-only until then. Read, never stored.
+    pub fn effective_privacy(&self) -> PrivacyMode {
+        if self.judge.api_key_present {
+            self.privacy_default
+        } else {
+            PrivacyMode::LocalOnly
         }
     }
 
@@ -563,10 +725,12 @@ impl Settings {
         }
         if let Some(gmail) = value.get_mut("gmail").and_then(|v| v.as_table_mut()) {
             gmail.remove("clientSecretPresent");
+            gmail.remove("builtinClientAvailable");
         }
         // The schema version leads the file; the rest is sorted by the TOML writer.
         if let Some(table) = value.as_table_mut() {
             table.remove("schemaVersion");
+            table.remove("effectivePrivacyDefault");
         }
         let body = toml::to_string_pretty(&value)
             .map_err(|e| RiddleError::internal(format!("settings serialize: {e}")))?;
@@ -652,13 +816,7 @@ mod tests {
         assert_eq!(s.schema_version, SETTINGS_SCHEMA_VERSION);
         assert_eq!(s.shadow_period_days, 7);
         assert_eq!(s.judge.model, "jev-1.13.0");
-        assert_eq!(s.judge.key_source, KeySource::Ssm);
-        assert_eq!(s.judge.ssm_profile.as_deref(), Some("dev"));
-        assert_eq!(
-            s.judge.ssm_parameter.as_deref(),
-            Some("/riddle/jev_api_key")
-        );
-        assert_eq!(s.llm.profile, "dev");
+        assert_eq!(s.judge.key_source, KeySource::Keychain);
         assert_eq!(s.llm.region, "us-east-1");
         assert_eq!(s.budgets.daily_judge_usd, 1.0);
         assert_eq!(s.budgets.daily_llm_usd, 5.0);
@@ -673,6 +831,96 @@ mod tests {
         assert_eq!(s.log_level, LogLevel::Debug);
         assert_eq!(s.ui_level, UiLevel::Everything);
         assert!(!s.developer_mode, "Everything is not Developer");
+    }
+
+    #[test]
+    fn production_defaults_carry_no_ssm_profile_and_the_dev_profile_keeps_it() {
+        let prod = Settings::prod_defaults();
+        assert_eq!(prod.judge.key_source, KeySource::Keychain);
+        assert_eq!(prod.judge.ssm_profile, None);
+        assert_eq!(prod.judge.ssm_parameter, None);
+        assert_eq!(
+            prod.llm.profile, "",
+            "the default AWS chain, not the owner's profile"
+        );
+        assert!(prod.judge.not_set_up(), "no key until one is pasted");
+        prod.validate()
+            .expect("a keychain source needs no SSM parameter");
+        assert!(prod.install_packs_on_first_sync);
+        assert!(Settings::dev_defaults().install_packs_on_first_sync);
+        let dev = Settings::dev_defaults();
+        assert_eq!(dev.judge.key_source, KeySource::Ssm);
+        assert_eq!(dev.judge.ssm_profile.as_deref(), Some("dev"));
+        assert_eq!(
+            dev.judge.ssm_parameter.as_deref(),
+            Some("/riddle/jev_api_key")
+        );
+        assert_eq!(dev.llm.profile, "dev");
+        assert!(
+            !dev.judge.not_set_up(),
+            "an SSM lookup is a lookup, not a missing setup"
+        );
+        let mut null = prod.clone();
+        null.judge.provider = JudgeProvider::Null;
+        assert!(null.judge.not_set_up());
+        let mut pasted = prod;
+        pasted.judge.api_key_present = true;
+        assert!(!pasted.judge.not_set_up());
+    }
+
+    #[test]
+    fn the_built_in_google_client_is_absent_by_default_and_an_env_baked_one_counts_as_configured() {
+        let s = GmailSettings::default();
+        assert!(s.use_builtin_client);
+        assert!(!s.builtin_client_available);
+        assert_eq!(GmailSettings::builtin_client_from(None, None), None);
+        assert_eq!(
+            GmailSettings::builtin_client_from(Some("  "), Some("x")),
+            None,
+            "a blank id is no client"
+        );
+        assert_eq!(s.effective_client_with(None), None);
+        let baked = GmailSettings::builtin_client_from(
+            Some("123-abc.apps.googleusercontent.com"),
+            Some("GOCSPX-secret"),
+        )
+        .expect("a baked-in client");
+        assert!(baked.builtin);
+        assert_eq!(baked.client_secret.as_deref(), Some("GOCSPX-secret"));
+        assert!(
+            !format!("{baked:?}").contains("GOCSPX"),
+            "Debug never prints the secret"
+        );
+        let effective = s
+            .effective_client_with(Some(baked.clone()))
+            .expect("configured");
+        assert_eq!(effective.client_id, "123-abc.apps.googleusercontent.com");
+        assert!(effective.builtin);
+        // Bring your own: an own id wins, and turning the built-in one off
+        // leaves nothing when there is no own id.
+        let mut own = s.clone();
+        own.client_id = "own.apps.googleusercontent.com".into();
+        let chosen = own.effective_client_with(Some(baked.clone())).unwrap();
+        assert_eq!(chosen.client_id, "own.apps.googleusercontent.com");
+        assert!(!chosen.builtin);
+        assert_eq!(
+            chosen.client_secret, None,
+            "an own client's secret lives in the keychain"
+        );
+        let mut off = s;
+        off.use_builtin_client = false;
+        assert_eq!(off.effective_client_with(Some(baked)), None);
+    }
+
+    #[test]
+    fn the_effective_privacy_default_is_local_only_until_a_judge_key_is_configured() {
+        let mut s = Settings::prod_defaults();
+        assert_eq!(s.privacy_default, PrivacyMode::CloudJudgment);
+        assert_eq!(s.effective_privacy(), PrivacyMode::LocalOnly);
+        s.judge.api_key_present = true;
+        assert_eq!(s.effective_privacy(), PrivacyMode::CloudJudgment);
+        s.privacy_default = PrivacyMode::CloudReasoning;
+        assert_eq!(s.effective_privacy(), PrivacyMode::CloudReasoning);
     }
 
     #[test]
@@ -729,9 +977,14 @@ mod tests {
         let mut s = Settings::prod_defaults();
         s.judge.api_key_present = true;
         s.gmail.client_secret_present = true;
+        s.gmail.builtin_client_available = true;
+        s.effective_privacy_default = PrivacyMode::CloudReasoning;
         let text = s.to_toml_string().unwrap();
         assert!(!text.contains("apiKeyPresent"));
         assert!(!text.contains("clientSecretPresent"));
+        assert!(!text.contains("builtinClientAvailable"), "{text}");
+        assert!(!text.contains("effectivePrivacyDefault"), "{text}");
+        assert!(text.contains("useBuiltinClient = true"), "{text}");
         assert!(text.contains("schemaVersion = 1"));
     }
 

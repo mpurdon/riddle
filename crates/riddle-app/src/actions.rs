@@ -138,6 +138,126 @@ impl Action for InstallPack {
     }
 }
 
+/// Turn on the packs every mailbox starts with (`[detect] always = true`:
+/// Core, Accounts) that are not installed yet, Active, with their default
+/// lists. The app runs the same install when an account's first listing
+/// completes (`packs::install_packs_after_first_listing`); the Action is
+/// the door for a person, the CLI and the Director, and the ledger row the
+/// install can be undone through.
+pub struct InstallDetectedPacks;
+
+#[async_trait]
+impl Action for InstallDetectedPacks {
+    fn meta(&self) -> ActionMeta {
+        meta(
+            "install_detected_packs",
+            "Turn on the rule packs every mailbox starts with",
+        )
+        .mutating()
+        .reversible()
+        .risk(Risk::Medium)
+        .confirm(ConfirmationPolicy::TwoStep)
+        .autonomy(Autonomy::Trusted)
+        .changes_rules()
+        .build()
+    }
+    async fn preview(&self, ctx: &ActionContext, _args: &Value) -> Result<Preview> {
+        let pending = crate::packs::always_packs_pending(&ctx.services.stores.index())?;
+        let names: Vec<&str> = pending.iter().map(|p| p.name.as_str()).collect();
+        Ok(Preview {
+            summary: if names.is_empty() {
+                "Every pack every mailbox starts with is already on".into()
+            } else {
+                format!("Turn on {} (Active)", names.join(", "))
+            },
+            real_arguments: json!({ "packIds": pending.iter().map(|p| &p.id).collect::<Vec<_>>(), "status": "active" }),
+        })
+    }
+    async fn execute(&self, ctx: &ActionContext, _args: Value) -> Result<ActionResult> {
+        let done = crate::packs::install_always_packs(
+            &ctx.services.stores.index(),
+            riddle_mesh::actions::created_by(&ctx.principal),
+        )?;
+        if !done.installed.is_empty() {
+            ctx.services.emit(RiddleEvent::SettingsChanged);
+            rinfo!(
+                Category::Actions,
+                "installed {} always packs",
+                done.installed.len()
+            );
+        }
+        let summary = if done.installed.is_empty() {
+            "Every pack every mailbox starts with was already on".to_string()
+        } else {
+            format!("Turned on {}", done.installed.join(", "))
+        };
+        Ok(ActionResult::ok(
+            json!({ "installed": done.installed, "status": "active" }),
+            summary,
+        )
+        .with_inputs(json!({ "packIds": done.installed }))
+        .with_undo(json!({ "reports": done.reports }), "Undo the install"))
+    }
+    async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
+        let reports: std::collections::BTreeMap<String, riddle_mesh::packs::InstallReport> =
+            serde_json::from_value(restore["reports"].clone())
+                .map_err(|e| RiddleError::invalid(format!("reports: {e}")))?;
+        let index = ctx.services.stores.index();
+        for (id, report) in &reports {
+            riddle_mesh::packs::undo_install(&index, id, report)?;
+        }
+        let ids: Vec<&String> = reports.keys().collect();
+        Ok(ActionResult::ok(
+            json!({ "packIds": ids }),
+            format!(
+                "Undid the install of {}",
+                ids.iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ))
+    }
+}
+
+/// "Not now" on a pack offer: the pack is not offered again. Remembered per
+/// pack in the index store; undo offers it again.
+pub struct DismissPackOffer;
+
+#[async_trait]
+impl Action for DismissPackOffer {
+    fn meta(&self) -> ActionMeta {
+        meta("dismiss_pack_offer", "Decline a rule pack's offer")
+            .mutating()
+            .reversible()
+            .risk(Risk::Low)
+            .autonomy(Autonomy::Act)
+            .build()
+    }
+    async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
+        let index = ctx.services.stores.index();
+        let id = pack_arg(&args, "packId")?;
+        let (pack, _) = riddle_mesh::packs::find_pack(&index, id)?;
+        riddle_mesh::packs::dismiss_offer(&index, &pack.id)?;
+        ctx.services.emit(RiddleEvent::SettingsChanged);
+        Ok(ActionResult::ok(
+            json!({ "packId": pack.id }),
+            format!("Not now: {} is not offered again", pack.name),
+        )
+        .with_inputs(json!({ "packId": pack.id }))
+        .with_undo(json!({ "packId": pack.id }), "Offer it again"))
+    }
+    async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
+        let id = pack_arg(&restore, "packId")?.to_string();
+        riddle_mesh::packs::restore_offer(&ctx.services.stores.index(), &id)?;
+        ctx.services.emit(RiddleEvent::SettingsChanged);
+        Ok(ActionResult::ok(
+            json!({ "packId": id }),
+            format!("{id} can be offered again"),
+        ))
+    }
+}
+
 /// Remove an installed pack: its Meshes go to Recently Deleted; the lists
 /// stay, since they hold your answers.
 pub struct RemovePack;
@@ -810,6 +930,8 @@ pub fn actions() -> Vec<Arc<dyn Action>> {
         Arc::new(ApplyMeshToHistory),
         Arc::new(RememberForSender),
         Arc::new(InstallPack),
+        Arc::new(InstallDetectedPacks),
+        Arc::new(DismissPackOffer),
         Arc::new(RemovePack),
         Arc::new(ImportPack),
         Arc::new(ExportPack),
@@ -1572,6 +1694,15 @@ impl Action for SetSecret {
             .ok_or_else(|| RiddleError::invalid("paste the key first"))?;
         let credentials = ctx.services.require::<riddle_credentials::Credentials>()?;
         credentials.set(key, value)?;
+        // The key pasted is the key used: a judge key stored while the
+        // settings still read the key from SSM or the environment would
+        // sit in the keychain unread, and the judge would stay off.
+        if key == riddle_credentials::JEV_API_KEY {
+            let settings = ctx.services.require::<riddle_settings::SettingsStore>()?;
+            if settings.settings().judge.key_source != riddle_settings::KeySource::Keychain {
+                settings.update(|s| s.judge.key_source = riddle_settings::KeySource::Keychain)?;
+            }
+        }
         secrets_changed(ctx);
         let mut r = ActionResult::ok(
             json!({ "secret": key }),
@@ -1829,7 +1960,7 @@ impl Action for ConnectGmail {
                     .get("privacy")
                     .cloned()
                     .and_then(|v| serde_json::from_value(v).ok())
-                    .unwrap_or(settings.privacy_default),
+                    .unwrap_or(settings.effective_privacy_default),
                 projection: args
                     .get("projection")
                     .cloned()

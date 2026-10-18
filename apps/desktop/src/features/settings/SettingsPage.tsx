@@ -27,6 +27,7 @@ import { privacyStatement, probeJudge, probeLlm, qk, updatePreview } from '@/lib
 import { fmtUsd, plural } from '@/lib/format'
 import { levelShows, type UiLevel } from '@/lib/level'
 import { useAllDigs, useDigs, useProfile, useSettings } from '@/lib/queries'
+import { judgeStateLine } from '@/lib/selectors'
 import type { JudgeSettings, LlmSettings, Settings } from '@/lib/types'
 import { useAction } from '@/lib/useAction'
 import { toast } from '@/lib/stores'
@@ -323,8 +324,13 @@ function JudgeCard({ judge, onSave }: { judge: JudgeSettings; onSave: (j: JudgeS
         </Button>
         <Probe probe={probeJudge} disabledReason={dirty ? 'Save first; Probe tests the running judge' : d.provider === 'null' ? 'No judge configured' : null} />
       </div>
+      {judgeStateLine(judge) ? (
+        <p className="text-xs text-ochre" role="status">
+          {judgeStateLine(judge)}.
+        </p>
+      ) : null}
       {jev && judge.keySource === 'keychain' && d.keySource === 'keychain' ? (
-        <SecretField secret="jev_api_key" label="Jev API key" hint="Written to the OS keychain; the judge picks it up at once." present={judge.apiKeyPresent} />
+        <SecretField secret="jev_api_key" label={judge.apiKeyPresent ? 'Jev API key' : 'Paste a judge key (optional)'} hint="Written to the OS keychain, never to a file or a log; the judge picks it up at once." present={judge.apiKeyPresent} />
       ) : jev && d.keySource === 'keychain' ? (
         <p className="text-xs text-clay">Save the judge to paste a key into the keychain.</p>
       ) : null}

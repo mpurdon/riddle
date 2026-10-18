@@ -14,6 +14,8 @@ import type { Disposition } from '@/bindings/Disposition'
 import type { FindType } from '@/bindings/FindType'
 import type { RiddleError } from '@/bindings/RiddleError'
 import type { ServiceHealth } from '@/bindings/ServiceHealth'
+import type { GmailSettings } from '@/bindings/GmailSettings'
+import type { JudgeSettings } from '@/bindings/JudgeSettings'
 import { fmtInt, fmtRelative, num, plural, titleCase, fmtClock } from './format'
 
 // ---------------------------------------------------------------------------
@@ -53,6 +55,33 @@ export function serviceHealthLine(label: string, h: ServiceHealth): string {
 /** Bad while the breaker refuses calls; ok otherwise. */
 export function serviceHealthTone(h: ServiceHealth): Tone {
   return h.breaker.state === 'open' || h.breaker.state === 'half_open' ? 'bad' : 'ok'
+}
+
+// ---------------------------------------------------------------------------
+// The judge key and the Google client: setup states in one line each, the
+// same words wherever they show. "Judge unavailable" read as an outage on
+// an install that had never been given a key (17 Oct 2026).
+
+/** The backend's Degraded reason while no judge key is configured; the settings card and the wizard say the same. */
+export const NO_JUDGE_KEY = 'Sorting by rules until you add a judge key; nothing hidden'
+
+/** No key where the settings look (the keychain, production's default) or no provider: a setup to finish, not a failure. */
+export function judgeNotSetUp(j: Pick<JudgeSettings, 'provider' | 'keySource' | 'apiKeyPresent'>): boolean {
+  return j.provider === 'null' || (j.provider === 'jev' && j.keySource === 'keychain' && !j.apiKeyPresent)
+}
+
+/** What Riddle does meanwhile, or null when a judge can run. */
+export function judgeStateLine(j: Pick<JudgeSettings, 'provider' | 'keySource' | 'apiKeyPresent'>): string | null {
+  return judgeNotSetUp(j) ? NO_JUDGE_KEY : null
+}
+
+export type GoogleClientSource = 'own' | 'builtin' | 'none'
+
+/** Which Google client sign-in uses, as the backend chooses it: the person's own when its id is set, else the built-in one unless turned off. */
+export function googleClientLine(g: Pick<GmailSettings, 'clientId' | 'builtinClientAvailable' | 'useBuiltinClient'>): { source: GoogleClientSource; label: string; tone: 'ok' | 'warn' } {
+  if (g.clientId.trim()) return { source: 'own', label: 'Client set up', tone: 'ok' }
+  if (g.builtinClientAvailable && g.useBuiltinClient) return { source: 'builtin', label: 'Using the built-in Google client', tone: 'ok' }
+  return { source: 'none', label: 'Not set up yet', tone: 'warn' }
 }
 
 // ---------------------------------------------------------------------------

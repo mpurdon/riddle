@@ -16,10 +16,11 @@ pub fn plugin<R: tauri::Runtime>(
     profile: Profile,
 ) -> tauri::plugin::TauriPlugin<R> {
     let level = env_level().unwrap_or(log::LevelFilter::Trace);
-    let file_name = match profile {
-        Profile::Dev => "riddle-dev",
-        Profile::Prod => "riddle",
-    };
+    let file_name = file_name(profile);
+    // The folder target makes the directory itself; making it here too means
+    // `dev_info` can name it before the first line is written, and a failure
+    // never stops the app: logging never fails the work.
+    let _ = std::fs::create_dir_all(&dirs.logs);
     Builder::new()
         .targets([
             Target::new(TargetKind::Stdout),
@@ -53,6 +54,16 @@ pub fn plugin<R: tauri::Runtime>(
             ))
         })
         .build()
+}
+
+/// The log file's stem in `AppDirs::logs`: `riddle-dev.log` or `riddle.log`,
+/// the file `read_app_logs` tails after a restart (the plugin rotates by
+/// renaming, so the current file is the newest `.log` there).
+pub fn file_name(profile: Profile) -> &'static str {
+    match profile {
+        Profile::Dev => "riddle-dev",
+        Profile::Prod => "riddle",
+    }
 }
 
 fn env_level() -> Option<log::LevelFilter> {

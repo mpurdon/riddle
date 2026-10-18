@@ -45,6 +45,7 @@ export function registerMocks(): void {
   mock('get_message', (a) => q.getMessage(state, str(a, 'digId'), str(a, 'messageId')))
   mock('get_thread', (a) => q.getThread(state, str(a, 'digId'), str(a, 'threadId')))
   mock('explain', (a) => q.explain(state, str(a, 'digId'), str(a, 'messageId')))
+  mock('decide_preview', (a) => q.decidePreview(state, str(a, 'digId'), str(a, 'messageId')))
   mock('search', (a) => q.search(state, { query: str(a, 'query'), digId: opt(a, 'digId') as string | null, page: a.page as PageRequest, shadowOnly: !!a.shadowOnly }))
   mock('priority_inbox', (a) => q.priorityInbox(state, { digId: opt(a, 'digId') as string | null, page: a.page as PageRequest }))
   mock('list_finds', (a) => q.listFinds(state, { status: opt(a, 'status') as string | null, findType: opt(a, 'findType') as string | null, digId: opt(a, 'digId') as string | null, page: a.page as PageRequest }))
@@ -66,6 +67,7 @@ export function registerMocks(): void {
   mock('rule_check', () => q.ruleCheck(state))
   mock('rule_samples', (a) => q.ruleSamples(state, str(a, 'meshId'), (opt(a, 'limit') as number | null) ?? 10))
   mock('list_packs', () => q.packCatalogue(state))
+  mock('pack_offers', () => q.packOffers(state))
   mock('list_named_lists', () => state.namedLists)
   mock('mesh_order', (a) => q.meshOrder(state, (opt(a, 'windowDays') as number | null) ?? 30))
   mock('simulate_mesh', async (a) => {
@@ -136,7 +138,12 @@ export function registerMocks(): void {
   mock('mailbox_writes', () => ({ dev: state.devInfo.dev, writes: state.writes, held: u64(state.held) }))
   mock('probe_judge', async () => {
     await new Promise((r) => setTimeout(r, 420))
-    return { ok: true, latencyMs: 184, message: 'jev-1.13.0 answered 1 question (2 choices); key from ssm dev', health: state.judgeHealth }
+    // As the backend: no key where the settings look is "not set up", apart from a failure.
+    const j = state.settings.judge
+    if (j.provider === 'null' || (j.provider === 'jev' && j.keySource === 'keychain' && !j.apiKeyPresent)) {
+      return { ok: false, notSetUp: true, latencyMs: 0, message: 'Not set up: paste a judge key to turn the judge on. Sorting by rules until then; nothing hidden', health: null }
+    }
+    return { ok: true, latencyMs: 184, message: `jev-1.13.0 answered 1 question (2 choices); key from ${j.keySource}${j.keySource === 'ssm' ? ` ${j.ssmProfile ?? ''}` : ''}`, health: state.judgeHealth }
   })
   mock('probe_llm', async () => {
     await new Promise((r) => setTimeout(r, 900))

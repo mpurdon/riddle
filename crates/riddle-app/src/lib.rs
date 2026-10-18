@@ -20,10 +20,13 @@ pub mod facts_refresh;
 pub mod live;
 pub mod notify;
 pub mod ops;
+pub mod packs;
 pub mod paths;
 pub mod places;
+pub mod preview;
 pub mod reads;
 pub mod suggestions;
+pub mod window;
 pub mod words;
 
 use riddle_actions::{Runtime, Services};
@@ -46,6 +49,10 @@ pub struct AppConfig {
     /// binary reads a keychain item, and a headless command that reads one
     /// at boot hangs on that dialog.
     pub offline: bool,
+    /// Where the log file lives (`AppDirs::logs`), so the Logs pane can
+    /// tail it after a restart and `dev_info` can name it; `None` for an
+    /// in-memory app, which logs to its ring only.
+    pub log_dir: Option<PathBuf>,
 }
 
 impl AppConfig {
@@ -57,6 +64,7 @@ impl AppConfig {
             build,
             keychain_service: "dev.codenaked.riddle.test".into(),
             offline: false,
+            log_dir: None,
         }
     }
 }

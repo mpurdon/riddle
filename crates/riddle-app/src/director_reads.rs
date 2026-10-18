@@ -197,6 +197,37 @@ impl DirectorReads for AppReads {
     ) -> Result<Value> {
         serde_json::to_value(self.0.explain(dig_id, message_id)?).map_err(Into::into)
     }
+    /// The preview as the Director reads it: the two decisions and the
+    /// diff, without the two full traces (facts, every Signal) behind them.
+    async fn decide_preview(
+        &self,
+        _scope: &ReadScope,
+        dig_id: &DigId,
+        message_id: &MessageId,
+    ) -> Result<Value> {
+        let p = self.0.decide_preview(dig_id, message_id).await?;
+        let side = |k: &riddle_core::Classification, t: Option<&riddle_core::DecisionTrace>| {
+            json!({
+                "disposition": k.disposition,
+                "strata": k.strata,
+                "mechanism": k.mechanism,
+                "meshName": t.and_then(|t| t.mesh_name.clone()),
+                "meshVersion": k.mesh_version,
+                "matched": k.matched_rule,
+                "reason": k.reason,
+                "earlierMeshes": t.map(|t| t.earlier_meshes()).unwrap_or_default(),
+            })
+        };
+        Ok(json!({
+            "messageId": p.message_id,
+            "digId": p.dig_id,
+            "changed": p.changed,
+            "diff": p.diff,
+            "note": p.note,
+            "stored": p.stored.as_ref().map(|k| side(k, p.stored_trace.as_ref())),
+            "would": side(&p.would, Some(&p.would_trace)),
+        }))
+    }
     /// Activity as the Director reads it: a bulk row's affected messages as
     /// a count and the first few, its undo as a state and reason. One such
     /// row carried 22,000 characters of message ids and restore data, and a
@@ -271,6 +302,9 @@ impl DirectorReads for AppReads {
             // they belong on one; not about any one Mesh, so only when the
             // read is not.
             "senderSuggestions": if only.is_none() { self.0.sender_suggestions(&scope.dig_ids)? } else { Vec::new() },
+            // Packs the mail matches that are neither on nor declined; the
+            // Director proposes `install_pack` for one the person wants.
+            "packOffers": if only.is_none() { self.0.pack_offers(&scope.dig_ids)? } else { Vec::new() },
             // Identifiers and dispositions only; the Director reads a message
             // with get_message when its content matters.
             "corrections": corrections.iter().take(50).map(|c| json!({

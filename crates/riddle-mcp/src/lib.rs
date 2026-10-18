@@ -39,6 +39,7 @@ impl McpServer {
             tool("list_messages", "Page through messages, newest first, optionally filtered.", json!({"type": "object", "properties": {"digId": {"type": "string"}, "disposition": {"type": "string", "enum": ["find", "filed", "spoil", "contamination", "unresolved"]}, "query": {"type": "string"}, "limit": {"type": "integer"}, "cursor": {"type": "string"}}})),
             tool("get_message", "One message with its body. Name it by digId and messageId, or pass a link copied from its page (riddle://message/<digId>/<messageId> …) whole as messageId.", json!({"type": "object", "required": ["messageId"], "properties": {"digId": {"type": "string"}, "messageId": {"type": "string"}}})),
             tool("explain", "Why a message has its disposition: the Mesh, the Signals, the gate, the escalation. Name it by digId and messageId, or pass a copied riddle://message/… link whole as messageId.", json!({"type": "object", "required": ["messageId"], "properties": {"digId": {"type": "string"}, "messageId": {"type": "string"}}})),
+            tool("decide_preview", "Decide a message again under today's Meshes, lists and Signals without saving anything: the would-be classification and trace beside the stored ones, and a one-sentence diff. Name it by digId and messageId, or pass a copied riddle://message/… link whole as messageId.", json!({"type": "object", "required": ["messageId"], "properties": {"digId": {"type": "string"}, "messageId": {"type": "string"}}})),
             tool("list_finds", "Finds needing attention.", json!({"type": "object", "properties": {"status": {"type": "string", "enum": ["open", "snoozed", "resolved", "dismissed"]}, "limit": {"type": "integer"}}})),
             tool("list_activity", "The Activity ledger, newest first.", json!({"type": "object", "properties": {"limit": {"type": "integer"}}})),
             tool("list_meshes", "Meshes (policy) at their latest version.", json!({"type": "object", "properties": {}})),
@@ -94,6 +95,10 @@ impl McpServer {
             "explain" => {
                 let (dig, id) = message_args(&args)?;
                 serde_json::to_value(app.explain(&dig, &id)?)?
+            }
+            "decide_preview" => {
+                let (dig, id) = message_args(&args)?;
+                serde_json::to_value(app.decide_preview(&dig, &id).await?)?
             }
             "list_finds" => {
                 let status = str_arg("status")

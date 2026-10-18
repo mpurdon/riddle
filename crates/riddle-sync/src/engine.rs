@@ -209,6 +209,26 @@ fn parse_count(s: Option<String>) -> Option<u64> {
     s.and_then(|s| s.parse().ok())
 }
 
+/// The first sync's window start, recorded on its first run. For a Dig
+/// synced before that was recorded (`initial_sync_done` and no start: every
+/// account from before this build), the oldest message it holds, recorded
+/// now, so an existing account backfills exactly as a new one would; on
+/// the first merged build no such account armed a backfill (17 Oct 2026).
+/// `None` while the first listing is not done, or for an empty Dig.
+pub fn window_start_or_derived(store: &Store) -> Result<Option<DateTime<Utc>>> {
+    if let Some(t) = parse_time(repo::sync_state::get(store, INITIAL_WINDOW_START)?) {
+        return Ok(Some(t));
+    }
+    if repo::sync_state::get(store, repo::sync_state::INITIAL_SYNC_DONE)?.as_deref() != Some("1") {
+        return Ok(None);
+    }
+    let Some(oldest) = repo::messages::oldest_date(store)? else {
+        return Ok(None);
+    };
+    repo::sync_state::set(store, INITIAL_WINDOW_START, &oldest.to_rfc3339())?;
+    Ok(Some(oldest))
+}
+
 /// A cancellation flag with an async wait, for `tokio::select!`.
 #[derive(Clone, Default)]
 pub struct CancelFlag {
@@ -330,7 +350,7 @@ impl SyncEngine {
         let store = self.store()?;
         Ok(self.initial_sync_done()?
             && repo::sync_state::get(&store, BACKFILL_DONE)?.as_deref() != Some("1")
-            && repo::sync_state::get(&store, INITIAL_WINDOW_START)?.is_some())
+            && window_start_or_derived(&store)?.is_some())
     }
 
     /// Initial if not done, else incremental; a resync when the cursor expired.
@@ -529,8 +549,9 @@ impl SyncEngine {
         if repo::sync_state::get(&store, BACKFILL_DONE)?.as_deref() == Some("1") {
             return Ok(report);
         }
-        let Some(before) = parse_time(repo::sync_state::get(&store, INITIAL_WINDOW_START)?) else {
-            // The first sync listed everything: there is no "before".
+        let Some(before) = window_start_or_derived(&store)? else {
+            // The first sync listed everything, or the Dig holds nothing:
+            // there is no "before".
             repo::sync_state::set(&store, BACKFILL_DONE, "1")?;
             return Ok(report);
         };

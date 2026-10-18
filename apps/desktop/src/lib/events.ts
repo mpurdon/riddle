@@ -104,7 +104,7 @@ export function handleEvent(qc: QueryClient, e: RiddleEvent): void {
       inv(qk.updatePreview)
       break
     case 'pipeline_stage':
-      usePipeline.getState().push({ at: Date.now(), messageId: e.message_id, stage: e.stage, ms: num(e.ms) })
+      usePipeline.getState().push({ at: Date.now(), messageId: e.message_id, passId: e.pass_id, stage: e.stage, ms: num(e.ms) })
       break
     case 'director_delta':
       useDirector.getState().delta(e.conversation_id, e.text)

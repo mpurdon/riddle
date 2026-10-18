@@ -32,4 +32,20 @@ uiLevel: UiLevel, logLevel: LogLevel,
 /**
  * Finds at or above this priority (0–100) interrupt in Stream mode; the rest wait.
  */
-notifyPriorityThreshold: number, notifications: NotificationSettings, priorityInbox: PriorityInboxSettings, shadowPeriodDays: number, judge: JudgeSettings, llm: LlmSettings, budgets: BudgetSettings, gmail: GmailSettings, autonomy: AutonomySettings, projectionDefault: ProjectionMode, privacyDefault: PrivacyMode, launchAtLogin: boolean, closeToHide: boolean, comparison: ComparisonSettings, };
+notifyPriorityThreshold: number, notifications: NotificationSettings, priorityInbox: PriorityInboxSettings, shadowPeriodDays: number, judge: JudgeSettings, llm: LlmSettings, budgets: BudgetSettings, gmail: GmailSettings, autonomy: AutonomySettings, projectionDefault: ProjectionMode, privacyDefault: PrivacyMode, 
+/**
+ * Derived at read time, never written: the privacy a new account and
+ * the sample mailbox actually start in. `privacy_default` once a judge
+ * key is configured, Local-only until then: the stored default is
+ * Cloud judgment, and with no judge that promised what nothing
+ * provided (`effective_privacy`).
+ */
+effectivePrivacyDefault: PrivacyMode, 
+/**
+ * When an account's first listing completes, turn on the rule packs
+ * every mailbox starts with (`[detect] always`), Active. On in
+ * production and dev; test boots turn it off so a fixture mailbox
+ * carries only the Meshes a test installs, because Core's throwaway
+ * domain rule caught every `.example` sender first (17 Oct 2026).
+ */
+installPacksOnFirstSync: boolean, launchAtLogin: boolean, closeToHide: boolean, comparison: ComparisonSettings, };

@@ -57,6 +57,8 @@ save_settings           { settings: Settings }    (applies to the running app at
 set_secret              { secret: "jev_api_key" | "gmail_client_secret", value }   (user only; stored in the keychain, never recorded)
 clear_secret            { secret }                (user only)
 import_gmail_client     { text }                  (user only; Google's client JSON: id to settings, secret to the keychain)
+install_detected_packs  {}                        (TwoStep; the packs every mailbox starts with ([detect] always: Core, Accounts), Active with their defaults; what the app runs itself when an account's first listing completes; undo takes them off)
+dismiss_pack_offer      { packId }                (Not now on a Summary offer; the pack is not offered again; undo offers it)
 add_fixture_dig         { name, email, seed?, count?, group?, privacy?, projection? }
 connect_gmail           { name?, group?, privacy?, projection?, loginHint?, digId? }   (with digId: sign an existing Dig in again; it keeps its history and runs a catch-up)
 review_shadow           { digId, messageId, agree: bool, disposition? }   (Agree counts for the Shadow Mesh and marks the row; Disagree records your decision as a correction)
@@ -79,7 +81,8 @@ permanent_delete        { digId, messageIds[] } (TypeCount; no undo)
 
 | command | args | returns |
 |---|---|---|
-| `summary` | `{ digId? }` | `Summary`; with `digId` the numbers cover that one Dig |
+| `summary` | `{ digId? }` | `Summary`; with `digId` the numbers cover that one Dig; `packOffers` are the rule packs the mail matches that are neither installed nor declined |
+| `pack_offers` | `{ digId? }` | `PackOffer[]`: `{ packId, name, reasonInWords, matchedMessages }`, largest match first, from each pack's `[detect]` block over the sync window (`always` packs are installed at the first listing and never offered) |
 | `task_centre` | – | `TaskCentre`; `judge` and `llm` carry each client's `ServiceHealth` (breaker, last success, last failure), `null` when not configured |
 | `list_digs` | – | `Dig[]` |
 | `list_dig_groups` | – | `DigGroup[]` |
@@ -87,6 +90,7 @@ permanent_delete        { digId, messageIds[] } (TypeCount; no undo)
 | `get_message` | `{ digId, messageId }` | `Message` (`bodyHtml` sanitized, remote content stripped) |
 | `get_thread` | `{ digId, threadId }` | `Thread` |
 | `explain` | `{ digId, messageId }` | `Explanation` |
+| `decide_preview` | `{ digId, messageId }` (or a `riddle://message/…` link as `messageId`) | `DecisionPreview`: today's rules run over the message through the non-persisting pipeline; the would-be classification and trace beside the stored ones, `changed`, and `diff` in one sentence. Nothing is written but any judge usage |
 | `search` | `{ query, digId?, page, shadowOnly? }` | `Page<MessageSummary>`; `shadowOnly` lists Shadow proposals (`shadow`, `shadowReview` on each row) |
 | `priority_inbox` | `{ digId?, page }` | `Page<MessageSummary>`: the Priority inbox. Messages carrying a chosen Stratum, a chosen provider label (`STARRED`, `IMPORTANT`) or belonging to an open Find at or above the chosen priority, OR-combined; the criteria are `settings.priorityInbox`, read by the backend, so no filter is sent |
 | `list_finds` | `{ status?, findType?, digId?, page }` | `Page<Find>` |
@@ -120,7 +124,7 @@ permanent_delete        { digId, messageIds[] } (TypeCount; no undo)
 | `trace_stats` | `{ digId?, sinceDays? }` | `TraceStats` (spec) |
 | `dev_info` | – | `DevInfo` (spec, exists); `swallowed` is the swallowed-failure table: `{ category, site, count, lastAt, lastError }[]` |
 | `dev_armed` | – | `boolean` |
-| `probe_judge` / `probe_llm` / `probe_provider {digId}` | | `{ ok, latencyMs, message, health? }`; the judge and LLM probes add the client's `ServiceHealth` after the call |
+| `probe_judge` / `probe_llm` / `probe_provider {digId}` | | `{ ok, latencyMs, message, health? }`; the judge and LLM probes add the client's `ServiceHealth` after the call. `probe_judge` adds `notSetUp: true` when there is no key where the settings look (the keychain, production's default) or no provider: a setup to finish, apart from a failure |
 | `read_app_logs` | `{ limit?, category?, level?, text? }` | `LogLine[]` |
 | `log_categories` | – | `string[]` |
 | `in_flight_calls` | – | `{ command, elapsedMs }[]` |
@@ -180,6 +184,30 @@ the floor for an open Find's priority; `null` or `0` means any open Find (TOML
 has no null, so it is written and read back as `0`); `findTypes` limits which Find types count, empty
 meaning every type. Saved with the rest of the settings through
 `save_settings`; the Priority page saves on every change.
+
+`settings.judge` production defaults: `keySource = "keychain"` with no key
+and no SSM profile or parameter (the dev profile keeps SSM `dev`). Until a
+key is pasted (`set_secret { secret: "jev_api_key" }`, which also sets
+`keySource` to `keychain` so the key pasted is the key used) Riddle sorts by
+rules and hides nothing: the account status reads "Sorting by rules until
+you add a judge key; nothing hidden", a message held for want of a judge
+reads "Waiting for a judge key; …", and `probe_judge` says `notSetUp`.
+
+`settings.gmail`: `clientId` (your own client), `useBuiltinClient` (default
+true: sign in through the client baked into the build while no own id is
+set; "Use your own" turns it off), and `builtinClientAvailable`, derived at
+read time from the build (`RIDDLE_GOOGLE_CLIENT_ID`), never written. See
+`docs/GMAIL_SETUP.md`.
+
+`settings.effectivePrivacyDefault`: derived at read time, never written.
+The privacy a new account and the sample mailbox start in: `privacyDefault`
+once a judge key is present, `local_only` until then. The wizard's sentence
+and the Summary's privacy line read it.
+
+`settings.installPacksOnFirstSync` (default true): when an account's first
+listing completes, the packs every mailbox starts with (`[detect] always`:
+Core, Accounts) are installed Active, recorded in Activity under System.
+Test boots turn it off.
 
 ## Mesh header additions
 

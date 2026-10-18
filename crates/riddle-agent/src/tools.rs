@@ -23,13 +23,14 @@ pub enum ReadTool {
     ListMeshes,
     ListSignals,
     ExplainDecision,
+    PreviewDecision,
     ListActivity,
     SimulateMesh,
     MeshCorrections,
 }
 
 impl ReadTool {
-    pub const ALL: [ReadTool; 11] = [
+    pub const ALL: [ReadTool; 12] = [
         ReadTool::ListMessages,
         ReadTool::GetMessage,
         ReadTool::GetThread,
@@ -38,6 +39,7 @@ impl ReadTool {
         ReadTool::ListMeshes,
         ReadTool::ListSignals,
         ReadTool::ExplainDecision,
+        ReadTool::PreviewDecision,
         ReadTool::ListActivity,
         ReadTool::SimulateMesh,
         ReadTool::MeshCorrections,
@@ -53,6 +55,7 @@ impl ReadTool {
             ReadTool::ListMeshes => "list_meshes",
             ReadTool::ListSignals => "list_signals",
             ReadTool::ExplainDecision => "explain_decision",
+            ReadTool::PreviewDecision => "preview_decision",
             ReadTool::ListActivity => "list_activity",
             ReadTool::SimulateMesh => "simulate_mesh",
             ReadTool::MeshCorrections => "mesh_corrections",
@@ -123,6 +126,11 @@ impl ReadTool {
             ReadTool::ExplainDecision => ToolSpec::new(
                 self.name(),
                 "Explain why Riddle gave a message its disposition: the Mesh version, matched route, Signal scores, gate and any escalation.",
+                json!({"type":"object","properties":{"digId":{"type":"string"},"messageId":{"type":"string"}},"required":["digId","messageId"]}),
+            ),
+            ReadTool::PreviewDecision => ToolSpec::new(
+                self.name(),
+                "Decide a message again under today's Meshes, lists and Signals without saving anything, beside the decision that stands: `diff` says in one sentence what would change (\"would be Filed by Bills v4 instead of Spoil by Frequent promotions v2\"), `would.earlierMeshes` what each earlier Mesh made of it. Use it after a Mesh or a list changed, or when the user asks whether a message would now go elsewhere; explain_decision says why the stored decision was made.",
                 json!({"type":"object","properties":{"digId":{"type":"string"},"messageId":{"type":"string"}},"required":["digId","messageId"]}),
             ),
             ReadTool::ListActivity => ToolSpec::new(

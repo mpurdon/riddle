@@ -7,10 +7,11 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
 import type { DecisionTrace } from '@/bindings/DecisionTrace'
-import { qk, readTrace } from '@/lib/api'
+import type { DecisionPreview } from '@/bindings/DecisionPreview'
+import { decidePreview, qk, readTrace } from '@/lib/api'
 import { cx, fmtInt, fmtMs, fmtScore, fmtUsd, num, safeJson } from '@/lib/format'
 import { dispositionLabel } from '@/lib/selectors'
-import { jevRequest, jevResponse, redactTrace } from '@/lib/traces'
+import { jevRequest, jevResponse, outcomeLine, redactTrace } from '@/lib/traces'
 import { toast } from '@/lib/stores'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
@@ -56,14 +57,64 @@ export function MessageInspector() {
   )
 }
 
+/**
+ * "Preview a re-decision": today's rules run over the message without
+ * saving, and the diff in one sentence beside what stands. The button
+ * replaces sending a message back to Sift just to see what would happen.
+ */
+function PreviewSection({ t }: { t: DecisionTrace }) {
+  const [preview, setPreview] = useState<DecisionPreview | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const run = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      setPreview(await decidePreview(t.digId, t.messageId))
+    } catch (e) {
+      setError((e as { message?: string })?.message ?? String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Section title="Preview">
+      <div className="text-xs text-ink-2">Decide it again under today's Meshes, lists and Signals. Nothing is written; a fresh judge call is booked as usage like any other.</div>
+      <Button size="sm" variant="ghost" className="mt-1" onClick={run} disabled={busy}>
+        {busy ? 'Deciding…' : 'Preview a re-decision'}
+      </Button>
+      {error ? <div className="mt-1 text-xs text-rust">{error}</div> : null}
+      {preview ? (
+        <div className="mt-2 text-xs" data-testid="preview-result">
+          <div className="flex items-center gap-2">
+            <Chip tone={preview.changed ? 'warn' : 'ok'}>{preview.changed ? 'would change' : 'unchanged'}</Chip>
+            <span className="font-medium selectable">{preview.diff}</span>
+          </div>
+          <div className="mt-1 text-ink-2">Signals: {preview.note}.</div>
+          {preview.wouldTrace.meshOutcomes.length ? (
+            <ul className="mt-1 flex flex-col gap-0.5 text-2xs text-ink-2 mono">
+              {preview.wouldTrace.meshOutcomes.filter((o) => o.outcome.kind !== 'not_reached').map((o) => (
+                <li key={`${o.meshId}@${o.version}`}>{outcomeLine(o)}</li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="mt-1 text-ink-2">Preview pass {preview.wouldTrace.passId}. The stored decision stands.</div>
+        </div>
+      ) : null}
+    </Section>
+  )
+}
+
 export function TraceView({ t }: { t: DecisionTrace }) {
   const nav = useNavigate()
   const facts = Object.entries(t.facts).filter(([k]) => k !== 'deadlines')
+  const ran = t.meshOutcomes.filter((o) => o.outcome.kind !== 'not_reached')
+  const notReached = t.meshOutcomes.length - ran.length
   return (
     <div className="grid grid-cols-2 gap-x-8">
       <div>
         <Section title="Message">
-          <KV rows={[['Message', t.messageId], ['Dig', t.digId], ['Trace', t.id], ['Received', t.createdAt], ['Build', t.buildStamp], ['Strategy', t.strategy], ['Shadow', t.shadow ? 'yes: recorded, not applied' : 'no']]} />
+          <KV rows={[['Message', t.messageId], ['Dig', t.digId], ['Trace', t.id], ['Pass', t.passId || '—'], ['Received', t.createdAt], ['Build', t.buildStamp], ['Strategy', t.strategy], ['Shadow', t.shadow ? 'yes: recorded, not applied' : 'no']]} />
           <Button size="sm" variant="ghost" className="mt-2" onClick={() => nav(`/inbox/${t.digId}/${t.messageId}`)}>Open the message</Button>
         </Section>
         <Section title="Deterministic facts">
@@ -112,8 +163,36 @@ export function TraceView({ t }: { t: DecisionTrace }) {
           ) : (
             <span className="text-xs text-clay">No Mesh matched; the confidence policy decided{t.escalation ? ' and escalated' : ''}.</span>
           )}
-          <div className="mt-2 text-sm">→ <span className="font-semibold">{dispositionLabel(t.conclusion)}</span> <span className="text-xs text-clay">by {t.mechanism}{t.confidence !== null ? ` · confidence ${fmtScore(t.confidence)}` : ''}</span></div>
+          <div className="mt-2 text-sm">→ <span className="font-semibold">{dispositionLabel(t.conclusion)}</span> <span className="text-xs text-clay">by {t.mechanism}{t.confidence !== null ? ` · confidence ${fmtScore(t.confidence)}` : ''}{t.margin != null ? ` · margin ${fmtScore(t.margin)}` : ''}</span></div>
+          {ran.length ? (
+            <div className="mt-2 text-xs" data-testid="mesh-outcomes">
+              <div className="font-medium text-ink-2">Meshes, in the order they ran</div>
+              <ul className="mt-1 flex flex-col gap-0.5 text-2xs mono">
+                {ran.map((o) => (
+                  <li key={`${o.meshId}@${o.version}`} className={cx(o.outcome.kind === 'matched' ? 'text-moss' : 'text-ink-2')}>{outcomeLine(o)}</li>
+                ))}
+              </ul>
+              {notReached ? <div className="mt-0.5 text-2xs text-clay">{notReached} not reached</div> : null}
+            </div>
+          ) : null}
+          {t.listResults.length ? (
+            <div className="mt-2 text-xs">
+              <div className="font-medium text-ink-2">Lists, as they read then</div>
+              <ul className="mt-1 flex flex-col gap-0.5 text-2xs mono text-ink-2">
+                {t.listResults.map((l, i) => (
+                  <li key={i}>{l.list} · {l.value} · {l.matched ? 'on it' : 'not on it'}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {t.policy ? (
+            <div className="mt-2 text-2xs text-ink-2">
+              Policy then: margins Find {fmtScore(t.policy.marginFind)}, Filed {fmtScore(t.policy.marginFiled)}, Spoil {fmtScore(t.policy.marginSpoil)}, Contamination {fmtScore(t.policy.marginContamination)}
+              {t.policy.escalateNonEnglish ? '; non-English mail escalates' : ''}
+            </div>
+          ) : null}
         </Section>
+        <PreviewSection t={t} />
         <Section title="Escalation">
           {t.escalation ? (
             <div className="text-xs">

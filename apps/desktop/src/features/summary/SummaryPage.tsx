@@ -14,6 +14,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { FlaskConical, Mail, RefreshCw, Sunrise } from 'lucide-react'
+import type { PackOffer } from '@/bindings/PackOffer'
 import type { Summary } from '@/bindings/Summary'
 import type { TaskCentre } from '@/bindings/TaskCentre'
 import { Button } from '@/components/ui/Button'
@@ -23,6 +24,7 @@ import { Sep } from '@/components/Bits'
 import { ErrorCard } from '@/components/ErrorCard'
 import { PRIVACY_OPTIONS, detailOf, labelOf } from '@/features/settings/accounts/model'
 import { fmtDuration, fmtInt, fmtRelative, num } from '@/lib/format'
+import { qk } from '@/lib/api'
 import { toRiddleError } from '@/lib/ipc'
 import { useSummary, useDigContext, useSettings, useTaskCentre } from '@/lib/queries'
 import { backfillLine, catchUpJob, catchUpLine, historyBackfillJob, jobKindLabel, jobProgressPct, summaryCopy } from '@/lib/selectors'
@@ -126,6 +128,8 @@ export default function SummaryPage() {
 
         {!c.firstRun ? <TrustCard /> : null}
 
+        {s.packOffers.length ? <PackOffers offers={s.packOffers} /> : null}
+
         {s.directorNote ? (
           <section className="mt-8 rounded-lg border border-line bg-sand p-4">
             <div className="text-xs font-semibold uppercase tracking-wide text-clay">Riddle noticed</div>
@@ -218,14 +222,15 @@ function FirstRunCards() {
   const nav = useNavigate()
   const { run } = useAction()
   const settings = useSettings().data
-  const privacy = settings?.privacyDefault
+  // The effective default: local-only until a judge key is configured, the stored default once one is.
+  const privacy = settings?.effectivePrivacyDefault
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const trySample = async () => {
     setBusy(true)
     setError(null)
     try {
-      await run('add_fixture_dig', { ...SAMPLE_MAILBOX, privacy: settings?.privacyDefault ?? 'local_only', projection: settings?.projectionDefault ?? 'none' }, { successToast: 'Sample mail is loading' })
+      await run('add_fixture_dig', { ...SAMPLE_MAILBOX, privacy: settings?.effectivePrivacyDefault ?? 'local_only', projection: settings?.projectionDefault ?? 'none' }, { successToast: 'Sample mail is loading' })
     } catch (e) {
       setError(toRiddleError(e).message)
     } finally {
@@ -258,6 +263,46 @@ function FirstRunCards() {
         </Link>
         , or the account's own setting afterwards.
       </p>
+    </section>
+  )
+}
+
+/**
+ * Rule packs the mail matches that are not on yet, one line each with the
+ * count: "Riddle recognised GitHub mail (412 messages). Turn its rules on?"
+ * Turn on installs the pack Active through `install_pack`; Not now records
+ * the decline so the offer is not made again. Shown at every level: the
+ * packs every mailbox starts with went on by themselves at the first
+ * listing, and these are the ones only this mailbox's mail calls for.
+ */
+function PackOffers({ offers }: { offers: PackOffer[] }) {
+  const { run } = useAction()
+  const [busy, setBusy] = useState<string | null>(null)
+  const act = async (action: 'install_pack' | 'dismiss_pack_offer', o: PackOffer) => {
+    setBusy(o.packId)
+    try {
+      await run(action, action === 'install_pack' ? { packId: o.packId, status: 'active' } : { packId: o.packId }, { successToast: action === 'install_pack' ? `${o.name} rules are on` : false, invalidate: [qk.summary, qk.packOffers] })
+    } finally {
+      setBusy(null)
+    }
+  }
+  return (
+    <section aria-label="Rule packs" className="mt-6 rounded-lg border border-line bg-sand p-4">
+      <div className="text-xs font-semibold uppercase tracking-wide text-clay">Riddle recognised</div>
+      <ul className="mt-2 flex flex-col gap-2">
+        {offers.map((o) => (
+          <li key={o.packId} className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="flex-1 text-ink-2">{o.reasonInWords}</span>
+            <Button size="sm" variant="primary" busy={busy === o.packId} aria-label={`Turn on ${o.name}`} onClick={() => act('install_pack', o)}>
+              Turn on
+            </Button>
+            <Button size="sm" variant="ghost" aria-label={`Not now: ${o.name}`} disabledReason={busy === o.packId ? 'Working' : null} onClick={() => act('dismiss_pack_offer', o)}>
+              Not now
+            </Button>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-xs text-clay">A pack's rules start Active and can be turned off or removed under Rules. Nothing is set aside by a rule you did not turn on.</p>
     </section>
   )
 }

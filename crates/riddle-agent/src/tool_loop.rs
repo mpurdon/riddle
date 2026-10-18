@@ -653,6 +653,15 @@ impl ToolLoop {
                     )
                     .await
             }
+            ReadTool::PreviewDecision => {
+                self.reads
+                    .decide_preview(
+                        scope,
+                        &DigId::from(s("digId")?),
+                        &MessageId::from(s("messageId")?),
+                    )
+                    .await
+            }
             ReadTool::ListActivity => self.reads.list_activity(scope, args.clone()).await,
             ReadTool::SimulateMesh => self.reads.simulate_mesh(scope, args.clone()).await,
             ReadTool::MeshCorrections => self.reads.mesh_corrections(scope, args.clone()).await,

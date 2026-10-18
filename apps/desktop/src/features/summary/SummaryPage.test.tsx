@@ -5,7 +5,7 @@
  * account actually starts in.
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { mockState, registerMocks, resetMockState } from '@/lib/mocks'
@@ -76,5 +76,34 @@ describe('the Summary before the first account', () => {
     expect(line.textContent).toBe("Either way, a new account starts in Cloud judgment: Jev reads message features to classify. No LLM. Change the default under Settings → Accounts → Defaults, or the account's own setting afterwards.")
     expect(screen.getByRole('link', { name: 'Settings → Accounts → Defaults' }).getAttribute('href')).toBe('/settings#new-digs')
     expect(screen.queryByText(/nothing leaves this machine/)).toBeNull()
+  })
+
+  it('reads the effective privacy default: local-only until a judge key is configured', async () => {
+    mount(() => {
+      mockState().digs = []
+      mockState().settings = { ...mockState().settings, judge: { ...mockState().settings.judge, keySource: 'keychain', apiKeyPresent: false }, effectivePrivacyDefault: 'local_only' }
+    })
+    await screen.findByText('Connect an account to start.')
+    await waitFor(() => expect(screen.getByText(/Either way, a new account starts in/).textContent).toContain('a new account starts in Local only: Nothing leaves this Mac.'))
+  })
+})
+
+describe('the Summary offers the rule packs the mail matches', () => {
+  it('shows the offer with its count, turns the pack on through install_pack, and a declined one is not offered again', async () => {
+    mount()
+    const card = await screen.findByRole('region', { name: 'Rule packs' })
+    expect(card.textContent).toContain('Riddle recognised GitHub mail (412 messages). Turn its rules on?')
+    fireEvent.click(within(card).getByRole('button', { name: 'Turn on GitHub' }))
+    await waitFor(() => expect(mockState().installedPacks.some((p) => p.id === 'developer-github')).toBe(true))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Rule packs' })).toBeNull())
+  })
+
+  it('Not now records the decline and the offer goes', async () => {
+    mount()
+    const card = await screen.findByRole('region', { name: 'Rule packs' })
+    fireEvent.click(within(card).getByRole('button', { name: 'Not now: GitHub' }))
+    await waitFor(() => expect(mockState().dismissedPackOffers).toEqual(['developer-github']))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Rule packs' })).toBeNull())
+    expect(mockState().installedPacks).toEqual([])
   })
 })

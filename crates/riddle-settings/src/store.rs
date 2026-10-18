@@ -173,9 +173,14 @@ impl SettingsStore {
     }
 }
 
+/// Everything derived at read time and never written: secret presence, the
+/// build's Google client, and the privacy a new account starts in, which
+/// follows the judge key.
 fn apply_presence(s: &mut Settings, secrets: &dyn SecretPresence) {
     s.judge.api_key_present = secrets.is_present(&Secret::judge(&s.judge));
     s.gmail.client_secret_present = secrets.is_present(&Secret::GmailClientSecret);
+    s.gmail.builtin_client_available = crate::model::GmailSettings::builtin_client().is_some();
+    s.effective_privacy_default = s.effective_privacy();
 }
 
 /// Parse the file over the profile defaults. Unknown keys are ignored; a
@@ -447,10 +452,20 @@ mod tests {
         let s = store.settings();
         assert!(s.judge.api_key_present);
         assert!(!s.gmail.client_secret_present);
+        assert_eq!(
+            s.effective_privacy_default, s.privacy_default,
+            "with a judge key the stored default is the one in force"
+        );
         store.save(s).unwrap();
         let text = std::fs::read_to_string(store.config_path()).unwrap();
         assert!(!text.contains("Present"));
-        assert!(!open(dir.path(), false).settings().judge.api_key_present);
+        let without = open(dir.path(), false).settings();
+        assert!(!without.judge.api_key_present);
+        assert_eq!(
+            without.effective_privacy_default,
+            riddle_core::PrivacyMode::LocalOnly,
+            "no judge key: a new account starts local-only whatever the file says"
+        );
     }
 
     #[test]

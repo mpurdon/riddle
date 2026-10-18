@@ -28,7 +28,7 @@ pub mod validate;
 
 pub use eval::{
     check_routes, deterministic_projection, evaluate, evaluate_with, signals_needed,
-    ListMembership, MeshDecision, ProfileLists, Truth,
+    ListMembership, MeshDecision, ProfileLists, TraceLists, Truth,
 };
 pub use format::format;
 pub use parse::{parse, parse_full, ParsedHeader};

@@ -16,6 +16,7 @@
 //! classification and sender tables (17 Oct 2026).
 
 use crate::domains::Domains;
+use crate::window::{decide_window, JUDGE_CONCURRENCY};
 use crate::App;
 use riddle_core::*;
 use riddle_errors::{Result, RiddleError};
@@ -125,6 +126,13 @@ pub struct SiftPassReport {
     pub llm_ms: u64,
     pub store_reads: u64,
     pub store_writes: u64,
+    /// The pass's id, stamped on every input it built (`SiftInput::pass_id`).
+    pub pass_id: String,
+    /// How the pass ran: the window decided together and how many of its
+    /// decisions ran at once. `judge_ms` is summed across messages and
+    /// `elapsed_ms` is wall time, so the two together show the overlap.
+    pub window: u64,
+    pub concurrency: u64,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize)]
@@ -309,7 +317,9 @@ impl App {
         Ok(input)
     }
 
-    /// Sift the backlog of one Dig, newest first, up to `limit` messages.
+    /// Sift the backlog of one Dig, newest first, up to `limit` messages:
+    /// one window, decided `JUDGE_CONCURRENCY` at a time and persisted in
+    /// order (`crate::window`).
     pub async fn sift_pass(
         self: &Arc<Self>,
         dig: &Dig,
@@ -414,6 +424,12 @@ impl App {
         let mut superseded: MeshGroups<MessageId> = std::collections::BTreeMap::new();
         // The pass's Context: the standing corrections, read once.
         let pass_context = riddle_context::PassContext::load(&store)?;
+        let pass_id = riddle_sift::new_pass_id();
+        report.pass_id = pass_id.clone();
+        // The batch is one window (`crate::window`). 1. Its inputs, in
+        // series: the facts read the store and are cheap. A message whose
+        // input fails is counted here and stays unclassified.
+        let mut inputs: Vec<SiftInput> = Vec::with_capacity(ids.len());
         for id in ids {
             if cancel.is_some_and(|c| c.is_cancelled()) {
                 break;
@@ -421,8 +437,11 @@ impl App {
             let Some(message) = repo::messages::get(&store, &dig.id, &id)? else {
                 continue;
             };
-            let input = match self.sift_input_with(dig, message, &pass_context) {
-                Ok(i) => i,
+            match self.sift_input_with(dig, message, &pass_context) {
+                Ok(mut input) => {
+                    input.pass_id = pass_id.clone();
+                    inputs.push(input);
+                }
                 Err(e) => {
                     rwarn!(
                         Category::Sift,
@@ -431,13 +450,44 @@ impl App {
                         e.kind.as_str()
                     );
                     report.failed += 1;
-                    continue;
                 }
-            };
-            match crate::ai::CURRENT_DIG
-                .scope(dig.id.clone(), sift.run_and_persist(input))
-                .await
-            {
+            }
+        }
+        report.window = inputs.len() as u64;
+        report.concurrency = JUDGE_CONCURRENCY as u64;
+        // What the window's decisions share, read once here rather than by
+        // the first six at once; a read that fails here fails them each,
+        // as it did one by one.
+        let _ = sift.pass_snapshot();
+        let _ = sift.meshes_in_scope(&dig.id, dig.group.as_deref());
+        // 2. Decide the window, `JUDGE_CONCURRENCY` at a time: the time is
+        // spent waiting on the judge, in parallel instead of in series. The
+        // judge client's bucket and breaker pace the calls; a breaker that
+        // opens mid-window leaves the rest Unresolved, as one by one. The
+        // escalation cap tallies under a lock, so a cap reached mid-window
+        // stops further escalations and not the window. A cancellation
+        // starts no further decision; those running finish and are kept.
+        let window_ids: Vec<MessageId> = inputs.iter().map(|i| i.message.id.clone()).collect();
+        let decided = crate::ai::CURRENT_DIG
+            .scope(
+                dig.id.clone(),
+                decide_window(
+                    inputs,
+                    JUDGE_CONCURRENCY,
+                    || cancel.is_some_and(|c| c.is_cancelled()),
+                    |input| sift.run(input),
+                ),
+            )
+            .await;
+        // 3. Persist in the window's order, so dispositions, Activity and
+        // the projection outbox keep newest-first and a thread's replies
+        // are spread after its root. One write per decision.
+        for (id, decision) in window_ids.into_iter().zip(decided) {
+            let persisted = decision.and_then(|mut outcome| {
+                sift.persist(&mut outcome)?;
+                Ok(outcome)
+            });
+            match persisted {
                 Ok(outcome) => {
                     report.processed += 1;
                     report.cached_signals += outcome.cached as u64;
@@ -595,9 +645,9 @@ impl App {
         report.store_reads = calls.reads;
         report.store_writes = calls.writes;
         report.elapsed_ms = _t.elapsed_ms();
-        rinfo!(Category::Sift, "pass {}: processed {} ({} cached, {} fresh signals), finds +{} joined {}, unresolved {}, hidden {}, failed {}, judge unavailable {}, remaining {}; {}ms (judge {}ms, llm {}ms), store reads {} writes {}",
+        rinfo!(Category::Sift, "pass {}: processed {} ({} cached, {} fresh signals), finds +{} joined {}, unresolved {}, hidden {}, failed {}, judge unavailable {}, remaining {}; {}ms (judge {}ms, llm {}ms), store reads {} writes {}, window {} concurrency {}, pass id {}",
             dig.id, report.processed, report.cached_signals, report.fresh_signals, report.finds_created, report.finds_joined, report.unresolved, report.hidden, report.failed, report.judge_unavailable, report.remaining,
-            report.elapsed_ms, report.judge_ms, report.llm_ms, report.store_reads, report.store_writes);
+            report.elapsed_ms, report.judge_ms, report.llm_ms, report.store_reads, report.store_writes, report.window, report.concurrency, report.pass_id);
         self.events.emit_summary();
         Ok(report)
     }
@@ -682,7 +732,7 @@ impl App {
                 } else {
                     format!("Triggered by Mesh: {mesh_name} v{version}")
                 }),
-                inputs: serde_json::json!({ "digId": dig.id, "count": n, "cached": cached, "fresh": fresh, "failed": report.failed, "judgeUnavailable": report.judge_unavailable }),
+                inputs: serde_json::json!({ "digId": dig.id, "passId": report.pass_id, "count": n, "cached": cached, "fresh": fresh, "failed": report.failed, "judgeUnavailable": report.judge_unavailable }),
                 affected: ids
                     .iter()
                     .map(|i| EntityRef::new(EntityKind::Message, i))
@@ -779,13 +829,15 @@ impl App {
     /// window still has pages to fetch. Read from sync state alone, so an
     /// account whose provider cannot be built (no sign-in yet) answers too.
     pub fn backfill_pending(&self, dig: &Dig) -> Result<bool> {
-        use riddle_sync::engine::{BACKFILL_DONE, INITIAL_WINDOW_START};
+        use riddle_sync::engine::{window_start_or_derived, BACKFILL_DONE};
         let store = self.stores.dig(&dig.id)?;
         Ok(
             repo::sync_state::get(&store, repo::sync_state::INITIAL_SYNC_DONE)?.as_deref()
                 == Some("1")
                 && repo::sync_state::get(&store, BACKFILL_DONE)?.as_deref() != Some("1")
-                && repo::sync_state::get(&store, INITIAL_WINDOW_START)?.is_some(),
+                // An account synced before the window start was recorded
+                // derives it from its oldest message here.
+                && window_start_or_derived(&store)?.is_some(),
         )
     }
 
@@ -1019,12 +1071,13 @@ impl EmitSummary for Arc<crate::events::Broadcast> {
 /// usage ledger again, once per escalation. A saved change to the cap
 /// applies from the next pass. A ledger that cannot be read allows
 /// escalation: bookkeeping never fails the work, and the daily LLM budget
-/// still bounds spend.
+/// still bounds spend. The tally is a `PassTally`, locked: a window's
+/// decisions escalate concurrently, and each books its own cost, so a cap
+/// reached mid-window stops the escalations after it and not the window.
 struct EscalationCap {
     stores: Arc<riddle_store::Stores>,
     settings: Arc<riddle_settings::SettingsStore>,
-    /// Per Dig, read on first use.
-    ledger: parking_lot::Mutex<std::collections::HashMap<DigId, PassLedger>>,
+    tally: PassTally,
 }
 
 /// The cap, what the ledger held when the pass first asked, and what the
@@ -1036,6 +1089,33 @@ struct PassLedger {
     spent_in_pass: f64,
 }
 
+/// The in-memory tally per Dig, read on first use and shared by every
+/// decision of the window under one lock, so no spend is lost between two
+/// escalations that finish together. A check and the booking that follows
+/// it are two critical sections: up to the window's concurrency can pass
+/// the check before the first books, and the overshoot is bounded by that.
+#[derive(Default)]
+struct PassTally(parking_lot::Mutex<std::collections::HashMap<DigId, PassLedger>>);
+
+impl PassTally {
+    fn allows(&self, dig: &DigId, read: impl FnOnce() -> PassLedger) -> bool {
+        let mut ledger = self.0.lock();
+        let l = ledger.entry(dig.clone()).or_insert_with(read);
+        l.spent_before + l.spent_in_pass < l.limit
+    }
+
+    fn spent(&self, dig: &DigId, usd: f64, read: impl FnOnce() -> PassLedger) {
+        let mut ledger = self.0.lock();
+        let l = ledger.entry(dig.clone()).or_insert_with(read);
+        l.spent_in_pass += usd;
+    }
+
+    #[cfg(test)]
+    fn spent_in_pass(&self, dig: &DigId) -> f64 {
+        self.0.lock().get(dig).map_or(0.0, |l| l.spent_in_pass)
+    }
+}
+
 impl EscalationCap {
     fn new(
         stores: Arc<riddle_store::Stores>,
@@ -1044,7 +1124,7 @@ impl EscalationCap {
         Self {
             stores,
             settings,
-            ledger: parking_lot::Mutex::new(std::collections::HashMap::new()),
+            tally: PassTally::default(),
         }
     }
 
@@ -1069,21 +1149,56 @@ impl EscalationCap {
 
 impl riddle_sift::EscalationBudget for EscalationCap {
     fn allows(&self, dig: &DigId) -> bool {
-        let mut ledger = self.ledger.lock();
-        let l = ledger
-            .entry(dig.clone())
-            .or_insert_with(|| self.read_ledger(dig));
-        l.spent_before + l.spent_in_pass < l.limit
+        self.tally.allows(dig, || self.read_ledger(dig))
     }
 
     /// The same figure the refiner's usage row carries, so the tally stays
     /// level with what the ledger would sum.
     fn spent(&self, dig: &DigId, usd: f64) {
-        let mut ledger = self.ledger.lock();
-        let l = ledger
-            .entry(dig.clone())
-            .or_insert_with(|| self.read_ledger(dig));
-        l.spent_in_pass += usd;
+        self.tally.spent(dig, usd, || self.read_ledger(dig))
+    }
+}
+
+#[cfg(test)]
+mod escalation_cap_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn the_escalation_tally_holds_under_concurrent_spending_and_closes_once_the_cap_is_reached() {
+        // Eight decisions escalating at once, a quarter each against a cap
+        // of two: in series eight get through. Together, no booking is
+        // lost (the tally is exactly what was spent), at most the
+        // concurrency's worth pass the check before the first books, and
+        // once the cap is reached nothing more is allowed.
+        let tally = PassTally::default();
+        let dig = DigId::from("dig-cap");
+        let read = || PassLedger {
+            limit: 2.0,
+            spent_before: 0.0,
+            spent_in_pass: 0.0,
+        };
+        let escalations = AtomicUsize::new(0);
+        let threads = 8;
+        std::thread::scope(|s| {
+            for _ in 0..threads {
+                s.spawn(|| {
+                    for _ in 0..10 {
+                        if tally.allows(&dig, read) {
+                            tally.spent(&dig, 0.25, read);
+                            escalations.fetch_add(1, Ordering::SeqCst);
+                        }
+                    }
+                });
+            }
+        });
+        let n = escalations.load(Ordering::SeqCst);
+        assert!(n >= 8, "the cap's worth got through: {n}");
+        assert!(n < 8 + threads, "overshoot beyond the concurrency: {n}");
+        assert_eq!(tally.spent_in_pass(&dig), 0.25 * n as f64);
+        assert!(!tally.allows(&dig, read), "the cap is reached");
+        // Another account's tally is its own.
+        assert!(tally.allows(&DigId::from("dig-other"), read));
     }
 }
 

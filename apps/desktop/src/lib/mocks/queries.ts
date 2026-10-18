@@ -12,6 +12,9 @@ import type { DecisionTrace } from '@/bindings/DecisionTrace'
 import type { ClauseCheck } from '@/bindings/ClauseCheck'
 import type { CmpOp } from '@/bindings/CmpOp'
 import type { Explanation } from '@/bindings/Explanation'
+import type { Classification } from '@/bindings/Classification'
+import type { DecisionPreview } from '@/bindings/DecisionPreview'
+import { outcomeLine } from '@/lib/traces'
 import type { Expr } from '@/bindings/Expr'
 import type { RouteCheck } from '@/bindings/RouteCheck'
 import type { Find } from '@/bindings/Find'
@@ -23,6 +26,7 @@ import type { SenderSuggestion } from '@/bindings/SenderSuggestion'
 import type { MeshOrder } from '@/bindings/MeshOrder'
 import type { Pack } from '@/bindings/Pack'
 import type { PackInfo } from '@/bindings/PackInfo'
+import type { PackOffer } from '@/bindings/PackOffer'
 import type { RuleCheckRow } from '@/bindings/RuleCheckRow'
 import type { RuleSample } from '@/bindings/RuleSample'
 import type { Message } from '@/bindings/Message'
@@ -228,7 +232,77 @@ export function explain(state: MockState, digId: string, messageId: string): Exp
     routes: mockRouteChecks(state, m, t),
     importance: state.importance.get(m.id) ?? importanceOf(c.disposition),
     importanceSetByYou: state.importance.has(m.id),
+    earlierMeshes: earlierMeshLines(t),
   }
+}
+
+/** The other Meshes that ran, one line each, as the backend's `DecisionTrace::earlier_meshes` reads them. */
+function earlierMeshLines(t: DecisionTrace): string[] {
+  return t.meshOutcomes
+    .filter((o) => o.outcome.kind !== 'not_reached' && !(o.meshId === t.meshId && o.version === t.meshVersion))
+    .map(outcomeLine)
+}
+
+function classificationOf(state: MockState, m: Message, t: DecisionTrace): Classification {
+  const c = state.classifications.get(m.id)
+  const spec = state.specs.get(m.id)
+  return {
+    id: `cls_${m.id}`,
+    messageId: m.id,
+    digId: m.digId,
+    disposition: c?.disposition ?? { kind: 'unresolved' },
+    strata: c?.strata ?? [],
+    notify: false,
+    mechanism: t.mechanism,
+    meshId: t.meshId,
+    meshVersion: t.meshVersion,
+    matchedRule: t.matchedRule,
+    confidence: t.confidence,
+    reason: spec?.reason ?? t.matchedRule ?? '',
+    traceId: t.id,
+    shadow: !!c?.shadow,
+    createdAt: t.createdAt,
+    supersededAt: null,
+    importance: state.importance.get(m.id) ?? importanceOf(c?.disposition ?? null),
+  }
+}
+
+function dispositionWords(d: Disposition): string {
+  switch (d.kind) {
+    case 'find':
+      return `Find: ${d.find_type.charAt(0).toUpperCase()}${d.find_type.slice(1).replace('_', ' ')}`
+    case 'filed':
+      return 'Filed'
+    case 'spoil':
+      return 'Spoil'
+    case 'contamination':
+      return 'Contamination'
+    case 'unresolved':
+      return 'Unresolved'
+  }
+}
+
+/**
+ * The mock's stand-in for `decide_preview`: the stored decision again, by
+ * the deciding Mesh's newest version when one exists, so the Inspector has
+ * a diff to show; nothing in the state changes.
+ */
+export function decidePreview(state: MockState, digId: string, messageId: string): DecisionPreview {
+  const m = getMessage(state, digId, messageId)
+  const t = state.traces.get(`tr_${m.id}`)
+  if (!t) throw err('not_found', 'this message has not been sifted yet; there is nothing to preview')
+  const stored = classificationOf(state, m, t)
+  const newer = t.meshId ? state.meshes.filter((x) => x.id === t.meshId && x.version > (t.meshVersion ?? 0)).sort((a, b) => b.version - a.version)[0] : undefined
+  const would: Classification = { ...stored, id: `cls_preview_${m.id}`, meshVersion: newer?.version ?? stored.meshVersion, traceId: `tr_preview_${m.id}` }
+  const wouldTrace: DecisionTrace = { ...t, id: would.traceId, passId: `preview-${m.id}`, meshVersion: would.meshVersion }
+  const who = (k: Classification, tr: DecisionTrace) => (tr.meshName ? `${tr.meshName} v${k.meshVersion}` : k.mechanism === 'gate' ? 'a gate' : 'deterministic facts')
+  const label = dispositionWords(stored.disposition)
+  const changed = !!newer
+  const diff = changed ? `still ${label}, but by ${who(would, wouldTrace)} instead of ${who(stored, t)}` : `the same: ${label} by ${who(stored, t)}`
+  const cached = t.signals.filter((s) => s.cached).length
+  const fresh = t.signals.length - cached
+  const note = !t.signals.length ? 'no Signals evaluated' : fresh ? `${cached} matched on cached Signals, ${fresh} needed a fresh evaluation` : `${cached} matched on cached Signals`
+  return { messageId: m.id, digId, stored, storedTrace: t, would, wouldTrace, changed, diff, note }
 }
 
 const OP: Record<CmpOp, string> = { gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '=', neq: '!=', contains: 'CONTAINS' }
@@ -329,7 +403,13 @@ export function summary(state: MockState, digId: string | null = null): Summary 
     lastSyncedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
     projectionPending: u64(base(41)),
     degraded,
+    packOffers: packOffers(state),
   }
+}
+
+/** The pack offers still open: matched by the mail, neither installed nor declined. */
+export function packOffers(state: MockState): PackOffer[] {
+  return state.packOffers.filter((o) => !state.installedPacks.some((p) => p.id === o.packId) && !state.dismissedPackOffers.includes(o.packId))
 }
 
 export function taskCentre(state: MockState): TaskCentre {

@@ -53,5 +53,9 @@ pub fn explain(dig_store: &Store, message_id: &MessageId) -> Result<Explanation>
             .filter(|c| !c.is_empty()),
         importance: repo::importance::get(dig_store, message_id)?
             .unwrap_or(classification.importance),
+        earlier_meshes: trace
+            .as_ref()
+            .map(|t| t.earlier_meshes())
+            .unwrap_or_default(),
     })
 }

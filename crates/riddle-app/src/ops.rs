@@ -23,6 +23,11 @@ use riddle_store::repo;
 use riddle_sync::engine::CancelFlag;
 use std::sync::Arc;
 
+/// The Degraded reason while no judge key is configured: what Riddle does
+/// meanwhile, not what it lacks. "Judge unavailable" read as an outage on
+/// an install that had never been given a key (17 Oct 2026).
+pub const NO_JUDGE_KEY: &str = "Sorting by rules until you add a judge key; nothing hidden";
+
 pub struct Ops {
     pub settings: Arc<SettingsStore>,
     pub queue: Arc<JobQueue>,
@@ -192,6 +197,14 @@ impl AppDigStatus {
         // the retry time in the user's zone; the Task Centre shows it.
         if unclassified > 0 {
             match self.0.services.judge() {
+                // No key where the settings look is a setup to finish, said
+                // as what Riddle does meanwhile; a lookup that failed is a
+                // failure.
+                None if self.0.judge_not_set_up() => {
+                    return Ok(DigStatus::Degraded {
+                        reason: NO_JUDGE_KEY.into(),
+                    });
+                }
                 None => {
                     return Ok(DigStatus::Degraded {
                         reason: "judge unavailable; nothing hidden".into(),
@@ -337,6 +350,14 @@ impl JobHandler for PassHandler {
                                 // follows at Backfill priority (§53); a wake's
                                 // catch-up re-arms one that failed.
                                 self.app.enqueue_history_backfill(&dig);
+                            }
+                            if report.kind == riddle_sync::SyncKind::Initial
+                                && self.app.install_packs_on_first_sync()
+                            {
+                                // The first listing is in: the rules every
+                                // mailbox starts with go on now, so the Sift
+                                // behind this has rules to decide with.
+                                self.app.install_packs_after_first_listing(&dig);
                             }
                         }
                         Err(e)
@@ -696,7 +717,7 @@ impl App {
         let no_client = self
             .services
             .get::<riddle_settings::SettingsStore>()
-            .is_some_and(|s| s.settings().gmail.client_id.trim().is_empty());
+            .is_some_and(|s| !s.settings().gmail.client_configured());
         if gmail && no_client {
             SyncFailure::NotSetUp
         } else {
@@ -816,6 +837,19 @@ impl App {
         self.services.judge().map(|j| j.health())
     }
 
+    /// No judge because none is set up: the settings read the key from the
+    /// keychain and there is none there (production's default until a key
+    /// is pasted), or the provider is `null`. Distinct from a judge that
+    /// could not be built from SSM or the environment, which is a failure
+    /// to show as one (`probe_judge`, `status_of`).
+    pub fn judge_not_set_up(&self) -> bool {
+        self.services.judge().is_none()
+            && self
+                .services
+                .get::<SettingsStore>()
+                .is_some_and(|s| s.settings().judge.not_set_up())
+    }
+
     /// The LLM client's breaker and last calls; `None` with no LLM (the
     /// `null` provider installs a client that refuses, not a dependency to
     /// watch, so the settings say whether there is one).
@@ -863,6 +897,7 @@ impl App {
                 s.judge.provider = JudgeProvider::Scripted;
                 s.llm.provider = LlmProvider::Null;
                 s.gmail.client_id = String::new();
+                s.gmail.use_builtin_client = false;
                 s
             })
         });

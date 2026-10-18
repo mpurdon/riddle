@@ -37,6 +37,7 @@ impl AppState {
             build: build.clone(),
             keychain_service: profile.keychain_service(),
             offline: false,
+            log_dir: Some(dirs.logs.clone()),
         })?;
         Ok(Self {
             app,

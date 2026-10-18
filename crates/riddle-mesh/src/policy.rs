@@ -33,6 +33,18 @@ impl Default for ConfidencePolicy {
 }
 
 impl ConfidencePolicy {
+    /// The policy as a trace stores it, so a decision read after the
+    /// thresholds changed still says what it was held to.
+    pub fn thresholds(&self) -> riddle_core::PolicyThresholds {
+        riddle_core::PolicyThresholds {
+            margin_find: self.margin_find,
+            margin_spoil: self.margin_spoil,
+            margin_filed: self.margin_filed,
+            margin_contamination: self.margin_contamination,
+            escalate_non_english: self.escalate_non_english,
+        }
+    }
+
     pub fn required_margin(&self, kind: DispositionKind) -> f64 {
         match kind {
             DispositionKind::Spoil => self.margin_spoil,

@@ -19,6 +19,7 @@ import type { ActionOutcome } from '@/bindings/ActionOutcome'
 import type { Activity } from '@/bindings/Activity'
 import type { Conversation } from '@/bindings/Conversation'
 import type { DecisionTrace } from '@/bindings/DecisionTrace'
+import type { DecisionPreview } from '@/bindings/DecisionPreview'
 import type { Dig } from '@/bindings/Dig'
 import type { DigGroup } from '@/bindings/DigGroup'
 import type { Draft } from '@/bindings/Draft'
@@ -39,6 +40,7 @@ import type { SimulationReport } from '@/bindings/SimulationReport'
 import type { MeshOrder } from '@/bindings/MeshOrder'
 import type { NamedListDef } from '@/bindings/NamedListDef'
 import type { PackInfo } from '@/bindings/PackInfo'
+import type { PackOffer } from '@/bindings/PackOffer'
 import type { RuleCheckRow } from '@/bindings/RuleCheckRow'
 import type { RuleSample } from '@/bindings/RuleSample'
 import type { Stratum } from '@/bindings/Stratum'
@@ -116,6 +118,8 @@ export const listMessages = (args: { digId?: string | null; filter: MessageFilte
 export const getMessage = (digId: string, messageId: string) => call<Message>('get_message', { digId, messageId })
 export const getThread = (digId: string, threadId: string) => call<Thread>('get_thread', { digId, threadId })
 export const explain = (digId: string, messageId: string) => call<Explanation>('explain', { digId, messageId })
+/** Today's rules run over the message without saving: the would-be decision beside the stored one, and a one-sentence diff. */
+export const decidePreview = (digId: string, messageId: string) => call<DecisionPreview>('decide_preview', { digId, messageId })
 /** The Priority inbox: what `settings.priorityInbox` chooses, OR-combined; the backend reads the settings itself. */
 export const priorityInbox = (args: { digId?: string | null; page: PageRequest }) => call<Page<MessageSummary>>('priority_inbox', { digId: args.digId ?? null, page: args.page })
 export const search = (args: { query: string; digId?: string | null; page: PageRequest; shadowOnly?: boolean }) =>
@@ -157,6 +161,8 @@ export const ruleCheck = () => call<RuleCheckRow[]>('rule_check')
 export const ruleSamples = (meshId: string, limit = 10) => call<RuleSample[]>('rule_samples', { meshId, limit })
 /** Every rule pack Riddle knows, with what it would do here. */
 export const listPacks = () => call<PackInfo[]>('list_packs')
+/** Packs the mail on hand matches, not installed and not declined: the Summary's offers. */
+export const packOffers = (digId?: string | null) => call<PackOffer[]>('pack_offers', { digId: digId ?? null })
 /** The user's named lists (`sender IN list:banks`). */
 export const listNamedLists = () => call<NamedListDef[]>('list_named_lists')
 /** Running Meshes in the order they run, with what each decides and what earlier ones take from it. */
@@ -240,6 +246,8 @@ export const qk = {
   meshOrder: (windowDays: number) => ['meshes', 'order', windowDays] as const,
   /** Under `meshes`, so installing a pack or saving a list refreshes Meshes, order and packs together. */
   packs: ['meshes', 'packs'] as const,
+  /** Under `meshes` too: installing or declining a pack refreshes the offers. */
+  packOffers: ['meshes', 'offers'] as const,
   ruleCheck: ['meshes', 'check'] as const,
   ruleSamples: (meshId: string) => ['meshes', 'samples', meshId] as const,
   namedLists: ['meshes', 'lists'] as const,

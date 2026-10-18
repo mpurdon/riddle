@@ -66,6 +66,17 @@ pub trait DirectorReads: Send + Sync {
     async fn simulate_mesh(&self, _scope: &ReadScope, _args: Value) -> Result<Value> {
         Err(RiddleError::invalid("simulate_mesh is not available here"))
     }
+    /// -> the `DecisionPreview` compacted: what today's rules would decide
+    /// for the message beside what stands, and `diff` in one sentence.
+    /// Saves nothing.
+    async fn decide_preview(
+        &self,
+        _scope: &ReadScope,
+        _dig_id: &DigId,
+        _message_id: &MessageId,
+    ) -> Result<Value> {
+        Err(RiddleError::invalid("decide_preview is not available here"))
+    }
     /// `{ meshId? }` -> `{ suggestions, corrections }`.
     async fn mesh_corrections(&self, _scope: &ReadScope, _args: Value) -> Result<Value> {
         Err(RiddleError::invalid(
@@ -189,5 +200,16 @@ impl DirectorReads for ScriptedReads {
     }
     async fn mesh_corrections(&self, _scope: &ReadScope, args: Value) -> Result<Value> {
         self.next("mesh_corrections", args)
+    }
+    async fn decide_preview(
+        &self,
+        _scope: &ReadScope,
+        dig_id: &DigId,
+        message_id: &MessageId,
+    ) -> Result<Value> {
+        self.next(
+            "decide_preview",
+            serde_json::json!({"digId": dig_id, "messageId": message_id}),
+        )
     }
 }

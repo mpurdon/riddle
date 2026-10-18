@@ -1,6 +1,7 @@
 use crate::engine::{
-    CancelFlag, SyncEngine, SyncKind, SyncOptions, SyncPhase, SyncProgress, BACKFILL_DONE,
-    BACKFILL_OLDEST, BODIES_PENDING, INITIAL_LISTED, INITIAL_TOTAL,
+    window_start_or_derived, CancelFlag, SyncEngine, SyncKind, SyncOptions, SyncPhase,
+    SyncProgress, BACKFILL_DONE, BACKFILL_OLDEST, BODIES_PENDING, INITIAL_LISTED, INITIAL_TOTAL,
+    INITIAL_WINDOW_START,
 };
 use riddle_core::*;
 use riddle_mail::{FixtureProvider, FixtureSpec, MailProvider, ProviderRegistry};
@@ -696,6 +697,48 @@ async fn bodies_are_pending_from_a_listing_until_the_fetch_has_nothing_left() {
         .unwrap();
     assert!(!pending());
     assert_eq!(repo::messages::count_without_body(&store).unwrap(), 0);
+}
+
+#[tokio::test]
+async fn a_dig_synced_before_the_window_start_was_recorded_derives_it_from_its_oldest_message() {
+    // Four hundred days of mail: the first sync lists the window, and a
+    // store from before this build has no window start on record.
+    let h = harness_with(200, 400, None, options());
+    let store = h.stores.dig(&h.dig.id).unwrap();
+    assert_eq!(
+        window_start_or_derived(&store).unwrap(),
+        None,
+        "nothing synced"
+    );
+    run_initial(&h).await;
+    let recorded = window_start_or_derived(&store).unwrap().unwrap();
+    repo::sync_state::clear(&store, INITIAL_WINDOW_START).unwrap();
+    let oldest = repo::messages::oldest_date(&store).unwrap().unwrap();
+    assert!(
+        oldest >= recorded,
+        "the window's oldest message is in the window"
+    );
+    let derived = window_start_or_derived(&store).unwrap().unwrap();
+    assert_eq!(derived, oldest);
+    assert_eq!(
+        repo::sync_state::get(&store, INITIAL_WINDOW_START)
+            .unwrap()
+            .as_deref(),
+        Some(oldest.to_rfc3339().as_str()),
+        "recorded for next time"
+    );
+    assert!(h.engine.backfill_pending().unwrap());
+    // The backfill lists before the derived start and fetches the history.
+    let cancel = CancelFlag::new();
+    while !h
+        .engine
+        .backfill_history(&mut no_progress(), &cancel)
+        .await
+        .unwrap()
+        .complete
+    {}
+    assert_eq!(repo::messages::count(&store).unwrap(), h.listed_since(None));
+    assert!(!h.engine.backfill_pending().unwrap());
 }
 
 /// The first sync to completion, however many runs it takes.

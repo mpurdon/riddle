@@ -76,6 +76,25 @@ enum Command {
         dig: String,
         message: String,
     },
+    /// Decide a message again. With --preview nothing is written: today's
+    /// rules run and the would-be decision prints beside what stands.
+    /// Without it the message goes back to Sift (the `decide_again` Action).
+    Decide {
+        #[arg(long)]
+        preview: bool,
+        #[arg(long)]
+        dig: Option<String>,
+        /// A message id, or a link copied from its page
+        /// (`riddle://message/<digId>/<messageId> …`), which carries the Dig.
+        message: String,
+    },
+    /// Print a stored decision trace: by trace id, or by a message id or
+    /// link, which gives its current decision's trace.
+    Trace {
+        #[arg(long)]
+        dig: Option<String>,
+        id: String,
+    },
     /// Sync a Dig now (enqueues refresh through the Action layer).
     Sync {
         #[arg(long)]
@@ -175,6 +194,7 @@ async fn open_app(prod: bool, offline: bool) -> Result<Arc<App>, RiddleError> {
         build,
         keychain_service: profile.keychain_service(),
         offline,
+        log_dir: Some(dirs.logs),
     })
 }
 
@@ -355,6 +375,34 @@ async fn run(cli: Cli, yes: bool) -> Result<(), RiddleError> {
         }
         Command::Explain { dig, message } => {
             serde_json::to_value(app.explain(&DigId::from(dig), &MessageId::from(message))?)?
+        }
+        Command::Decide {
+            preview,
+            dig,
+            message,
+        } => {
+            let (dig_id, message_id) = riddle_cli::message_ref(dig.as_deref(), &message)?;
+            if preview {
+                // A read: the words for a person on stderr, the structures on stdout.
+                let p = app.decide_preview(&dig_id, &message_id).await?;
+                eprintln!("{}", riddle_cli::format_preview(&p));
+                serde_json::to_value(p)?
+            } else {
+                invoke(
+                    &app.runtime,
+                    "decide_again",
+                    &serde_json::json!({ "digId": dig_id, "messageIds": [message_id] }).to_string(),
+                    Some(dig_id.to_string()),
+                    cli.yes || cli.progress,
+                    cli.progress,
+                )
+                .await?
+            }
+        }
+        Command::Trace { dig, id } => {
+            let trace = riddle_cli::find_trace(&app, dig.as_deref(), &id)?;
+            eprintln!("{}", riddle_cli::format_trace(&trace));
+            serde_json::to_value(trace)?
         }
         Command::Sync { dig } => {
             invoke(

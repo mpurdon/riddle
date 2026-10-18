@@ -295,6 +295,178 @@ pub fn recognised_domains(index: &Store) -> Result<Vec<String>> {
         .collect())
 }
 
+/// What a pack's `[detect]` block found in one account's mail: the pack is
+/// `always`, or enough messages in the window came from its sender domains
+/// (or under them) or carry its Gmail categories.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackDetection {
+    pub pack_id: String,
+    pub name: String,
+    /// The offer as the Summary says it, count included.
+    pub reason_in_words: String,
+    pub matched_messages: u64,
+    /// Everyone's pack: installed when the first listing completes, never
+    /// offered.
+    pub always: bool,
+}
+
+const OFFER_DISMISSED: &str = "pack_offer_dismissed:";
+
+/// Which packs the received mail in `dig_store` since `since` says apply,
+/// installed packs left out. Every built-in pack has carried a `[detect]`
+/// block since the packs were written, and nothing read it: a new account
+/// got no rules until its owner found the catalogue (17 Oct 2026). Two
+/// grouped queries and no Mesh parsing, so the Summary can ask on every
+/// read. The count behind a sender-domain pack is the messages from those
+/// domains or under them (`riddle_core::domain_under`); behind a category
+/// pack, the messages carrying any of its `CATEGORY_*` labels.
+pub fn detect(
+    index: &Store,
+    dig_store: &Store,
+    since: &chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<PackDetection>> {
+    let installed: HashSet<String> = installed(index)?.into_iter().map(|p| p.id).collect();
+    let candidates: Vec<Pack> = all_packs(index)?
+        .into_iter()
+        .map(|(p, _)| p)
+        .filter(|p| !installed.contains(&p.id))
+        .collect();
+    if candidates.is_empty() {
+        return Ok(vec![]);
+    }
+    let senders = if candidates
+        .iter()
+        .any(|p| !p.detect.always && !p.detect.sender_domains.is_empty())
+    {
+        repo::messages::sender_counts_since(dig_store, since)?
+    } else {
+        vec![]
+    };
+    let categories = if candidates
+        .iter()
+        .any(|p| !p.detect.always && !p.detect.gmail_categories.is_empty())
+    {
+        repo::messages::category_counts_since(dig_store, since)?
+    } else {
+        vec![]
+    };
+    let mut out = Vec::new();
+    for p in candidates {
+        if p.detect.always {
+            out.push(PackDetection {
+                reason_in_words: format!(
+                    "{} is the set of rules every mailbox starts with.",
+                    p.name
+                ),
+                pack_id: p.id,
+                name: p.name,
+                matched_messages: 0,
+                always: true,
+            });
+            continue;
+        }
+        if p.detect.sender_domains.is_empty() && p.detect.gmail_categories.is_empty() {
+            continue;
+        }
+        let roots: Vec<String> = p
+            .detect
+            .sender_domains
+            .iter()
+            .map(|d| d.to_ascii_lowercase())
+            .collect();
+        let wanted: Vec<String> = p
+            .detect
+            .gmail_categories
+            .iter()
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        let from_domains: u64 = senders
+            .iter()
+            .filter(|(sender, _)| {
+                let domain = riddle_core::email_domain(sender);
+                roots.iter().any(|r| riddle_core::domain_under(&domain, r))
+            })
+            .map(|(_, n)| n)
+            .sum();
+        let in_categories: u64 = categories
+            .iter()
+            .filter(|(c, _)| wanted.contains(c))
+            .map(|(_, n)| n)
+            .sum();
+        let matched = from_domains + in_categories;
+        if matched < u64::from(p.detect.min_messages.max(1)) {
+            continue;
+        }
+        let count = riddle_core::plural(matched as usize, "message");
+        let reason_in_words = if !roots.is_empty() {
+            format!(
+                "Riddle recognised {} mail ({count}). Turn its rules on?",
+                p.name
+            )
+        } else {
+            let under = wanted
+                .iter()
+                .map(|c| title_case(c))
+                .collect::<Vec<_>>()
+                .join(" and ");
+            format!(
+                "Riddle found {count} Gmail files under {under}. Turn the {} rules on?",
+                p.name
+            )
+        };
+        out.push(PackDetection {
+            pack_id: p.id,
+            name: p.name,
+            reason_in_words,
+            matched_messages: matched,
+            always: false,
+        });
+    }
+    Ok(out)
+}
+
+/// `promotions` → `Promotions`, for a Gmail category in a sentence.
+fn title_case(word: &str) -> String {
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// The detections worth offering: not `always` (those are installed at the
+/// first listing) and not declined with "Not now".
+pub fn offers(
+    index: &Store,
+    dig_store: &Store,
+    since: &chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<PackDetection>> {
+    let dismissed = dismissed_offers(index)?;
+    Ok(detect(index, dig_store, since)?
+        .into_iter()
+        .filter(|d| !d.always && !dismissed.contains(&d.pack_id))
+        .collect())
+}
+
+/// Decline a pack's offer: it is not offered again until the record goes.
+pub fn dismiss_offer(index: &Store, pack_id: &str) -> Result<()> {
+    repo::kv::set(index, &format!("{OFFER_DISMISSED}{pack_id}"), "1")
+}
+
+/// Take a decline back (the Action's undo).
+pub fn restore_offer(index: &Store, pack_id: &str) -> Result<()> {
+    repo::kv::delete(index, &format!("{OFFER_DISMISSED}{pack_id}"))
+}
+
+/// The packs whose offers were declined.
+pub fn dismissed_offers(index: &Store) -> Result<HashSet<String>> {
+    Ok(repo::kv::list_prefix(index, OFFER_DISMISSED)?
+        .into_iter()
+        .filter_map(|(k, _)| k.strip_prefix(OFFER_DISMISSED).map(str::to_string))
+        .collect())
+}
+
 pub fn find_pack(index: &Store, id: &str) -> Result<(Pack, bool)> {
     all_packs(index)?
         .into_iter()
@@ -925,6 +1097,165 @@ mod tests {
 
     /// The built-in packs' Meshes as they would run once installed: each at
     /// its band start plus its rank, Active.
+    /// A received message from `sender` with these provider labels, dated
+    /// now, in the Dig store.
+    fn received(store: &Store, id: &str, sender: &str, labels: &[&str]) {
+        let mut m = riddle_mail::fixture::blank_message("d", id);
+        m.from = riddle_core::Address::new(sender, None);
+        m.labels = labels.iter().map(|l| l.to_string()).collect();
+        repo::messages::upsert(store, &m).unwrap();
+    }
+
+    fn since() -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc::now() - chrono::Duration::days(90)
+    }
+
+    #[test]
+    fn detection_matches_sender_domains_at_the_threshold_and_always_packs_and_skips_installed_ones()
+    {
+        let index = index();
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        // Nine GitHub messages, under the pack's ten; one from a subdomain
+        // of canada.ca, at the government pack's one.
+        for i in 0..9 {
+            received(
+                &store,
+                &format!("gh{i}"),
+                "notifications@github.com",
+                &["INBOX"],
+            );
+        }
+        received(&store, "cra", "noreply@cra-arc.gc.ca", &["INBOX"]);
+        // Mail the person sent is not mail from the domain.
+        let mut sent = riddle_mail::fixture::blank_message("d", "sent");
+        sent.from = riddle_core::Address::new("me@github.com", None);
+        sent.is_sent = true;
+        repo::messages::upsert(&store, &sent).unwrap();
+        let ids = |d: &[PackDetection]| d.iter().map(|x| x.pack_id.clone()).collect::<Vec<_>>();
+        let found = detect(&index, &store, &since()).unwrap();
+        assert!(
+            ids(&found).contains(&"government-canada".to_string()),
+            "{found:?}"
+        );
+        assert!(
+            !ids(&found).contains(&"developer-github".to_string()),
+            "nine is under ten"
+        );
+        let always: Vec<&PackDetection> = found.iter().filter(|d| d.always).collect();
+        assert_eq!(
+            ids(&always.iter().map(|d| (*d).clone()).collect::<Vec<_>>()),
+            vec!["core", "accounts"],
+            "the always packs come whatever the mail, in catalogue order"
+        );
+        // The tenth GitHub message reaches the threshold, from a subdomain.
+        received(&store, "gh9", "noreply@mail.github.com", &["INBOX"]);
+        let found = detect(&index, &store, &since()).unwrap();
+        let github = found
+            .iter()
+            .find(|d| d.pack_id == "developer-github")
+            .expect("GitHub detected");
+        assert_eq!(github.matched_messages, 10);
+        assert_eq!(
+            github.reason_in_words,
+            "Riddle recognised GitHub mail (10 messages). Turn its rules on?"
+        );
+        assert!(!github.always);
+        // Installed packs are not detected again.
+        let (pack, _) = find_pack(&index, "developer-github").unwrap();
+        install(
+            &index,
+            &pack,
+            &BTreeMap::new(),
+            MeshStatus::Active,
+            true,
+            CreatedBy::User,
+        )
+        .unwrap();
+        let found = detect(&index, &store, &since()).unwrap();
+        assert!(!ids(&found).contains(&"developer-github".to_string()));
+    }
+
+    #[test]
+    fn detection_counts_gmail_categories_and_words_the_offer_by_category() {
+        let index = index();
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        for i in 0..20 {
+            received(
+                &store,
+                &format!("promo{i}"),
+                &format!("deals{i}@shop.example"),
+                &["INBOX", "CATEGORY_PROMOTIONS"],
+            );
+        }
+        for i in 0..4 {
+            received(
+                &store,
+                &format!("upd{i}"),
+                "bank@bank.example",
+                &["CATEGORY_UPDATES"],
+            );
+        }
+        let found = detect(&index, &store, &since()).unwrap();
+        let shopping = found
+            .iter()
+            .find(|d| d.pack_id == "shopping")
+            .expect("Shopping detected");
+        assert_eq!(shopping.matched_messages, 20);
+        assert_eq!(shopping.reason_in_words, "Riddle found 20 messages Gmail files under Promotions. Turn the Shopping and promotions rules on?");
+        assert!(
+            !found.iter().any(|d| d.pack_id == "money"),
+            "four updates is under Money's five"
+        );
+    }
+
+    #[test]
+    fn an_offer_disappears_when_the_pack_is_installed_or_declined_and_undo_brings_it_back() {
+        let index = index();
+        let store = Store::in_memory(StoreKind::Dig).unwrap();
+        for i in 0..10 {
+            received(
+                &store,
+                &format!("gh{i}"),
+                "notifications@github.com",
+                &["INBOX"],
+            );
+        }
+        received(&store, "cra", "noreply@canada.ca", &["INBOX"]);
+        let offered = |index: &Store| {
+            offers(index, &store, &since())
+                .unwrap()
+                .into_iter()
+                .map(|d| d.pack_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            offered(&index),
+            vec!["government-canada", "developer-github"]
+        );
+        assert!(
+            offers(&index, &store, &since())
+                .unwrap()
+                .iter()
+                .all(|d| !d.always),
+            "always packs are never offered"
+        );
+        dismiss_offer(&index, "government-canada").unwrap();
+        assert_eq!(offered(&index), vec!["developer-github"]);
+        let (pack, _) = find_pack(&index, "developer-github").unwrap();
+        install(
+            &index,
+            &pack,
+            &BTreeMap::new(),
+            MeshStatus::Active,
+            true,
+            CreatedBy::User,
+        )
+        .unwrap();
+        assert!(offered(&index).is_empty());
+        restore_offer(&index, "government-canada").unwrap();
+        assert_eq!(offered(&index), vec!["government-canada"]);
+    }
+
     fn running(pack_ids: &[&str]) -> Vec<Mesh> {
         let mut out = Vec::new();
         for p in builtin_packs()

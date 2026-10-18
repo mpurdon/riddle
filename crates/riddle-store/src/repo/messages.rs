@@ -678,6 +678,26 @@ pub fn sender_counts_since(
     })
 }
 
+/// Received messages per Gmail category since a moment, the category
+/// lowercase without its `CATEGORY_` prefix (`promotions`, `updates`), for
+/// pack detection: one query over the label arrays for every category.
+pub fn category_counts_since(
+    store: &Store,
+    since: &chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<(String, u64)>> {
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT lower(substr(j.value, 10)), count(*) FROM messages m, json_each(m.labels_json) j
+             WHERE m.deleted_at IS NULL AND m.is_sent = 0 AND m.date >= ?1 AND upper(j.value) LIKE 'CATEGORY\\_%' ESCAPE '\\'
+             GROUP BY lower(substr(j.value, 10))",
+        )?;
+        let rows = st
+            .query_map([ts(since)], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?
+            .collect();
+        rows
+    })
+}
+
 /// Each sender's newest messages in the window, up to `per_sender`, from
 /// one query: what the invoice count reads, so a sender with years of
 /// promotions and a few invoices among them is not an invoice sender.
@@ -919,6 +939,20 @@ pub fn thread_decisions(
             })?
             .collect();
         rows
+    })
+}
+
+/// When the oldest live message was sent: where a Dig's synced span starts,
+/// for a store synced before the first sync recorded its window start
+/// (§53). One probe of the date index; `None` for an empty Dig.
+pub fn oldest_date(store: &Store) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+    store.read(|c| {
+        c.query_row(
+            "SELECT min(date) FROM messages WHERE deleted_at IS NULL",
+            [],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .map(|t| t.map(from_ts))
     })
 }
 

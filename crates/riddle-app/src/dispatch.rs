@@ -94,6 +94,7 @@ pub const COMMANDS: &[&str] = &[
     "get_message",
     "get_thread",
     "explain",
+    "decide_preview",
     "search",
     "priority_inbox",
     "list_finds",
@@ -144,6 +145,7 @@ pub const COMMANDS: &[&str] = &[
     "mesh_order",
     "list_named_lists",
     "list_packs",
+    "pack_offers",
     "list_suggestions",
     "rule_check",
     "rule_samples",
@@ -190,6 +192,11 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
         "explain" => {
             let (dig, id) = message_args(&args)?;
             serde_json::to_value(app.explain(&dig, &id)?)?
+        }
+        // A read that may call the judge: nothing is written but usage.
+        "decide_preview" => {
+            let (dig, id) = message_args(&args)?;
+            serde_json::to_value(app.decide_preview(&dig, &id).await?)?
         }
         "search" => {
             let filter = repo::messages::MessageFilter {
@@ -421,8 +428,13 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
                     json!({ "ok": false, "latencyMs": 0, "message": format!("{}: {}", e.kind.as_str(), e.message), "health": j.health() })
                 }
             },
+            // No key where the settings look is "not set up", said apart
+            // from a failure: the pane offers the paste field, not Retry.
+            None if app.judge_not_set_up() => {
+                json!({ "ok": false, "notSetUp": true, "latencyMs": 0, "message": "Not set up: paste a judge key to turn the judge on. Sorting by rules until then; nothing hidden", "health": Value::Null })
+            }
             None => {
-                json!({ "ok": false, "latencyMs": 0, "message": "no judge configured", "health": Value::Null })
+                json!({ "ok": false, "notSetUp": false, "latencyMs": 0, "message": "no judge configured", "health": Value::Null })
             }
         },
         "probe_llm" => match app.services.get::<crate::ai::AiServices>() {
@@ -522,13 +534,16 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             Value::Null
         }
         "dev_info" => dev_info(app),
+        // The ring, and when it is short of the lines asked (the app just
+        // started), the end of the current log file before them.
         "read_app_logs" => {
             let min = opt::<String>(&args, "level").and_then(|l| l.parse::<log::Level>().ok());
-            serde_json::to_value(riddle_observability::tail(
+            serde_json::to_value(riddle_observability::tail_with_file(
                 opt::<u32>(&args, "limit").unwrap_or(500) as usize,
                 opt::<String>(&args, "category").as_deref(),
                 min,
                 opt::<String>(&args, "text").as_deref(),
+                current_log_file(app).as_deref(),
             ))?
         }
         "log_categories" => json!(riddle_observability::Category::ALL
@@ -555,6 +570,12 @@ pub async fn call(app: &Arc<App>, command: &str, args: Value) -> Result<Value> {
             serde_json::to_value(app.rule_samples(&mesh_id, limit)?)?
         }
         "list_packs" => serde_json::to_value(riddle_mesh::packs::catalogue(&index)?)?,
+        // Packs the mail on hand matches, not installed and not declined:
+        // the Summary's offers, for one account or all.
+        "pack_offers" => {
+            let only: Vec<DigId> = opt::<DigId>(&args, "digId").into_iter().collect();
+            serde_json::to_value(app.pack_offers(&only)?)?
+        }
         "list_named_lists" => serde_json::to_value(repo::lists::all(&index)?)?,
         "mesh_order" => serde_json::to_value(app.mesh_order(window_days(&args, 30))?)?,
         "simulate_mesh" => {
@@ -624,6 +645,25 @@ fn trace_stats(
     Ok(total)
 }
 
+/// The log file being written now: the newest `.log` in the logs directory
+/// (the desktop's log plugin rotates by renaming, so the current one is the
+/// most recently modified). `None` for an in-memory app or an empty directory.
+fn current_log_file(app: &App) -> Option<std::path::PathBuf> {
+    let dir = app.config.log_dir.as_ref()?;
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "log"))
+        .filter_map(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .map(|t| (t, e.path()))
+        })
+        .max_by_key(|(t, _)| *t)
+        .map(|(_, p)| p)
+}
+
 /// The Developer pane's runtime row: build, directories, store sizes, the
 /// fault flag, and the swallowed-failure table (`riddle_observability`).
 fn dev_info(app: &App) -> Value {
@@ -637,7 +677,8 @@ fn dev_info(app: &App) -> Value {
         "build": app.config.build, "dev": app.config.dev, "os": std::env::consts::OS, "arch": std::env::consts::ARCH,
         "uptimeSeconds": app.started_at.elapsed().as_secs(),
         "dataDir": app.config.data_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-        "logDir": app.config.data_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+        "logDir": app.config.log_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+        "logFile": current_log_file(app).map(|p| p.display().to_string()).unwrap_or_default(),
         "configDir": app.config.config_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
         "cacheDir": "", "stores": stores, "storeFault": app.stores.any_fault(), "logLevel": log::max_level().to_string(),
         "swallowed": riddle_observability::swallowed_failures(),
@@ -696,10 +737,18 @@ fn export_diagnostics(app: &Arc<App>) -> Result<Value> {
         .services
         .get::<riddle_settings::SettingsStore>()
         .map(|s| redacted_settings(&s.settings()));
-    let warnings: Vec<Value> = riddle_observability::tail(50, None, Some(log::Level::Warn), None)
-        .into_iter()
-        .map(|l| json!({ "at": l.at, "level": l.level, "category": l.category, "message": l.message }))
-        .collect();
+    // The same tail the Logs pane reads: the ring, then the file before it,
+    // so an export taken right after a restart still carries the night.
+    let warnings: Vec<Value> = riddle_observability::tail_with_file(
+        50,
+        None,
+        Some(log::Level::Warn),
+        None,
+        current_log_file(app).as_deref(),
+    )
+    .into_iter()
+    .map(|l| json!({ "at": l.at, "level": l.level, "category": l.category, "message": l.message }))
+    .collect();
     Ok(json!({
         "exportedAt": now,
         "redaction": "identifiers only: no subjects, bodies, addresses, names, tokens or keys",

@@ -3,6 +3,7 @@
  * from a DecisionTrace, and the redacted export (§69, §89).
  */
 import type { DecisionTrace } from '@/bindings/DecisionTrace'
+import type { MeshOutcome } from '@/bindings/MeshOutcome'
 import type { SignalEvaluation } from '@/bindings/SignalEvaluation'
 import { num } from './format'
 
@@ -84,5 +85,35 @@ export function redactTrace(t: DecisionTrace): Record<string, unknown> {
     timing: Object.fromEntries(Object.entries(t.timing).map(([k, v]) => [k, num(v)])),
     cost: { ...t.cost, judgeInputTokens: num(t.cost.judgeInputTokens), llmInputTokens: num(t.cost.llmInputTokens), llmOutputTokens: num(t.cost.llmOutputTokens) },
     shadow: t.shadow,
+  }
+}
+
+/** `0.62` as the rule syntax writes it: `.62`. */
+const two = (n: number) => n.toFixed(2).replace(/^0/, '')
+
+/**
+ * One Mesh's outcome in one line, the same words the backend's "Why?"
+ * answer uses for its earlier Meshes: "Bills v3: payment_related .62,
+ * needed .80". A view of the stored structure; the backend's line is the
+ * reference and this one follows it.
+ */
+export function outcomeLine(o: MeshOutcome): string {
+  const key = `${o.name} v${o.version}`
+  const k = o.outcome
+  switch (k.kind) {
+    case 'matched':
+      return `${key}: decided`
+    case 'no_route_matched':
+      return `${key}: no route matched`
+    case 'margin_shortfall':
+      return k.signal && k.score !== null && k.needed_score !== null
+        ? `${key}: ${k.signal.split('@')[0]} ${two(k.score)}, needed ${two(k.needed_score)}`
+        : `${key}: margin ${two(k.margin)}, needed ${two(k.needed)}`
+    case 'unknown':
+      return k.signals.length ? `${key}: ${k.signals.join(', ')} not scored` : `${key}: a Signal was not scored`
+    case 'held_for_find':
+      return `${key}: matched, set aside so an earlier borderline Find is not hidden`
+    case 'not_reached':
+      return `${key}: not reached`
   }
 }

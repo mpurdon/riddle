@@ -57,7 +57,7 @@ export function OpsPane() {
         <Section title="Storage">
           {d ? (
             <div className="flex flex-col gap-1 text-xs">
-              {[['Data', d.dataDir], ['Config', d.configDir], ['Cache', d.cacheDir], ['Logs', d.logDir]].map(([k, v]) => (
+              {[['Data', d.dataDir], ['Config', d.configDir], ['Cache', d.cacheDir], ['Logs', d.logDir], ['Log file', d.logFile ?? '']].map(([k, v]) => (
                 <div key={k} className="flex items-center gap-2">
                   <span className="w-12 text-clay">{k}</span>
                   <span className="min-w-0 flex-1 truncate mono selectable" title={v}>{v}</span>
@@ -225,7 +225,7 @@ function LogTail() {
         <div className="flex items-center gap-1">
           <Select label="Category" size="sm" value={category} onChange={setCategory} options={[{ value: 'all', label: 'all' }, ...(cats.data ?? []).map((c) => ({ value: c, label: c }))]} />
           <Select label="Level" size="sm" value={level} onChange={setLevel} options={LEVELS.map((l) => ({ value: l, label: `≥ ${l}` }))} />
-          <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="filter text" aria-label="Filter log text" className="h-6 w-32 text-xs" />
+          <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="filter text or pass id" aria-label="Filter log text" className="h-6 w-32 text-xs" />
           <Button size="sm" variant="ghost" icon={follow ? <Pause /> : <Play />} onClick={() => setFollow((f) => !f)}>
             {follow ? 'Following' : 'Paused'}
           </Button>
@@ -248,7 +248,7 @@ function LogTail() {
         {!lines.length ? <div className="p-3 text-clay">No log lines match. Logs carry identifiers only; never subjects, bodies, addresses or tokens.</div> : null}
         <div id="log-end" />
       </div>
-      {!isTauri ? <Note className="mt-2">Browser mode: these are mock log lines. In the app they are the backend ring buffer, live.</Note> : null}
+      {!isTauri ? <Note className="mt-2">Browser mode: these are mock log lines. In the app they are the backend ring buffer, live, with the log file's tail before them after a restart. A pass id from a trace or an Activity finds that pass's lines.</Note> : null}
     </Section>
   )
 }

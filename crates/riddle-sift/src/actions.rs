@@ -139,6 +139,11 @@ fn classify_as_user(
         build_stamp: ctx.services.build.git_sha.clone(),
         shadow: false,
         created_at: now,
+        pass_id: String::new(),
+        list_results: vec![],
+        policy: None,
+        margin: None,
+        mesh_outcomes: vec![],
     };
     let strata = prior.as_ref().map(|p| p.strata.clone()).unwrap_or_default();
     let k = Classification {

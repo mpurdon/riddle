@@ -7,6 +7,7 @@ import type { ModelAccess } from '@/bindings/ModelAccess'
 import type { ProviderWrites } from '@/bindings/ProviderWrites'
 import type { Importance } from '@/bindings/Importance'
 import type { InstalledPack } from '@/bindings/InstalledPack'
+import type { PackOffer } from '@/bindings/PackOffer'
 import type { NamedListDef } from '@/bindings/NamedListDef'
 import type { Activity } from '@/bindings/Activity'
 import type { Conversation } from '@/bindings/Conversation'
@@ -26,6 +27,7 @@ import type { Stratum } from '@/bindings/Stratum'
 import type { UserProfile } from '@/bindings/UserProfile'
 import type { ServiceHealth } from '@/bindings/ServiceHealth'
 import type { DevInfo, LogLine, Settings } from '../types'
+import { u64 } from '../format'
 import {
   buildActivity,
   buildConversations,
@@ -62,6 +64,10 @@ export interface MockState {
   /** Spot-check grades, `meshId:messageId` → right | wrong. */
   grades: Record<string, string>
   installedPacks: InstalledPack[]
+  /** What the mail's `[detect]` blocks matched; the Summary offers those not installed and not declined. */
+  packOffers: PackOffer[]
+  /** "Not now" on an offer, by pack id. */
+  dismissedPackOffers: string[]
   digs: Dig[]
   digGroups: DigGroup[]
   profile: UserProfile
@@ -151,6 +157,8 @@ export function buildState(): MockState {
     namedLists: [],
     grades: {},
     installedPacks: [],
+    packOffers: empty ? [] : [{ packId: 'developer-github', name: 'GitHub', reasonInWords: 'Riddle recognised GitHub mail (412 messages). Turn its rules on?', matchedMessages: u64(412) }],
+    dismissedPackOffers: [],
     signals,
     strata: buildStrata(),
     jobs: empty ? [] : buildJobs(),

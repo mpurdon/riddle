@@ -114,6 +114,7 @@ async fn a_restart_resumes_the_first_sync_from_its_token_rather_than_restarting(
         keychain_service: "dev.codenaked.riddle.test".into(),
         // No keychain and no network: credentials stay in memory.
         offline: true,
+        log_dir: None,
     };
     let settings = || {
         let mut s = Settings::dev_defaults();
@@ -247,4 +248,60 @@ async fn refresh_now_runs_a_sync_job_that_lands_an_injected_message_with_its_bod
     .expect("the refresh job lands the message and its body");
     assert_eq!(repo::messages::count(&store).unwrap(), before + 1);
     ops.runner.stop();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_account_synced_before_the_window_start_was_recorded_still_gets_its_backfill() {
+    use riddle_sync::engine::{
+        BACKFILL_DONE, BACKFILL_FLOOR, BACKFILL_LISTED, BACKFILL_OLDEST, BACKFILL_PAGE_TOKEN,
+        BACKFILL_TOTAL, INITIAL_WINDOW_START,
+    };
+    let (app, ops) = common::boot_scripted(false, |_| {}).await;
+    let dig =
+        common::fixture_dig_synced(&app, &ops, "Work", "matt@example.com", 11, 120, json!({}))
+            .await;
+    let store = app.stores.dig(&dig.id).unwrap();
+    // What a store synced before this build holds: the first sync done,
+    // no window start, nothing about a backfill.
+    for key in [
+        INITIAL_WINDOW_START,
+        BACKFILL_DONE,
+        BACKFILL_FLOOR,
+        BACKFILL_LISTED,
+        BACKFILL_TOTAL,
+        BACKFILL_OLDEST,
+        BACKFILL_PAGE_TOKEN,
+    ] {
+        repo::sync_state::clear(&store, key).unwrap();
+    }
+    assert!(app.initial_sync_done(&dig).unwrap());
+    let backfills = |ops: &riddle_app::ops::Ops| -> Vec<Job> {
+        ops.queue
+            .recent(100)
+            .unwrap()
+            .into_iter()
+            .filter(|j| j.kind == JobKind::HistoryBackfill && j.dig_id.as_ref() == Some(&dig.id))
+            .collect()
+    };
+    let before = backfills(&ops).len();
+    let lists = list_calls(&app, &dig);
+    ops.queue
+        .enqueue(JobSpec::new(JobKind::CatchUp, "Catch up Work").dig(dig.id.clone()))
+        .unwrap();
+    assert!(ops.runner.run_until_idle(Duration::from_secs(180)).await);
+    let after = backfills(&ops);
+    assert_eq!(after.len(), before + 1, "the catch-up armed the backfill");
+    assert!(after.iter().all(|j| j.status == JobStatus::Completed));
+    // The window start was derived from the oldest message synced and
+    // recorded, and the backfill listed before it: one empty page here.
+    let oldest = repo::messages::oldest_date(&store).unwrap().unwrap();
+    let recorded = repo::sync_state::get(&store, INITIAL_WINDOW_START)
+        .unwrap()
+        .expect("recorded for next time");
+    assert_eq!(
+        chrono::DateTime::parse_from_rfc3339(&recorded).unwrap(),
+        oldest
+    );
+    assert_eq!(list_calls(&app, &dig), lists + 1);
+    assert!(!app.backfill_pending(&dig).unwrap());
 }

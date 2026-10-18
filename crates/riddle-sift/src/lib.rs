@@ -140,6 +140,16 @@ pub struct SiftInput {
     /// Named Context slices the state builders may include (`user_profile`,
     /// `sender_history`, ...). Retrieved, not stuffed (§44).
     pub context_slices: BTreeMap<String, String>,
+    /// The pass this input belongs to, one id per pass (`new_pass_id`), so
+    /// the decisions of one window can be read together. A pass stamps the
+    /// same id on every input it builds; an input built on its own is a
+    /// pass of one.
+    pub pass_id: String,
+}
+
+/// A fresh pass id: UUIDv7, so passes sort by when they began.
+pub fn new_pass_id() -> String {
+    uuid::Uuid::now_v7().to_string()
 }
 
 impl SiftInput {
@@ -185,6 +195,7 @@ impl SiftInput {
             has_structured_receipt: false,
             dig,
             context_slices,
+            pass_id: new_pass_id(),
         }
     }
 }
@@ -382,21 +393,29 @@ impl Sift {
         self
     }
 
-    /// Run the pipeline without persisting anything.
+    /// Decide: facts, gates, Signal Selection and the judge, routes,
+    /// confidence and escalation, without persisting anything. The outcome
+    /// holds everything `persist` needs, so a pass can decide a window of
+    /// messages concurrently (the time is spent waiting on the judge) and
+    /// persist them in the window's order afterwards (17 Oct 2026). A
+    /// `Sift` is shared by the window's decisions: its snapshots are read
+    /// once and its budget keeps its tally under a lock.
     pub async fn run(&self, input: SiftInput) -> Result<SiftOutcome> {
         pipeline::run(self, input).await
     }
 
-    /// Run and persist: facts, classification, trace, events, projection.
+    /// Decide and persist one message: `run`, then `persist`.
     pub async fn run_and_persist(&self, input: SiftInput) -> Result<SiftOutcome> {
         let mut outcome = self.run(input).await?;
         self.persist(&mut outcome)?;
         Ok(outcome)
     }
 
-    /// Persist an outcome (facts, classification, trace), emit events, hand
-    /// the classification to the projection hook, and return the Find
-    /// proposal for `riddle-finds`. Updates the outcome's persist timing.
+    /// Persist a decided outcome (facts, classification, trace) in one
+    /// write, emit events, hand the classification to the projection hook,
+    /// and return the Find proposal for `riddle-finds`. Updates the
+    /// outcome's persist timing. The order `persist` is called in is the
+    /// order dispositions are recorded in.
     pub fn persist(&self, outcome: &mut SiftOutcome) -> Result<Option<FindProposal>> {
         pipeline::persist(self, outcome)
     }

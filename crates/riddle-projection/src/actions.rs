@@ -86,6 +86,11 @@ fn record_user_classification(
         build_stamp: ctx.services.build.git_sha.clone(),
         shadow: false,
         created_at: now,
+        pass_id: String::new(),
+        list_results: vec![],
+        policy: None,
+        margin: None,
+        mesh_outcomes: vec![],
     };
     let k = Classification {
         id: ClassificationId::new(),

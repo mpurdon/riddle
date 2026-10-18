@@ -13,7 +13,7 @@ import type { PrivacyMode } from '@/bindings/PrivacyMode'
 import type { ProjectionMode } from '@/bindings/ProjectionMode'
 import { cx, plural } from '@/lib/format'
 import { useDevArmed, useDigGroups, useAllDigs } from '@/lib/queries'
-import { digStatusChip } from '@/lib/selectors'
+import { digStatusChip, googleClientLine } from '@/lib/selectors'
 import type { Settings } from '@/lib/types'
 import { useAction } from '@/lib/useAction'
 import { Button } from '@/components/ui/Button'
@@ -112,7 +112,7 @@ export function AccountsTab({ settings, focus }: { settings: Settings; focus?: s
         </nav>
           <div className="shrink-0 border-t border-line pt-2 pb-1">
           <div className="px-2 pb-1 text-2xs font-medium uppercase tracking-wide text-clay">Setup</div>
-          <NavItem icon={<KeyRound className="size-4" />} title="Google sign-in" detail={settings.gmail.clientId ? 'Client set up' : 'Not set up yet'} tone={settings.gmail.clientId ? 'ok' : 'warn'} selected={current.kind === 'google'} onSelect={() => setSel({ kind: 'google' })} />
+          <NavItem icon={<KeyRound className="size-4" />} title="Google sign-in" detail={googleClientLine(settings.gmail).label} tone={googleClientLine(settings.gmail).tone} selected={current.kind === 'google'} onSelect={() => setSel({ kind: 'google' })} />
           <NavItem icon={<SlidersHorizontal className="size-4" />} title="Defaults and groups" detail={`Default: ${autonomyLabel(settings.autonomy.default)} · ${plural(groups.length, 'group')}`} selected={current.kind === 'defaults'} onSelect={() => setSel({ kind: 'defaults' })} />
         </div>
       </aside>
@@ -178,16 +178,50 @@ function NavItem({ icon, title, detail, selected, onSelect, tone }: { icon: Reac
   )
 }
 
+/**
+ * The Google client, in one of three states: the build's own ("Using the
+ * built-in Google client", with Use your own to bring one), a client the
+ * person imported or typed, or none yet with the console steps open. A
+ * build without a baked-in client shows today's steps as before.
+ */
 function GooglePanel({ settings }: { settings: Settings }) {
   const { run } = useAction()
-  const ready = !!settings.gmail.clientId
+  const g = settings.gmail
+  const client = googleClientLine(g)
+  const ready = client.source !== 'none'
+  const setBuiltin = (useBuiltinClient: boolean) => run('save_settings', { settings: { ...settings, gmail: { ...g, useBuiltinClient } } }, { successToast: useBuiltinClient ? 'Using the built-in Google client' : 'Bring your own Google client' })
+  if (client.source === 'builtin') {
+    return (
+      <div>
+        <h2 className="text-base font-semibold">Google sign-in</h2>
+        <div className="mt-3 flex items-start gap-2 rounded-md border border-moss/40 bg-moss/5 p-3">
+          <KeyRound className="mt-0.5 size-4 text-moss" />
+          <div>
+            <div className="font-medium">Using the built-in Google client</div>
+            <p className="mt-1 max-w-2xl text-xs text-ink-2">Every Gmail account signs in through the OAuth client this build of Riddle carries, so there is nothing to create in Google Cloud. Google asks you to approve access in your browser as it would for any app; Riddle asks only to read and label mail.</p>
+            <div className="mt-2 flex items-center gap-2">
+              <Button size="sm" onClick={() => setBuiltin(false)} title="Create your own Desktop app client in Google Cloud and import it; the built-in one is set aside">
+                Use your own
+              </Button>
+              <span className="text-xs text-clay">Your own client keeps sign-in under a project you administer, which a Workspace domain may require.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
   return (
     <div>
       <h2 className="text-base font-semibold">Google sign-in</h2>
       <p className="mt-1 max-w-2xl text-sm text-ink-2">Every Gmail account signs in through one OAuth client you create in Google Cloud (a Desktop app client). Set it up once; Add account uses it for each account.</p>
       <div className="mt-3 flex flex-wrap gap-2">
         <Chip tone={ready ? 'ok' : 'warn'}>{ready ? 'Client id set' : 'No client id'}</Chip>
-        <Chip tone={settings.gmail.clientSecretPresent ? 'ok' : undefined}>{settings.gmail.clientSecretPresent ? 'Secret in keychain' : 'No secret stored'}</Chip>
+        <Chip tone={g.clientSecretPresent ? 'ok' : undefined}>{g.clientSecretPresent ? 'Secret in keychain' : 'No secret stored'}</Chip>
+        {g.builtinClientAvailable && !g.useBuiltinClient && !g.clientId.trim() ? (
+          <Button size="sm" variant="ghost" onClick={() => setBuiltin(true)}>
+            Use the built-in client instead
+          </Button>
+        ) : null}
       </div>
       <GoogleConsoleSteps defaultOpen={!ready} />
       <Block title="Import from Google" hint="The JSON file Google Auth Platform → Clients offers as a download. It fills both fields below.">

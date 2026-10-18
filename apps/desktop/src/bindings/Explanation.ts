@@ -29,4 +29,10 @@ importanceSetByYou: boolean,
 /**
  * The one-time sign-in code the message carries, to copy.
  */
-verificationCode?: string, };
+verificationCode?: string, 
+/**
+ * The other Meshes that ran, one line each in evaluation order
+ * (`DecisionTrace::earlier_meshes`): "Bills v3: payment_related .62,
+ * needed .80". Empty when no Mesh decided or the trace predates it.
+ */
+earlierMeshes: Array<string>, };

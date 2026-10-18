@@ -101,6 +101,8 @@ export interface DevInfo {
   uptimeSeconds: number
   dataDir: string
   logDir: string
+  /** The log file being written now, which the Logs pane tails after a restart. */
+  logFile?: string
   configDir: string
   cacheDir: string
   stores: StoreInfo[]
@@ -123,6 +125,8 @@ export interface ProbeResult {
   message: string
   /** The judge and LLM probes add the client's health after the call. */
   health?: ServiceHealth | null
+  /** The judge probe: no key where the settings look, a setup to finish rather than a failure. */
+  notSetUp?: boolean
 }
 
 /** The redacted diagnostics bundle (`export_diagnostics`): one JSON document for an issue. */

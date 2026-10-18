@@ -883,3 +883,140 @@ async fn the_lists_and_the_registry_are_read_once_per_pass_and_an_edit_waits_for
         2
     );
 }
+
+/// §60, 17 Oct 2026: the trace stores what decided. The walk used to replay
+/// the pinned Mesh against today's lists; now each list clause's result, the
+/// policy in force, the winning margin and every Mesh's outcome are on the
+/// trace, from the decision itself.
+#[tokio::test]
+async fn the_trace_carries_the_list_results_thresholds_margin_and_every_meshs_outcome() {
+    let (sift, stores, _) = harness(Some(Arc::new(ScriptedJudge::new())));
+    let index = stores.index();
+    repo::lists::put(
+        &index,
+        &NamedListDef {
+            name: "shops".into(),
+            description: String::new(),
+            entries: vec!["shop.example".into()],
+            pack: None,
+            kinds: vec![],
+        },
+    )
+    .unwrap();
+    let mut shops = riddle_mesh::parse::parse(
+        "Mesh: Shops\nScope:\nAll Digs\nPriority: 5\n\nROUTES\n\nIF sender_domain IN list:shops → Spoil",
+    )
+    .unwrap();
+    shops.status = MeshStatus::Active;
+    repo::meshes::upsert(&index, &shops).unwrap();
+    let mut outcome = sift
+        .run(input(
+            message(
+                "shop1",
+                "deals@shop.example",
+                "This week's deals",
+                "Everything is 20% off until Sunday.",
+            ),
+            PeopleFacts::default(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome.classification.disposition,
+        Disposition::Spoil,
+        "{}",
+        outcome.classification.reason
+    );
+    let t = outcome.trace.clone();
+    // The list clause the route read, and the guards' lists after it.
+    let shops_clause = t
+        .list_results
+        .iter()
+        .find(|l| l.list == "list:shops")
+        .expect("the route's list clause is recorded");
+    assert_eq!(shops_clause.value, "deals@shop.example");
+    assert!(shops_clause.matched);
+    assert!(
+        t.list_results
+            .iter()
+            .any(|l| l.list == "never_hidden" && !l.matched),
+        "{:?}",
+        t.list_results
+    );
+    // The policy in force, and no margin for a fact-only route.
+    let policy = t.policy.as_ref().expect("the policy is recorded");
+    assert_eq!(policy.margin_spoil, 0.15);
+    assert_eq!(policy.margin_find, 0.05);
+    assert_eq!(t.margin, None);
+    // Every Mesh in evaluation order: the guards-only Mesh first (no route
+    // matched), Shops decided, the rest never reached.
+    let keys: Vec<String> = t.mesh_outcomes.iter().map(|o| o.key()).collect();
+    assert_eq!(keys[0], "System guards v1", "{keys:?}");
+    assert!(matches!(
+        t.mesh_outcomes[0].outcome,
+        MeshOutcomeKind::NoRouteMatched
+    ));
+    let shops_outcome = t.mesh_outcomes.iter().find(|o| o.name == "Shops").unwrap();
+    assert!(matches!(
+        &shops_outcome.outcome,
+        MeshOutcomeKind::Matched { route } if route.contains("list:shops")
+    ));
+    // Every Mesh before Shops in the order was checked; every one after it
+    // was never reached.
+    let at = t
+        .mesh_outcomes
+        .iter()
+        .position(|o| o.name == "Shops")
+        .unwrap();
+    assert!(t.mesh_outcomes[..at]
+        .iter()
+        .all(|o| !matches!(o.outcome, MeshOutcomeKind::NotReached)));
+    assert!(t.mesh_outcomes[at + 1..]
+        .iter()
+        .all(|o| matches!(o.outcome, MeshOutcomeKind::NotReached)));
+    // The "Why?" answer lists the other Meshes that ran, one line each: the
+    // ones before Shops, and not Shops itself.
+    let earlier = t.earlier_meshes();
+    assert_eq!(earlier.len(), at, "{earlier:?}");
+    assert!(earlier.contains(&"System guards v1: no route matched".to_string()));
+    assert!(earlier.iter().all(|l| !l.starts_with("Shops v1")));
+    sift.persist(&mut outcome).unwrap();
+    let store = stores.dig(&DigId("d1".into())).unwrap();
+    let why = explain(&store, &outcome.classification.message_id).unwrap();
+    assert_eq!(why.earlier_meshes, earlier);
+}
+
+/// The pass id names a decision's pass on the trace, on every stage event
+/// and in the log payload, so one pass's decisions can be read together.
+#[tokio::test]
+async fn the_pass_id_is_on_the_trace_the_stage_events_and_the_log_payload() {
+    let (sift, _, events) = harness(Some(Arc::new(ScriptedJudge::new())));
+    let mut i = input(github_comment(), PeopleFacts::default());
+    i.pass_id = "pass-test-7f".into();
+    let outcome = sift.run(i).await.unwrap();
+    assert_eq!(outcome.trace.pass_id, "pass-test-7f");
+    let stages: Vec<(String, String)> = events
+        .take()
+        .into_iter()
+        .filter_map(|e| match e {
+            RiddleEvent::PipelineStage { pass_id, stage, .. } => Some((pass_id, stage)),
+            _ => None,
+        })
+        .collect();
+    assert!(!stages.is_empty());
+    assert!(
+        stages.iter().all(|(p, _)| p == "pass-test-7f"),
+        "{stages:?}"
+    );
+    let lines = riddle_observability::tail(500, Some("sift"), None, Some("pass-test-7f"));
+    let line = lines
+        .iter()
+        .find(|l| {
+            l.message
+                .starts_with(&format!("message {} →", outcome.classification.message_id))
+        })
+        .expect("the per-message line is found by its pass id");
+    let payload = line.payload.as_ref().unwrap();
+    assert_eq!(payload["passId"], "pass-test-7f");
+    assert_eq!(payload["traceId"], outcome.trace.id.as_str());
+}

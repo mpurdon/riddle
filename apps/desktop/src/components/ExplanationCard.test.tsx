@@ -34,6 +34,7 @@ const meshDecision: Explanation = {
   routes: [{ when: null, clauses: [{ text: 'marketing@v1 > .70', actual: '0.91', result: 'pass', signal: 'marketing@v1' }], output: 'Spoil', outcome: 'matched' }],
   importance: 'normal',
   importanceSetByYou: false,
+  earlierMeshes: [],
 }
 
 function mount(ex: Explanation) {
@@ -66,6 +67,19 @@ describe('the Why? card', () => {
     expect(outer.querySelector('summary')?.textContent).toBe('How it was decided')
     expect(outer.open).toBe(false)
     expect(reason.compareDocumentPosition(grammar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('lists the other Meshes that ran, one line each, under the disclosure', () => {
+    const lines = ['Bills v3: payment_related .62, needed .80', 'System guards v1: no route matched']
+    mount({ ...meshDecision, earlierMeshes: lines })
+    const list = screen.getByTestId('earlier-meshes')
+    expect(list.textContent).toContain('Other Meshes that ran')
+    const items = Array.from(list.querySelectorAll('li')).map((li) => li.textContent)
+    expect(items).toEqual(lines)
+    // Folded with the rest of the grammar, after the words.
+    const fold = list.closest('details') as HTMLDetailsElement
+    expect(fold.querySelector('summary')?.textContent).toBe('How it was decided')
+    expect(fold.open).toBe(false)
   })
 
   it('still shows the words for an LLM decision', () => {

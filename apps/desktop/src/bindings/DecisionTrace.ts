@@ -4,8 +4,11 @@ import type { DigId } from "./DigId";
 import type { Disposition } from "./Disposition";
 import type { EscalationRecord } from "./EscalationRecord";
 import type { Facts } from "./Facts";
+import type { ListClauseResult } from "./ListClauseResult";
 import type { MeshId } from "./MeshId";
+import type { MeshOutcome } from "./MeshOutcome";
 import type { MessageId } from "./MessageId";
+import type { PolicyThresholds } from "./PolicyThresholds";
 import type { SignalEvaluation } from "./SignalEvaluation";
 import type { TraceCost } from "./TraceCost";
 import type { TraceId } from "./TraceId";
@@ -14,4 +17,18 @@ import type { TraceTiming } from "./TraceTiming";
 /**
  * The structured reasoning artifact behind one classification (§60).
  */
-export type DecisionTrace = { id: TraceId, messageId: MessageId, digId: DigId, objective: string, strategy: string, facts: Facts, gate: string | null, signals: Array<SignalEvaluation>, meshId: MeshId | null, meshVersion: number | null, meshName: string | null, matchedRule: string | null, guardVetoes: Array<string>, escalation: EscalationRecord | null, conclusion: Disposition, confidence: number | null, mechanism: DecisionMechanism, timing: TraceTiming, cost: TraceCost, judgeIdentity: string | null, appVersion: string, buildStamp: string, shadow: boolean, createdAt: string, };
+export type DecisionTrace = { id: TraceId, messageId: MessageId, digId: DigId, objective: string, strategy: string, facts: Facts, gate: string | null, signals: Array<SignalEvaluation>, meshId: MeshId | null, meshVersion: number | null, meshName: string | null, matchedRule: string | null, guardVetoes: Array<string>, escalation: EscalationRecord | null, conclusion: Disposition, confidence: number | null, mechanism: DecisionMechanism, timing: TraceTiming, cost: TraceCost, judgeIdentity: string | null, appVersion: string, buildStamp: string, shadow: boolean, createdAt: string, 
+/**
+ * The Sift pass that made the decision (`SiftInput::pass_id`), the
+ * same id the pass's log lines and Activity carry; empty for a
+ * decision made outside a pass (an older trace, a preview).
+ */
+passId: string, 
+/**
+ * What decided, as of the decision (17 Oct 2026): each list clause the
+ * routes read, the confidence policy in force, the winning route's
+ * weakest Signal margin, and every Mesh's outcome in evaluation
+ * order. Empty on a trace stored before these were kept, and on a
+ * decision no Mesh took part in (a gate, a draft, sent mail).
+ */
+listResults: Array<ListClauseResult>, policy?: PolicyThresholds | null, margin?: number | null, meshOutcomes: Array<MeshOutcome>, };

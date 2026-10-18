@@ -158,6 +158,19 @@ impl App {
             last_synced_at: last_synced,
             projection_pending,
             degraded,
+            // Offers are a card, not the summary: a detection that cannot
+            // be read leaves the card empty and the morning intact.
+            pack_offers: match self.pack_offers(dig_id.map(std::slice::from_ref).unwrap_or(&[])) {
+                Ok(offers) => offers,
+                Err(e) => {
+                    riddle_observability::swallowed!(
+                        riddle_observability::Category::App,
+                        "pack_offers",
+                        e
+                    );
+                    vec![]
+                }
+            },
         })
     }
 
@@ -415,11 +428,16 @@ impl App {
                 .map(|f| f.verification_code)
                 .filter(|c| !c.is_empty()),
             importance: yours.unwrap_or(class.importance),
+            earlier_meshes: trace
+                .as_ref()
+                .map(|t| t.earlier_meshes())
+                .unwrap_or_default(),
         })
     }
 
-    /// The deciding Mesh version, replayed against the facts and scores the
-    /// decision used. Best effort: an explanation without it still answers.
+    /// The deciding Mesh version, replayed against the facts, scores and
+    /// list results the decision used. Best effort: an explanation without
+    /// it still answers.
     fn route_checks(
         &self,
         class: &Classification,
@@ -432,11 +450,19 @@ impl App {
         let profile = repo::user_profile::get(&index).unwrap_or_default();
         let sender = trace.facts.sender.clone();
         let named = repo::lists::named(&index).unwrap_or_default();
-        let lists = riddle_mesh::ProfileLists {
+        let today = riddle_mesh::ProfileLists {
             profile: &profile,
             sender: &sender,
             facts: &trace.facts,
             named: &named,
+        };
+        // The lists as the decision read them; today's only for a clause
+        // the decision never reached, or a trace stored before the
+        // snapshot was kept.
+        let lists = riddle_mesh::TraceLists {
+            snapshot: &trace.list_results,
+            sender: &sender,
+            fallback: &today,
         };
         Some(riddle_mesh::check_routes(
             &mesh,

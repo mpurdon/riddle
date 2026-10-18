@@ -40,9 +40,14 @@ fn a_minimal_v1_file_loads_with_defaults_for_every_later_field() {
     assert_eq!(s.shadow_period_days, 10);
     assert_eq!(s.judge.model, "jev-1.12.0", "the file's value wins");
     assert_eq!(
-        s.judge.ssm_parameter.as_deref(),
-        Some("/riddle/jev_api_key"),
-        "a missing nested key takes its default"
+        s.judge.key_source,
+        riddle_settings::KeySource::Keychain,
+        "a missing nested key takes its default: the keychain, no SSM"
+    );
+    assert_eq!(s.judge.ssm_parameter, None);
+    assert!(
+        s.gmail.use_builtin_client,
+        "a file from before the built-in client signs in through it"
     );
     assert_eq!(
         s.llm.director_model,

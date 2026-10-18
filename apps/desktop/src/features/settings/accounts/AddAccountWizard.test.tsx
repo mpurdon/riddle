@@ -54,4 +54,49 @@ describe('the Add account wizard', () => {
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Catching up.'))
     expect((await screen.findByRole('region', { name: 'Catching up' })).textContent).toContain('Initial sync: Fetching headers')
   })
+
+  it('keeps the Google client step when the build carries no client', async () => {
+    mountApp('#/settings#add-account')
+    const dialog = await screen.findByRole('dialog', { name: 'Add an account' })
+    expect(within(dialog).getByRole('list', { name: 'Steps' }).textContent).toContain('Google client')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Continue' }))
+    expect(within(dialog).getByRole('listitem', { current: 'step' }).textContent).toContain('Google client')
+    expect(await within(dialog).findByText(/Riddle signs in to Gmail through an OAuth client you create once/)).toBeTruthy()
+  })
+
+  it('skips the Google client step when the settings say the built-in client is configured', async () => {
+    mountApp('#/settings#add-account', (s) => {
+      s.settings = { ...s.settings, gmail: { ...s.settings.gmail, builtinClientAvailable: true } }
+    })
+    const dialog = await screen.findByRole('dialog', { name: 'Add an account' })
+    expect(within(dialog).getByRole('list', { name: 'Steps' }).textContent).not.toContain('Google client')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Continue' }))
+    // Straight to Behaviour: the Gmail name field, no console steps.
+    expect(await within(dialog).findByPlaceholderText('Personal')).toBeTruthy()
+    expect(within(dialog).getByRole('listitem', { current: 'step' }).textContent).toContain('Behaviour')
+    expect(within(dialog).queryByText(/OAuth client you create once/)).toBeNull()
+  })
+
+  it('offers a judge key on the Done step when none is configured, stores it through set_secret, and privacy follows the key', async () => {
+    mountApp('#/settings#add-account', (s) => {
+      s.settings = { ...s.settings, judge: { ...s.settings.judge, keySource: 'keychain', apiKeyPresent: false }, effectivePrivacyDefault: 'local_only' }
+    })
+    const dialog = await screen.findByRole('dialog', { name: 'Add an account' })
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Test mailbox/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Continue' }))
+    // The sentence reads the effective default: local-only until there is a key.
+    expect(await within(dialog).findByText('Riddle will observe only, change nothing in the test mailbox until it is raised to Act, and keep everything on this Mac.')).toBeTruthy()
+    fireEvent.change(within(dialog).getByPlaceholderText('Side project'), { target: { value: 'Scratch' } })
+    fireEvent.change(within(dialog).getByPlaceholderText('me@side.example'), { target: { value: 'me@scratch.example' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create test mailbox' }))
+    await within(dialog).findByText('Scratch is connected')
+    expect(mockState().digs.find((d) => d.name === 'Scratch')?.privacy).toBe('local_only')
+    expect(within(dialog).getByText('Sorting by rules until you add a judge key; nothing hidden.')).toBeTruthy()
+    fireEvent.change(within(dialog).getByLabelText('Paste a judge key (optional)'), { target: { value: 'jev-key-123' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Store' }))
+    await waitFor(() => expect(mockState().settings.judge.apiKeyPresent).toBe(true))
+    expect(mockState().settings.judge.keySource).toBe('keychain')
+    expect(mockState().settings.effectivePrivacyDefault).toBe('cloud_judgment')
+    await waitFor(() => expect(within(dialog).queryByText('Sorting by rules until you add a judge key; nothing hidden.')).toBeNull())
+  })
 })

@@ -126,8 +126,11 @@ impl App {
     }
 }
 
-/// The Gmail OAuth client from settings; `None` until a client id is set.
+/// The Gmail OAuth client from settings: the person's own (its secret, if
+/// any, in the keychain), else the one baked into the build with its own
+/// secret; `None` until either is set (`GmailSettings::effective_client`).
 pub fn gmail_config(s: &Settings) -> Option<riddle_gmail::GmailOAuthConfig> {
-    let id = s.gmail.client_id.trim();
-    (!id.is_empty()).then(|| riddle_gmail::GmailOAuthConfig::new(id.to_string(), None))
+    s.gmail
+        .effective_client()
+        .map(|c| riddle_gmail::GmailOAuthConfig::new(c.client_id, c.client_secret))
 }

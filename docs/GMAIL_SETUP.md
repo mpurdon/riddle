@@ -20,6 +20,39 @@ what used to be one "OAuth consent screen" page is now **Google Auth
 Platform** with Branding, Audience, Data Access and Clients tabs — so if a
 label has moved again, the shape of the task is still the one below.
 
+## A client baked into the build
+
+A build of Riddle can carry its own Desktop client, so a new person signs
+in without opening the Google Cloud console at all. The repository ships
+none: the id and secret are read at compile time from the environment, and
+a build without them behaves exactly as this document describes.
+
+    RIDDLE_GOOGLE_CLIENT_ID=1234567890-abc.apps.googleusercontent.com \
+    RIDDLE_GOOGLE_CLIENT_SECRET=GOCSPX-... \
+    pnpm tauri build
+
+(`cargo build -p riddle-cli` takes the same variables.) The values land in
+`riddle-settings` through `option_env!` (`GmailSettings::builtin_client`);
+its `build.rs` tells Cargo to rebuild when either variable changes, so a
+stale cache cannot ship a build that says it has a client and has not.
+
+What changes with a client baked in:
+
+- The Add account wizard leaves the Google client step out; Settings →
+  Accounts → Google sign-in says "Using the built-in Google client".
+- **Bring your own remains.** "Use your own" on that panel sets
+  `gmail.useBuiltinClient = false` in `settings.toml` and opens the steps
+  below; a client you import or type (`gmail.clientId`) is used whenever
+  its id is set, built-in or not. A Workspace domain that requires an
+  Internal client needs your own.
+- The secret is a Desktop client's: Google treats the client as public (it
+  signs in with PKCE and a loopback redirect, RFC 8252), so the secret does
+  not protect anything and may be compiled in. Riddle still never prints or
+  logs it; `GoogleClient`'s `Debug` says only whether there is one, and the
+  diagnostics export carries the client as present-or-absent.
+- `settings.gmail.builtinClientAvailable` is derived at read time from the
+  build and never written to the file.
+
 ## First decide: Internal or External
 
 `gmail.modify` is a **restricted** scope, and that choice decides how much

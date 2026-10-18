@@ -129,6 +129,29 @@ pub fn record(level: log::Level, category: &str, message: &str) {
     });
 }
 
+impl LogLine {
+    /// Whether the line passes the tail's filters. The text filter reads the
+    /// payload too, so a pass id or a trace id, which ride in the payload
+    /// and not in the message, finds the lines of one pass.
+    fn passes(
+        &self,
+        category: Option<&str>,
+        min_level: Option<log::Level>,
+        text: Option<&str>,
+    ) -> bool {
+        category.is_none_or(|c| self.category == c)
+            && min_level.is_none_or(|m| level_rank(&self.level) <= level_rank(m.as_str()))
+            && text.is_none_or(|t| {
+                let t = t.to_lowercase();
+                self.message.to_lowercase().contains(&t)
+                    || self
+                        .payload
+                        .as_ref()
+                        .is_some_and(|p| p.to_string().to_lowercase().contains(&t))
+            })
+    }
+}
+
 /// The most recent lines, newest last, optionally filtered.
 pub fn tail(
     limit: usize,
@@ -139,15 +162,113 @@ pub fn tail(
     let r = ring().lock();
     r.iter()
         .rev()
-        .filter(|l| category.is_none_or(|c| l.category == c))
-        .filter(|l| min_level.is_none_or(|m| level_rank(&l.level) <= level_rank(m.as_str())))
-        .filter(|l| text.is_none_or(|t| l.message.to_lowercase().contains(&t.to_lowercase())))
+        .filter(|l| l.passes(category, min_level, text))
         .take(limit)
         .cloned()
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
         .collect()
+}
+
+/// How much of the log file the file tail reads, from the end.
+pub const FILE_TAIL_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Parse one line of the log file as the desktop writes it,
+/// `[rfc3339][LEVEL][target] message ||PAYLOAD||json`; `None` for a line in
+/// any other shape (a continuation, a torn first line).
+pub fn parse_file_line(line: &str) -> Option<LogLine> {
+    let rest = line.strip_prefix('[')?;
+    let (at, rest) = rest.split_once("][")?;
+    let (level, rest) = rest.split_once("][")?;
+    let (category, message) = rest.split_once("] ")?;
+    let at = at.parse::<chrono::DateTime<chrono::Utc>>().ok()?;
+    let (message, payload) = match message.split_once(PAYLOAD_MARK) {
+        Some((m, p)) => (m.to_string(), serde_json::from_str(p).ok()),
+        None => (message.to_string(), None),
+    };
+    Some(LogLine {
+        at,
+        level: level.to_string(),
+        category: category.to_string(),
+        message,
+        payload,
+    })
+}
+
+/// The newest lines of a log file, oldest first: the file is read from
+/// its end, at most `max_bytes`, never whole (`APPLICATION_FEATURES.md`
+/// §5, "In-app tail"). A missing or unreadable file is an error for the
+/// caller to swallow, since logs never fail the work.
+pub fn tail_file(
+    path: &std::path::Path,
+    limit: usize,
+    max_bytes: u64,
+    category: Option<&str>,
+    min_level: Option<log::Level>,
+    text: Option<&str>,
+) -> std::io::Result<Vec<LogLine>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    let len = f.metadata()?.len();
+    let start = len.saturating_sub(max_bytes);
+    f.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::with_capacity((len - start) as usize);
+    f.read_to_end(&mut bytes)?;
+    let body = String::from_utf8_lossy(&bytes);
+    let mut lines = body.lines();
+    if start > 0 {
+        // The first line is cut where the window began.
+        lines.next();
+    }
+    let kept: Vec<LogLine> = lines
+        .rev()
+        .filter_map(parse_file_line)
+        .filter(|l| l.passes(category, min_level, text))
+        .take(limit)
+        .collect();
+    Ok(kept.into_iter().rev().collect())
+}
+
+/// The ring's tail, and when it holds fewer lines than asked (the app just
+/// started; the ring is five thousand lines long), the lines before them
+/// from the log file, merged by time. Lines from the file older than the
+/// ring's oldest line are added; the rest are the ring's own lines written
+/// to disk, so they are not repeated. Before this, the Logs pane was empty
+/// after every restart although the file had the night's warnings.
+pub fn tail_with_file(
+    limit: usize,
+    category: Option<&str>,
+    min_level: Option<log::Level>,
+    text: Option<&str>,
+    file: Option<&std::path::Path>,
+) -> Vec<LogLine> {
+    let mut lines = tail(limit, category, min_level, text);
+    if lines.len() >= limit {
+        return lines;
+    }
+    let Some(path) = file else {
+        return lines;
+    };
+    let oldest = {
+        let r = ring().lock();
+        r.front().map(|l| l.at)
+    };
+    let want = limit - lines.len();
+    match tail_file(path, limit, FILE_TAIL_BYTES, category, min_level, text) {
+        Ok(from_file) => {
+            let mut older: Vec<LogLine> = from_file
+                .into_iter()
+                .filter(|l| oldest.is_none_or(|o| l.at < o))
+                .collect();
+            if older.len() > want {
+                older.drain(..older.len() - want);
+            }
+            older.append(&mut lines);
+            older
+        }
+        Err(_) => lines,
+    }
 }
 
 fn level_rank(l: &str) -> u8 {
@@ -370,6 +491,80 @@ mod tests {
     #[test]
     fn redaction_keeps_a_prefix_and_a_length() {
         assert_eq!(redact("secret-token"), "secr…(12)");
+    }
+
+    #[test]
+    fn the_file_tail_returns_the_newest_lines_of_a_log_file_and_merges_before_the_ring() {
+        let dir = std::env::temp_dir().join(format!("riddle-logtail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("riddle-test.log");
+        let mut body = String::new();
+        for i in 0..5 {
+            let extra = if i == 4 {
+                payload(&serde_json::json!({"passId": "pass-x"}))
+            } else {
+                String::new()
+            };
+            body.push_str(&format!(
+                "[2020-01-01T00:00:0{i}.000Z][INFO][filetail] line {i}{extra}\n"
+            ));
+        }
+        body.push_str("not a log line\n");
+        std::fs::write(&path, &body).unwrap();
+
+        let newest = tail_file(&path, 2, 1 << 20, None, None, None).unwrap();
+        let msgs: Vec<&str> = newest.iter().map(|l| l.message.as_str()).collect();
+        assert_eq!(msgs, ["line 3", "line 4"]);
+        assert_eq!(newest[1].category, "filetail");
+        assert_eq!(newest[1].level, "INFO");
+        assert_eq!(newest[1].payload.as_ref().unwrap()["passId"], "pass-x");
+        // The filters read the file as they read the ring; text reads the payload too.
+        let by_pass =
+            tail_file(&path, 10, 1 << 20, Some("filetail"), None, Some("pass-x")).unwrap();
+        assert_eq!(by_pass.len(), 1);
+        assert!(
+            tail_file(&path, 10, 1 << 20, None, Some(log::Level::Warn), None)
+                .unwrap()
+                .is_empty()
+        );
+        // A window that starts mid-file drops the torn first line and keeps the rest.
+        let torn = tail_file(&path, 10, 200, None, None, None).unwrap();
+        assert!(!torn.is_empty() && torn.len() < 5, "{torn:?}");
+        assert_eq!(torn.last().unwrap().message, "line 4");
+        assert_ne!(torn.first().unwrap().message, "line 0");
+
+        // Short of lines, the ring is preceded by the file's older ones, once each.
+        record(log::Level::Info, "filetail", "ring line");
+        let merged = tail_with_file(10, Some("filetail"), None, None, Some(&path));
+        let msgs: Vec<&str> = merged.iter().map(|l| l.message.as_str()).collect();
+        assert_eq!(
+            msgs,
+            [
+                "line 0",
+                "line 1",
+                "line 2",
+                "line 3",
+                "line 4",
+                "ring line"
+            ]
+        );
+        // Enough in the ring: the file is not needed.
+        let ring_only = tail_with_file(1, Some("filetail"), None, None, Some(&path));
+        assert_eq!(ring_only.len(), 1);
+        assert_eq!(ring_only[0].message, "ring line");
+        // No file, or an unreadable one: the ring alone, never an error.
+        assert_eq!(
+            tail_with_file(
+                10,
+                Some("filetail"),
+                None,
+                None,
+                Some(&dir.join("missing.log"))
+            )
+            .len(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

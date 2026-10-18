@@ -4,7 +4,7 @@ import type { Summary } from '@/bindings/Summary'
 import type { TaskCentre } from '@/bindings/TaskCentre'
 import type { Job } from '@/bindings/Job'
 import { u64 } from './format'
-import { catchUpJob, catchUpLine, digStatusChip, errorAffordance, jobPriorityLabel, skippedLines, skippedSummary, summaryCopy, taskCentreIndicator, digPipeline } from './selectors'
+import { NO_JUDGE_KEY, catchUpJob, catchUpLine, digStatusChip, errorAffordance, googleClientLine, jobPriorityLabel, judgeNotSetUp, judgeStateLine, skippedLines, skippedSummary, summaryCopy, taskCentreIndicator, digPipeline } from './selectors'
 
 const summary = (over: Partial<Summary> = {}): Summary => ({
   asOf: '2026-09-22T07:42:00.000Z',
@@ -24,7 +24,27 @@ const summary = (over: Partial<Summary> = {}): Summary => ({
   lastSyncedAt: '2026-09-22T07:40:00.000Z',
   projectionPending: u64(0),
   degraded: [],
+  packOffers: [],
   ...over,
+})
+
+describe('the judge key and the Google client, as setup states', () => {
+  it('says what Riddle does without a judge key, in the same words as the account status', () => {
+    expect(judgeStateLine({ provider: 'jev', keySource: 'keychain', apiKeyPresent: false })).toBe('Sorting by rules until you add a judge key; nothing hidden')
+    expect(judgeStateLine({ provider: 'jev', keySource: 'keychain', apiKeyPresent: false })).toBe(NO_JUDGE_KEY)
+    expect(judgeStateLine({ provider: 'null', keySource: 'keychain', apiKeyPresent: false })).toBe(NO_JUDGE_KEY)
+    expect(judgeStateLine({ provider: 'jev', keySource: 'keychain', apiKeyPresent: true })).toBeNull()
+    // An SSM or environment lookup is a lookup, not a missing setup.
+    expect(judgeStateLine({ provider: 'jev', keySource: 'ssm', apiKeyPresent: false })).toBeNull()
+    expect(judgeNotSetUp({ provider: 'scripted', keySource: 'keychain', apiKeyPresent: false })).toBe(false)
+  })
+
+  it('names which Google client sign-in uses: the own one first, then the built-in one, else none', () => {
+    expect(googleClientLine({ clientId: '', builtinClientAvailable: false, useBuiltinClient: true })).toEqual({ source: 'none', label: 'Not set up yet', tone: 'warn' })
+    expect(googleClientLine({ clientId: '', builtinClientAvailable: true, useBuiltinClient: true })).toEqual({ source: 'builtin', label: 'Using the built-in Google client', tone: 'ok' })
+    expect(googleClientLine({ clientId: '', builtinClientAvailable: true, useBuiltinClient: false }).source).toBe('none')
+    expect(googleClientLine({ clientId: 'own.apps.googleusercontent.com', builtinClientAvailable: true, useBuiltinClient: true })).toEqual({ source: 'own', label: 'Client set up', tone: 'ok' })
+  })
 })
 
 describe('the morning summary is honest about whether Riddle has finished', () => {

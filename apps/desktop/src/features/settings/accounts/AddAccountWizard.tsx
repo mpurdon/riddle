@@ -22,12 +22,15 @@ import type { ProjectionMode } from '@/bindings/ProjectionMode'
 import { cx } from '@/lib/format'
 import { mailboxName } from '@/lib/gmailEffect'
 import { useDigGroups, useAllDigs, useSettings } from '@/lib/queries'
+import { googleClientLine, judgeStateLine } from '@/lib/selectors'
 import { useUi } from '@/lib/stores'
+import type { Settings } from '@/lib/types'
 import { useAction } from '@/lib/useAction'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
 import { Field, Input } from '@/components/ui/Field'
 import { Select } from '@/components/ui/Select'
+import { SecretField } from '../shared'
 import { GmailClientId, GoogleConsoleSteps, ImportGmailClient, SignInProgress, useGmailSignIn } from './GoogleClient'
 import { AUTONOMY_OPTIONS, PRIVACY_OPTIONS, PROJECTION_OPTIONS, gmailEffect } from './model'
 import { OptionCards } from './pieces'
@@ -74,7 +77,8 @@ export function AddAccountWizard({ open, onOpenChange, onCreated }: { open: bool
   // Start fresh each time the wizard opens; later settings refetches (an
   // import, a save) must not reset a wizard in progress.
   const ready = !!settings
-  const privacyDefault = settings?.privacyDefault ?? 'cloud_judgment'
+  // The effective default: local-only until a judge key is configured, the stored default once one is.
+  const privacyDefault = settings?.effectivePrivacyDefault ?? 'local_only'
   const projectionDefault = settings?.projectionDefault ?? 'none'
   const reset = () => {
     setStep('kind')
@@ -92,8 +96,12 @@ export function AddAccountWizard({ open, onOpenChange, onCreated }: { open: bool
   }
 
   if (!settings || !setup) return null
-  const steps = STEPS[kind]
-  const clientReady = !!settings.gmail.clientId.trim()
+  // A client baked into the build means there is nothing to set up: the
+  // Google client step is left out, not shown as done.
+  const client = googleClientLine(settings.gmail)
+  const builtinClient = client.source === 'builtin'
+  const steps = kind === 'gmail' && builtinClient ? STEPS.gmail.filter((s) => s.id !== 'client') : STEPS[kind]
+  const clientReady = client.source !== 'none'
   const next = (s: Step) => setStep(s)
 
   /** Per-account autonomy lives in settings; Observe needs no entry when it is the default. */
@@ -160,7 +168,7 @@ export function AddAccountWizard({ open, onOpenChange, onCreated }: { open: bool
           />
         ) : null}
 
-        {step === 'done' && created ? <Done dig={created} setup={setup} /> : null}
+        {step === 'done' && created ? <Done dig={created} setup={setup} settings={settings} /> : null}
       </div>
 
       <footer className="mt-5 flex items-center gap-2">
@@ -171,7 +179,7 @@ export function AddAccountWizard({ open, onOpenChange, onCreated }: { open: bool
         ) : null}
         <span className="flex-1" />
         {step === 'kind' ? (
-          <Button variant="primary" onClick={() => next(kind === 'gmail' ? 'client' : 'setup')}>
+          <Button variant="primary" onClick={() => next(kind === 'gmail' && !builtinClient ? 'client' : 'setup')}>
             Continue
           </Button>
         ) : null}
@@ -369,8 +377,15 @@ function SignIn({ setup, onConnected }: { setup: Setup; onConnected: (dig: Dig) 
   )
 }
 
-function Done({ dig, setup }: { dig: Dig; setup: Setup }) {
+/**
+ * Done, with one optional thing left: a judge key. Without one Riddle
+ * sorts by rules and hides nothing, which the step says in the same words
+ * as the account's status; the key goes to the keychain through
+ * `set_secret` and the judge picks it up at once.
+ */
+function Done({ dig, setup, settings }: { dig: Dig; setup: Setup; settings: Settings }) {
   const effect = gmailEffect(setup.autonomy, setup.projection, { provider: dig.provider })
+  const noJudge = judgeStateLine(settings.judge)
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-start gap-3 rounded-md border border-moss/40 bg-moss/5 p-4">
@@ -384,6 +399,12 @@ function Done({ dig, setup }: { dig: Dig; setup: Setup }) {
         <li>The first sync has started; it continues in the background. Progress shows on the account and in the Task Centre.</li>
         <li>{effect.sentence}</li>
       </ul>
+      {noJudge ? (
+        <div className="rounded-md border border-line bg-sand/50 px-3 py-2 text-sm">
+          <div className="text-ink-2">{noJudge}.</div>
+          <SecretField secret="jev_api_key" label="Paste a judge key (optional)" hint="Stored in the OS keychain, never in a file or a log. The judge starts at once, and new accounts then start in your default privacy mode." present={settings.judge.apiKeyPresent} />
+        </div>
+      ) : null}
     </div>
   )
 }

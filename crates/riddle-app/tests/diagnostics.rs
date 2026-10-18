@@ -231,3 +231,45 @@ async fn the_diagnostics_export_carries_every_section_and_no_address() {
         "the export carries no address"
     );
 }
+
+/// Claim: an install that was never given a judge key is a setup to finish,
+/// not an outage. With mail waiting the account says what Riddle does
+/// meanwhile, the probe says "not set up" apart from a failure, and the
+/// Summary carries the same words.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dig_with_mail_waiting_and_no_judge_key_says_it_sorts_by_rules_and_the_probe_says_not_set_up(
+) {
+    let (app, ops) = common::boot_scripted(false, |s| {
+        s.shadow_period_days = 0;
+        s.judge.provider = riddle_settings::JudgeProvider::Null;
+    })
+    .await;
+    let dig =
+        common::fixture_dig_synced(&app, &ops, "Work", "me@work.example", 3, 8, json!({})).await;
+    fresh_message(&app, &dig, "nokey");
+    assert!(app.judge_not_set_up());
+    match AppDigStatus(app.clone())
+        .status_of(&app.dig(&dig.id).unwrap())
+        .unwrap()
+    {
+        DigStatus::Degraded { reason } => assert_eq!(reason, riddle_app::ops::NO_JUDGE_KEY),
+        other => panic!("expected Degraded, got {other:?}"),
+    }
+    let probe = riddle_app::dispatch::call(&app, "probe_judge", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(probe["ok"], false);
+    assert_eq!(probe["notSetUp"], true);
+    assert!(
+        probe["message"].as_str().unwrap().starts_with("Not set up"),
+        "{probe}"
+    );
+    app.refresh_dig_status(&dig.id);
+    let summary = app
+        .summary(chrono::Utc::now() - chrono::Duration::hours(24), None)
+        .unwrap();
+    assert_eq!(
+        summary.degraded,
+        vec![format!("Work: {}", riddle_app::ops::NO_JUDGE_KEY)]
+    );
+}
