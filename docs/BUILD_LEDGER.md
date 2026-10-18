@@ -111,3 +111,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 52 | fix: a judge that could not resolve its key at start is attached again by housekeeping, not by a restart | 12 | 0 | 0 | 0 | 0 |
 | 53 | feat: an Engineering pack: the search console, the cloud, the registrar and the coding tools are Engineering, with what to do about each | 25 | 0 | 0 | 0 | 0 |
 | 54 | fix: Engineering pack v2: expiring things collapse per subject, incidents expire, a renewed certificate and a statement are Filed | 10 | 0 | 0 | 0 | 0 |
+| 55 | fix: Engineering pack v3: a cost alert or a health notice is one Know, the newest of the same subject | 6 | 0 | 0 | 0 | 0 |

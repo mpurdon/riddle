@@ -1,6 +1,6 @@
 id = "engineering"
 name = "Engineering"
-version = 2
+version = 3
 area = "Developer"
 summary = "Mail from the cloud, the registrar, the search console, developer tooling and AI coding tools is Engineering: an action a vendor asks for, an incident, an expiring certificate or a cost alert becomes a Find, indexing problems from the search console too; product news and routine notices are Filed; bills stay with the money rules and carry Engineering as well."
 band = "specific"
@@ -24,6 +24,10 @@ band = "specific"
 # subject, incidents and failures expire, a renewed certificate or a
 # statement is Filed, a health event or maintenance is a Know, and the
 # judge's Do replaces the last of the same subject too.
+#
+# v3: a monthly budget alert and a spend cap notice opened a Know each
+# time; the newest of the same subject replaces the rest, as the Do
+# routes already did.
 
 [detect]
 sender_domains = [
@@ -171,9 +175,9 @@ WHEN (sender IN list:engineering_vendors OR sender IN list:engineering_senders) 
     ELSE IF subject CONTAINS "vulnerab" OR subject CONTAINS "security advisory" OR subject CONTAINS "cve-" OR subject CONTAINS "incident" OR subject CONTAINS "outage" OR subject CONTAINS "degraded" OR subject CONTAINS "failed" OR subject CONTAINS "failure"
         → Find: Do + Stratum: Engineering + Importance: High + Expires: 7d
     ELSE IF subject CONTAINS "budget" OR subject CONTAINS "spend cap" OR subject CONTAINS "spending" OR subject CONTAINS "usage limit" OR subject CONTAINS "quota" OR subject CONTAINS "free tier" OR subject CONTAINS "rate limit"
-        → Find: Know + Stratum: Engineering + Importance: High
+        → Find: Know + Stratum: Engineering + Importance: High + Replaces: same subject
     ELSE IF subject CONTAINS "health event" OR subject CONTAINS "maintenance" OR subject CONTAINS "credits"
-        → Find: Know + Stratum: Engineering
+        → Find: Know + Stratum: Engineering + Replaces: same subject
     ELSE IF subject CONTAINS "statement" OR subject CONTAINS "receipt" OR subject CONTAINS "thank you for your payment" OR subject CONTAINS "payment received" OR subject CONTAINS "is renewed"
         → Filed + Stratum: Engineering
     ELSE IF security_alert@v1 > .80 AND marketing@v1 < .70
