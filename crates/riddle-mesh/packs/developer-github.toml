@@ -1,6 +1,6 @@
 id = "developer-github"
 name = "GitHub"
-version = 3
+version = 4
 area = "Developer"
 summary = "Reviews you were asked for personally (at low importance when a bot such as Dependabot asked), failed Actions runs, assignments and admin requests become Finds; team review requests and new pull requests are Filed; approvals, merges, bot comments and pushes are set aside."
 band = "specific"
@@ -19,31 +19,11 @@ description = "GitHub accounts whose review requests can wait"
 question = "Which GitHub accounts' review requests are low priority for you (dependabot[bot], renovate[bot])? Leave it empty to treat them like anyone's."
 default = ["dependabot[bot]", "renovate[bot]"]
 
-# v3: a registrar's renewal is engineering and a bill at once. A domain
-# that expires is a Pay Find under Finance, which is right, and nothing said
-# it was about the user's domains (16 Oct 2026). A Find has one type but any
-# number of Strata, so a tag adds Engineering to mail from the vendors the
-# user names, before the money rules decide; the money rules still decide.
-[[lists]]
-name = "engineering_vendors"
-description = "Vendors whose mail is engineering spend: a domain registrar, a cloud provider, developer tooling"
-question = "Which vendors are engineering costs for you, by domain (a registrar such as moniker.com, a cloud provider such as amazonaws.com, developer tooling)?"
-default = []
-kinds = ["cloud_or_hosting", "domain_registrar", "developer_tooling"]
-
-[[meshes]]
-band = "personal"
-rank = 35
-text = '''
-Mesh: Engineering vendors
-Scope:
-All Digs
-
-ROUTES
-
-IF sender_domain IN list:engineering_vendors
-    → Stratum: Engineering
-'''
+# v3 added the engineering_vendors list and its Engineering vendors tag
+# Mesh (a registrar's renewal is engineering and a bill at once, 16 Oct
+# 2026). v4 moves both to the Engineering pack, so an account without
+# GitHub still gets them (18 Oct 2026); that pack takes the Mesh over on
+# install, and reinstalling this one leaves it alone.
 
 [[meshes]]
 rank = 10

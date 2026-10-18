@@ -109,3 +109,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 50 | feat: a user level hides the machinery, the first sync sorts within minutes and backfills history, and every pass says what it cost and why it degraded | 58 | 0 | 0 | 0 | 0 |
 | 51 | feat: packs turn on from what the mail shows, the judge key is optional, every trace says what decided and can be previewed, and a pass judges six at a time | 45 | 0 | 0 | 0 | 0 |
 | 52 | fix: a judge that could not resolve its key at start is attached again by housekeeping, not by a restart | 12 | 0 | 0 | 0 | 0 |
+| 53 | feat: an Engineering pack: the search console, the cloud, the registrar and the coding tools are Engineering, with what to do about each | 25 | 0 | 0 | 0 | 0 |

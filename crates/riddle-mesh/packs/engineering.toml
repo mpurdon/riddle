@@ -1,0 +1,176 @@
+id = "engineering"
+name = "Engineering"
+version = 1
+area = "Developer"
+summary = "Mail from the cloud, the registrar, the search console, developer tooling and AI coding tools is Engineering: an action a vendor asks for, an incident, an expiring certificate or a cost alert becomes a Find, indexing problems from the search console too; product news and routine notices are Filed; bills stay with the money rules and carry Engineering as well."
+band = "specific"
+
+# v1 (18 Oct 2026): Search Console mail about page indexing on the user's
+# own site, and a Gemini API spend cap, were plain notifications, because
+# google.com sends everything from account security to Play receipts and a
+# vendor list names domains. The engineering vendors list and its tag Mesh
+# move here from the GitHub pack (v3) so an account without GitHub still
+# gets them, and a second list names the addresses at mixed-purpose
+# companies (Google, Amazon, Apple, Microsoft, Meta) that are developer
+# consoles. The money rules run first and keep a vendor's bill a Pay Find
+# under Finance; the tag adds Engineering to it.
+
+[detect]
+sender_domains = [
+  "amazonaws.com", "aws.com", "cloudflare.com", "vercel.com", "netlify.com",
+  "digitalocean.com", "heroku.com", "fly.io", "railway.app", "render.com",
+  "supabase.com", "npmjs.com", "pypi.org", "crates.io", "sentry.io",
+  "datadoghq.com", "pagerduty.com", "gitlab.com", "atlassian.com",
+  "jetbrains.com", "docker.com", "hashicorp.com", "circleci.com",
+  "anthropic.com", "claude.com", "openai.com", "cursor.com", "kilocode.ai",
+  "namecheap.com", "godaddy.com", "hover.com", "porkbun.com", "gandi.net",
+  "tailscale.com", "postman.com", "twilio.com",
+]
+min_messages = 5
+
+[[lists]]
+name = "engineering_vendors"
+description = "Vendors whose mail is engineering: a cloud provider, a domain registrar, developer tooling, an AI coding tool, a package registry, monitoring"
+question = "Which vendors are engineering for you, by domain (a registrar such as moniker.com, a cloud provider such as amazonaws.com, developer tooling)? The usual ones are already here."
+default = [
+  # Cloud and hosting
+  "amazonaws.com", "aws.com", "cloudflare.com", "fastly.com", "vercel.com",
+  "netlify.com", "digitalocean.com", "linode.com", "vultr.com", "hetzner.com",
+  "heroku.com", "fly.io", "railway.app", "render.com", "supabase.com",
+  "planetscale.com", "neon.tech", "upstash.com", "mongodb.com",
+  # Registrars, DNS and certificates
+  "namecheap.com", "godaddy.com", "hover.com", "porkbun.com", "gandi.net",
+  "dnsimple.com", "name.com", "cloudns.net", "letsencrypt.org", "digicert.com",
+  "sectigo.com",
+  # Developer tooling, source hosting, CI and registries
+  "gitlab.com", "bitbucket.org", "atlassian.com", "jetbrains.com",
+  "docker.com", "hashicorp.com", "circleci.com", "npmjs.com", "pypi.org",
+  "crates.io", "rubygems.org", "packagist.org", "nuget.org", "gitkraken.com",
+  "postman.com", "hookdeck.com", "ngrok.com", "tailscale.com", "linear.app",
+  "expo.dev", "icepanel.io",
+  # Monitoring and incident
+  "sentry.io", "datadoghq.com", "newrelic.com", "pagerduty.com",
+  "statuspage.io", "uptimerobot.com", "betterstack.com", "grafana.com",
+  "honeycomb.io",
+  # Messaging and API services
+  "twilio.com", "sendgrid.com", "sendgrid.net", "mailgun.com",
+  "postmarkapp.com", "resend.com", "auth0.com",
+  # AI coding tools and model APIs
+  "anthropic.com", "claude.com", "openai.com", "cursor.com", "cursor.sh",
+  "kilocode.ai", "codeium.com", "windsurf.com", "replit.com",
+  "sourcegraph.com", "tabnine.com", "opencode.ai", "mistral.ai", "cohere.com",
+  "huggingface.co", "groq.com", "together.ai", "elevenlabs.io",
+  "deepgram.com", "assemblyai.com",
+]
+kinds = ["cloud_or_hosting", "domain_registrar", "developer_tooling"]
+
+[[lists]]
+name = "engineering_senders"
+description = "Developer-console addresses at companies that also send consumer mail: Search Console, Google Cloud, AI Studio, Play developer support, AWS, the Amazon and Apple developer programs, Azure, Meta for Developers"
+question = "Which addresses at Google, Amazon, Apple, Microsoft or Meta are engineering for you (sc-noreply@google.com for Search Console, azure-noreply@microsoft.com)? The usual ones are already here."
+default = [
+  # Google: everything comes from google.com, so these are addresses
+  "sc-noreply@google.com",
+  "cloudplatform-noreply@google.com",
+  "googleaistudio-noreply@google.com",
+  "googledevelopers-noreply@google.com",
+  "google-maps-platform-noreply@google.com",
+  "firebase-noreply@google.com",
+  "workspace-noreply@google.com",
+  "googleplay-dev-support@google.com",
+  "googleplay-developer-support@google.com",
+  "analytics-noreply@google.com",
+  "tagmanager-noreply@google.com",
+  "apps-scripts-notifications@google.com",
+  # Amazon and AWS under amazon.com
+  "no-reply-aws@amazon.com",
+  "appstore.amazon.com",
+  "developer.amazon.com",
+  # Apple, Microsoft, Meta
+  "developer.apple.com",
+  "azure-noreply@microsoft.com",
+  "visualstudio.com",
+  "developers.facebook.com",
+]
+
+# The tag: engineering mail carries Engineering whatever else decides it.
+# The money rules keep a bill a Pay Find under Finance; this adds the
+# second Stratum.
+[[meshes]]
+band = "personal"
+rank = 35
+text = '''
+Mesh: Engineering vendors
+Scope:
+All Digs
+
+ROUTES
+
+IF sender IN list:engineering_vendors OR sender IN list:engineering_senders
+    → Stratum: Engineering
+'''
+
+# Search Console writes about the user's own site. An ownership or
+# verification change is security; a new indexing problem is something to
+# do, and the same problem is reported again every few days, so the newest
+# replaces the rest; fixes validating or fixed, and the reports, are Filed.
+[[meshes]]
+rank = 12
+text = '''
+Mesh: Search Console
+Scope:
+All Digs
+
+ROUTES
+
+WHEN sender = "sc-noreply@google.com"
+    IF subject CONTAINS "owner" OR subject CONTAINS "verif" OR subject CONTAINS "manual action" OR subject CONTAINS "security issue" OR subject CONTAINS "hacked"
+        → Find: Do + Stratum: Engineering + Importance: High
+    ELSE IF subject CONTAINS "prevent pages" OR subject CONTAINS "fixes failed" OR subject CONTAINS "not indexed" OR subject CONTAINS "issues detected" OR subject CONTAINS "new issue" OR subject CONTAINS "errors" OR subject CONTAINS "problem"
+        → Find: Do + Stratum: Engineering + Replaces: same subject
+    ELSE IF subject CONTAINS "successfully fixed" OR subject CONTAINS "validating" OR subject CONTAINS "validation" OR subject CONTAINS "performance" OR subject CONTAINS "report" OR subject CONTAINS "top "
+        → Filed + Stratum: Engineering
+    ELSE
+        → Find: Know + Stratum: Engineering + Importance: Low
+END
+'''
+
+# What a vendor asks for, by the subject it writes: an action with a date,
+# a deprecation or migration, an incident, a certificate or anything else
+# expiring, a cost alert. Rank 19 sits behind the money rules (a failed
+# payment is theirs) and ahead of the general security alert, so an
+# engineering account's security notice carries Engineering. A person at a
+# vendor who writes gets Respond; product news is Filed, never Spoil, so it
+# stays findable; everything else from these senders is Filed.
+[[meshes]]
+rank = 19
+text = '''
+Mesh: Engineering alerts
+Scope:
+All Digs
+
+ROUTES
+
+WHEN (sender IN list:engineering_vendors OR sender IN list:engineering_senders) AND NOT gmail_category = promotions
+    IF subject CONTAINS "action required" OR subject CONTAINS "action needed" OR subject CONTAINS "deprecat" OR subject CONTAINS "end of life" OR subject CONTAINS "end-of-life" OR subject CONTAINS "will be removed" OR subject CONTAINS "will be deleted" OR subject CONTAINS "will be disabled" OR subject CONTAINS "migrat" OR subject CONTAINS "breaking change"
+        → Find: Do + Stratum: Engineering + Importance: High + Replaces: same subject
+    ELSE IF subject CONTAINS "vulnerab" OR subject CONTAINS "security advisory" OR subject CONTAINS "cve-" OR subject CONTAINS "certificate" OR subject CONTAINS "expir" OR subject CONTAINS "incident" OR subject CONTAINS "outage" OR subject CONTAINS "degraded" OR subject CONTAINS "health event" OR subject CONTAINS "maintenance" OR subject CONTAINS "failed" OR subject CONTAINS "failure"
+        → Find: Do + Stratum: Engineering + Importance: High + Expires: 7d
+    ELSE IF subject CONTAINS "budget" OR subject CONTAINS "spend cap" OR subject CONTAINS "spending" OR subject CONTAINS "usage limit" OR subject CONTAINS "quota" OR subject CONTAINS "free tier" OR subject CONTAINS "credits" OR subject CONTAINS "rate limit"
+        → Find: Know + Stratum: Engineering + Importance: High
+    ELSE IF security_alert@v1 > .80 AND marketing@v1 < .70
+        → Find: Know + Stratum: Engineering + Importance: High
+    ELSE IF NOT automated_sender AND (requires_response@v1 > .70 OR asks_question@v1 > .75)
+        → Find: Respond + Stratum: Engineering
+    ELSE IF marketing@v1 > .70 OR newsletter@v1 > .70
+        → Filed + Stratum: Engineering
+    ELSE IF requires_action@v1 > .75
+        → Find: Do + Stratum: Engineering
+    ELSE
+        → Filed + Stratum: Engineering
+END
+
+GUARDS
+
+NEVER Spoil IF sender IN never_hidden
+'''

@@ -38,14 +38,17 @@ async fn a_new_vendor_is_judged_once_and_offered_its_list_until_it_is_on_it() {
     let (app, ops) = common::boot_scripted(true, |_| {}).await;
     let dig =
         common::fixture_dig_synced(&app, &ops, "Personal", "me@example.com", 5, 5, json!({})).await;
-    // The GitHub pack brings the engineering_vendors list.
-    app.runtime
-        .invoke_as_user(
-            "install_pack",
-            json!({ "packId": "developer-github", "status": "active", "replace": true }),
-        )
-        .await
-        .unwrap();
+    // The Engineering pack brings the engineering_vendors list; the GitHub
+    // pack recognises github.com.
+    for pack in ["engineering", "developer-github"] {
+        app.runtime
+            .invoke_as_user(
+                "install_pack",
+                json!({ "packId": pack, "status": "active", "replace": true }),
+            )
+            .await
+            .unwrap();
+    }
     let store = app.stores.dig(&dig.id).unwrap();
     for (pid, h) in [("s1", 72), ("s2", 48), ("s3", 24)] {
         repo::messages::upsert(&store, &bill(&dig.id, pid, h)).unwrap();

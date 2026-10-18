@@ -165,6 +165,7 @@ const BUILTIN: &[&str] = &[
     include_str!("../packs/core.toml"),
     include_str!("../packs/government-canada.toml"),
     include_str!("../packs/developer-github.toml"),
+    include_str!("../packs/engineering.toml"),
     include_str!("../packs/money.toml"),
     include_str!("../packs/shopping.toml"),
     include_str!("../packs/reading-social.toml"),
@@ -1527,7 +1528,7 @@ mod tests {
             ..Default::default()
         };
         facts.subject = "Moniker Invoice 92885590".into();
-        let packs = ["developer-github", "money", "core"];
+        let packs = ["engineering", "money", "core"];
         let d = decide(
             &packs,
             &facts,
