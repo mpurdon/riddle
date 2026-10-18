@@ -342,7 +342,8 @@ impl App {
 
     /// Build the judge from settings and install it. Key resolution may hit
     /// SSM, so this is async; a failure leaves the judge unset and Sift
-    /// degrades to Unresolved (§18), which is logged, not fatal.
+    /// degrades to Unresolved (§18), which is logged, not fatal, and the
+    /// pass's housekeeping tries again (`App::retry_judge_attach`).
     pub async fn attach_judge(self: &Arc<Self>, cfg: &JudgeConfig) -> Option<String> {
         let recorder = store_recorder(self.stores.clone());
         let judge: Option<Arc<dyn SemanticJudge>> = match cfg.provider.as_str() {
@@ -375,7 +376,7 @@ impl App {
                     Err(e) => {
                         rwarn!(
                             Category::Judge,
-                            "judge unavailable at start ({}): {}",
+                            "judge unavailable ({}): {}",
                             source.describe(),
                             e.kind.as_str()
                         );

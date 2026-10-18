@@ -108,3 +108,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 49 | perf: the Sift path reads four rows per message and one probe per idle pass; the Why card says why, the wizard says what it will do | 39 | 0 | 0 | 0 | 0 |
 | 50 | feat: a user level hides the machinery, the first sync sorts within minutes and backfills history, and every pass says what it cost and why it degraded | 58 | 0 | 0 | 0 | 0 |
 | 51 | feat: packs turn on from what the mail shows, the judge key is optional, every trace says what decided and can be previewed, and a pass judges six at a time | 45 | 0 | 0 | 0 | 0 |
+| 52 | fix: a judge that could not resolve its key at start is attached again by housekeeping, not by a restart | 12 | 0 | 0 | 0 | 0 |

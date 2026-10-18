@@ -14,6 +14,12 @@
 //! on every tenth pass or after ten minutes, whichever comes first. Both
 //! had run every 45 seconds on every account, each a read of the whole
 //! classification and sender tables (17 Oct 2026).
+//!
+//! A judge that failed to resolve its key at start (an expired SSO session,
+//! a keychain item added later) is tried again on the same floor, at most
+//! once every ten minutes across accounts, instead of waiting for a restart:
+//! an hour of live checks ran judge-less after the dev session expired,
+//! and the Summary looked healthy because nothing was waiting (18 Oct 2026).
 
 use crate::domains::Domains;
 use crate::window::{decide_window, JUDGE_CONCURRENCY};
@@ -360,6 +366,7 @@ impl App {
                 true
             });
         if housekeeping {
+            self.retry_judge_attach().await;
             // Bookkeeping: a failure to look for stale Unresolved never stops the pass.
             if let Err(e) = self.retry_stale_unresolved(dig, &store) {
                 swallowed!(
@@ -1215,12 +1222,32 @@ struct HousekeepingState {
     skipped: u32,
 }
 
-/// Whether a pass's housekeeping is due, per account (`App::sift_pass`,
-/// module header). The decision is recorded as it is made.
+/// Whether a pass's housekeeping is due, per account, and whether an absent
+/// judge is due another attempt, across accounts (`App::sift_pass`, module
+/// header). Each decision is recorded as it is made.
 #[derive(Default)]
-pub struct Housekeeping(std::sync::Mutex<std::collections::HashMap<DigId, HousekeepingState>>);
+pub struct Housekeeping {
+    digs: std::sync::Mutex<std::collections::HashMap<DigId, HousekeepingState>>,
+    judge_tried_at: std::sync::Mutex<Option<chrono::DateTime<chrono::Utc>>>,
+}
 
 impl Housekeeping {
+    /// Whether an absent judge should be attached again now: the first
+    /// time it is asked, then at most once per floor, whichever account
+    /// asks. Records the attempt.
+    pub fn judge_retry_due(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
+        let mut tried = self
+            .judge_tried_at
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let due =
+            tried.is_none_or(|t| now - t >= chrono::Duration::minutes(HOUSEKEEPING_EVERY_MINUTES));
+        if due {
+            *tried = Some(now);
+        }
+        due
+    }
+
     /// Due when the backlog has mail, the rules changed since the last run,
     /// or the floor is reached (the first pass always); records the answer.
     pub fn due(
@@ -1230,7 +1257,7 @@ impl Housekeeping {
         backlog: bool,
         rules_changed_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> bool {
-        let mut map = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        let mut map = self.digs.lock().unwrap_or_else(|p| p.into_inner());
         let s = map.entry(dig.clone()).or_default();
         let due = backlog
             || s.rules_seen != rules_changed_at
@@ -1265,11 +1292,50 @@ impl App {
         let rules = repo::kv::rules_changed_at(&self.stores.index())?;
         Ok(h.due(&dig.id, self.services.clock.now(), backlog, rules))
     }
+
+    /// Attach the judge again when there is none and the settings name one:
+    /// the key it failed to resolve at start may be there now. Once per
+    /// floor across accounts (`Housekeeping::judge_retry_due`); a bare `App`
+    /// without the service or the settings store never retries. Bookkeeping:
+    /// a failed attempt is logged by `attach_judge` and the pass goes on.
+    async fn retry_judge_attach(self: &Arc<Self>) {
+        if self.services.judge().is_some() {
+            return;
+        }
+        let (Some(h), Some(settings)) = (
+            self.services.get::<Housekeeping>(),
+            self.services.get::<riddle_settings::SettingsStore>(),
+        ) else {
+            return;
+        };
+        if !h.judge_retry_due(self.services.clock.now()) {
+            return;
+        }
+        let cfg = crate::ops::judge_config(&settings.settings());
+        if cfg.provider == "null" {
+            return;
+        }
+        rinfo!(Category::Judge, "no judge; attaching it again");
+        if let Some(id) = self.attach_judge(&cfg).await {
+            rinfo!(Category::Judge, "judge attached on retry: {id}");
+        }
+    }
 }
 
 #[cfg(test)]
 mod housekeeping_tests {
     use super::*;
+
+    #[test]
+    fn an_absent_judge_is_tried_again_on_the_floor_not_every_pass() {
+        let h = Housekeeping::default();
+        let t0 = chrono::Utc::now();
+        assert!(h.judge_retry_due(t0));
+        assert!(!h.judge_retry_due(t0 + chrono::Duration::seconds(45)));
+        assert!(!h.judge_retry_due(t0 + chrono::Duration::minutes(9)));
+        assert!(h.judge_retry_due(t0 + chrono::Duration::minutes(10)));
+        assert!(!h.judge_retry_due(t0 + chrono::Duration::minutes(11)));
+    }
 
     #[test]
     fn housekeeping_runs_on_new_mail_rule_changes_and_the_floor_and_skips_an_idle_pass() {
