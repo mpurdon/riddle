@@ -58,6 +58,8 @@ export function NumberSetting({ value, onCommit, min, max, step, className, labe
 export function SecretField({ secret, label, hint, present }: { secret: 'jev_api_key' | 'gmail_client_secret'; label: string; hint: string; present: boolean }) {
   const { run } = useAction()
   const [value, setValue] = useState('')
+  // The keychain prompt can take a moment; the button says so rather than inviting a second click.
+  const [storing, setStoring] = useState(false)
   return (
     <div className="mt-3 max-w-2xl">
       <div className="flex items-end gap-2">
@@ -66,10 +68,18 @@ export function SecretField({ secret, label, hint, present }: { secret: 'jev_api
         </Field>
         <Button
           icon={<KeyRound />}
+          busy={storing}
           disabledReason={value.trim() ? null : 'Paste the key first'}
           onClick={async () => {
-            const out = await run('set_secret', { secret, value: value.trim() })
-            if (out) setValue('')
+            setStoring(true)
+            try {
+              const out = await run('set_secret', { secret, value: value.trim() })
+              if (out) setValue('')
+            } catch {
+              // `run` has shown the error; the key stays in the field to try again.
+            } finally {
+              setStoring(false)
+            }
           }}
         >
           Store

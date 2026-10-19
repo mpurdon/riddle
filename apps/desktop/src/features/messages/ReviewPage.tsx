@@ -165,7 +165,9 @@ export function ReviewPage({ kind }: { kind: 'spoil' | 'contamination' }) {
           ? {
               label: 'Undo',
               onClick: async () => {
-                for (const id of undoIds) await run('undo_activity', { activityId: id }, { successToast: false })
+                // The rule and the restores undo side by side; the lists refresh once after.
+                await Promise.all(undoIds.map((id) => run('undo_activity', { activityId: id }, { successToast: false, skipInvalidate: true })))
+                await actions.invalidateAfter(['undo_activity'])
                 useLastUndoable.getState().set(null)
                 toast('Undone', { kind: 'success' })
               },
@@ -187,8 +189,9 @@ export function ReviewPage({ kind }: { kind: 'spoil' | 'contamination' }) {
   }
   /**
    * Never Hidden per distinct sender; each call names the first message from
-   * that sender so the backend records the correction on it. Then restore,
-   * since nothing from a Never Hidden sender belongs here.
+   * that sender so the backend records the correction on it. The senders
+   * run side by side, then the restore, since nothing from a Never Hidden
+   * sender belongs here; the lists refresh once at the end.
    */
   const neverHide = async (ms: MessageSummary[]) => {
     if (!ms.length) return
@@ -199,8 +202,9 @@ export function ReviewPage({ kind }: { kind: 'spoil' | 'contamination' }) {
     }
     setBusy(true)
     try {
-      for (const [entry, m] of firstBySender) await run('add_never_hidden', { entry, digId: m.digId, messageId: m.id })
-      await runPerDig(actions, ms, 'restore_messages')
+      await Promise.all([...firstBySender].map(([entry, m]) => run('add_never_hidden', { entry, digId: m.digId, messageId: m.id }, { skipInvalidate: true })))
+      await runPerDig(actions, ms, 'restore_messages', {}, { skipInvalidate: true })
+      await actions.invalidateAfter(['add_never_hidden', 'restore_messages'])
       list.clear()
       setSheetOpen(false)
     } finally {

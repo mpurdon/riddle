@@ -3,17 +3,25 @@
  * Action layer, catches `needs_confirmation`, routes the PendingAction to
  * the right confirmation tier (§51), confirms, invalidates queries, and
  * offers Undo in a toast when the Action was reversible.
+ *
+ * The refetch after a success is started, not awaited: `run` once resolved
+ * only after every invalidated list had come back, so an Archive on a deep
+ * Inbox held the toast and the next keypress for the whole refetch. The
+ * rows the outcome names are patched in place first (`refresh.ts`), and a
+ * saved setting shows its new value before the Action runs. A bulk loop
+ * still awaits `invalidateAfter` once at the end, as before.
  */
 import { useCallback } from 'react'
-import { useQueryClient, type QueryKey } from '@tanstack/react-query'
+import { useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import { confirm, invoke, listActions, qk } from './api'
 import { confirmsImmediately, pendingFrom } from './confirm'
 import { fmtBy } from './format'
 import { gmailEffectLine, isMailboxAction } from './gmailEffect'
 import { isRiddleError, log, toRiddleError } from './ipc'
+import { addStrataToRows, dropMessageRows } from './refresh'
 import { dispositionLabel, errorAffordance, importanceLabel } from './selectors'
 import { toast, useConfirmQueue } from './stores'
-import type { DevInfo } from './types'
+import type { DevInfo, Settings } from './types'
 import type { ActionOutcome } from '@/bindings/ActionOutcome'
 import type { EntityKind } from '@/bindings/EntityKind'
 import type { EntityRef } from '@/bindings/EntityRef'
@@ -138,7 +146,7 @@ export function useAction() {
    * Refetch what the Actions touched, each query once: the defaults for the
    * Action, the Activity and pending lists, and `extra` (the entity kinds
    * the backend said it affected, a caller's own keys). Every success comes
-   * through here; a bulk loop calls it once at the end instead.
+   * through here; a bulk loop calls it once at the end instead and awaits it.
    */
   const invalidateAfter = useCallback(
     async (actions: string[], extra: QueryKey[] = []) => {
@@ -151,17 +159,29 @@ export function useAction() {
 
   const run = useCallback(
     async <T = unknown>(action: string, args: Record<string, unknown> = {}, opts: RunOptions = {}): Promise<(ActionOutcome & { result: T }) | null> => {
+      const ahead = action === 'save_settings' ? await settingsAhead(qc, args) : null
       let outcome: (ActionOutcome & { result: T }) | null = null
       try {
         outcome = await invoke<T>(action, args, { digId: opts.digId, idempotencyKey: opts.idempotencyKey, confirmed: opts.confirmed })
       } catch (e) {
         const pending = pendingFrom(e)
         if (!pending) {
+          ahead?.rollback()
           if (opts.toastErrors !== false) showError(e)
           throw toRiddleError(e)
         }
-        outcome = await settle<T>(pending, opts)
+        // A dialog asks beside the stored value; the chosen one returns with the confirmed outcome.
+        const asked = !confirmsImmediately(pending.confirmation)
+        if (asked) ahead?.rollback()
+        try {
+          outcome = await settle<T>(pending, opts)
+        } catch (err) {
+          if (!asked) ahead?.rollback()
+          throw err
+        }
+        // Null is a declined dialog, already rolled back.
         if (!outcome) return null
+        ahead?.apply()
       }
       await afterSuccess(action, outcome, opts, args)
       return outcome
@@ -197,7 +217,9 @@ export function useAction() {
   )
 
   async function afterSuccess(action: string, outcome: ActionOutcome, opts: RunOptions, args: Record<string, unknown> = {}) {
-    if (!opts.skipInvalidate) await invalidateAfter([action], [...keysForEntities(outcome.affected ?? []), ...(opts.invalidate ?? [])])
+    // The rows change first, from what the outcome names; the refetch runs behind the toast and the next keypress.
+    patchRows(qc, action, outcome.affected ?? [], args)
+    if (!opts.skipInvalidate) void invalidateAfter([action], [...keysForEntities(outcome.affected ?? []), ...(opts.invalidate ?? [])])
     if (opts.successToast === false) return
     let reversible = false
     if (outcome.activityId && action !== 'undo_activity' && opts.offerUndo !== false) {
@@ -251,6 +273,49 @@ function effectSuffix(qc: ReturnType<typeof useQueryClient>, action: string, arg
 
 /** Actions whose success is its own feedback; no toast even though the outcome carries a sentence. */
 const SILENT = new Set(['create_draft', 'update_draft', 'refresh_now', 'test_signal', 'evaluate_signal', 'connect_gmail'])
+
+/** The verbs after which a message leaves the list it was acted on from. */
+const ROW_LEAVES = new Set(['archive_messages', 'move_to_spoil', 'mark_contamination', 'snooze_messages', 'restore_messages', 'permanent_delete'])
+
+/**
+ * The in-place change to the paged message rows once an Action has run,
+ * for the verbs whose effect on a row is certain: the row leaves, or gains
+ * the Strata it was given. Which rows comes from the outcome's `affected`,
+ * never from the request, so a partial result patches only what changed.
+ * A `set_disposition` is left to the refetch: its outcome may open a Find
+ * of another type, and the row cannot say so from here. This runs only on
+ * the final outcome, so a verb behind a confirmation touches nothing until
+ * it is confirmed.
+ */
+function patchRows(qc: QueryClient, action: string, affected: EntityRef[], args: Record<string, unknown>): void {
+  const ids = new Set(affected.filter((e) => e.kind === 'message').map((e) => e.id))
+  if (!ids.size) return
+  if (ROW_LEAVES.has(action)) dropMessageRows(qc, ids)
+  else if (action === 'label_messages' && Array.isArray(args.strata)) addStrataToRows(qc, ids, args.strata.map(String))
+}
+
+/**
+ * A setting shows what was chosen the moment it is clicked. Every settings
+ * control posts the whole `Settings`, and the control read the stored value
+ * until `settings`, `trustStats` and `digs` had all refetched, so a toggle
+ * snapped back and forth. The settings query takes the new value before
+ * the Action runs; the stored value comes back, and a refetch follows, if
+ * the Action fails or the user declines its confirmation. The in-flight
+ * refetch is cancelled first, or its revert would undo the patch.
+ */
+async function settingsAhead(qc: QueryClient, args: Record<string, unknown>): Promise<{ apply: () => void; rollback: () => void } | null> {
+  const next = args.settings
+  if (!next || typeof next !== 'object') return null
+  await qc.cancelQueries({ queryKey: qk.settings })
+  const prev = qc.getQueryData<Settings>(qk.settings)
+  const apply = () => qc.setQueryData<Settings>(qk.settings, next as Settings)
+  const rollback = () => {
+    if (prev) qc.setQueryData<Settings>(qk.settings, prev)
+    void qc.invalidateQueries({ queryKey: qk.settings })
+  }
+  apply()
+  return { apply, rollback }
+}
 
 /** The queries an affected entity kind makes stale; the backend says what it touched, this says what to refetch. */
 const ENTITY_KEYS: Partial<Record<EntityKind, QueryKey[]>> = {

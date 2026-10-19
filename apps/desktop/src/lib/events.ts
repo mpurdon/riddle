@@ -3,9 +3,17 @@
  * `RiddleEvent`; the client refetches on signals and never expects data
  * volume in an event (ARCHITECTURE.md §7). In browser mode a mock bus
  * (`emitMock`) drives the same handlers, so the UI behaves identically.
+ *
+ * The events a pass emits per message are coalesced: a Sift over a hundred
+ * messages sends a hundred `message_classified`, and each once refetched
+ * the lists, the Summary and the traces, so a catch-up had the Inbox
+ * refetching more often than it rendered. Those keys now refetch once a
+ * short pause after the last event, and at least once every couple of
+ * seconds while the stream keeps coming. A Find arriving still refreshes
+ * at once: it is what a notification points at.
  */
 import { useEffect } from 'react'
-import { useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import { bridge, isTauri, log } from './ipc'
 import { qk } from './api'
 import { useBanners, useDirector, useEventLog, usePipeline, toast } from './stores'
@@ -13,6 +21,35 @@ import type { RiddleEvent } from '@/bindings/RiddleEvent'
 import { num } from './format'
 
 export const EVENT_NAME = 'riddle://event'
+
+/** How long after the last event of a storm a key refetches. */
+export const COALESCE_MS = 400
+/** A stream that never pauses still refetches this often. */
+export const COALESCE_MAX_MS = 2_000
+
+const waiting = new Map<string, { timer: ReturnType<typeof setTimeout>; since: number }>()
+
+/** Refetch `key` once the events naming it pause, or once `COALESCE_MAX_MS` has passed since the first of them. */
+function invalidateLater(qc: QueryClient, key: QueryKey): void {
+  const id = JSON.stringify(key)
+  const now = Date.now()
+  const w = waiting.get(id)
+  if (w) clearTimeout(w.timer)
+  const since = w?.since ?? now
+  const fire = () => {
+    waiting.delete(id)
+    void qc.invalidateQueries({ queryKey: key })
+  }
+  const delay = Math.min(COALESCE_MS, since + COALESCE_MAX_MS - now)
+  if (delay <= 0) return fire()
+  waiting.set(id, { timer: setTimeout(fire, delay), since })
+}
+
+/** Drop every refetch still waiting: the shell unmounting, and a test tearing down. */
+export function clearPendingInvalidations(): void {
+  for (const w of waiting.values()) clearTimeout(w.timer)
+  waiting.clear()
+}
 
 type Listener = (e: RiddleEvent) => void
 const listeners = new Set<Listener>()
@@ -44,12 +81,16 @@ function dispatch(e: RiddleEvent): void {
 /** Route an event to query invalidations and stores. Pure of React. */
 export function handleEvent(qc: QueryClient, e: RiddleEvent): void {
   useEventLog.getState().push(e)
-  const inv = (key: readonly unknown[]) => void qc.invalidateQueries({ queryKey: key })
+  const inv = (key: QueryKey) => void qc.invalidateQueries({ queryKey: key })
+  const later = (key: QueryKey) => invalidateLater(qc, key)
   switch (e.type) {
     case 'job_changed':
-    case 'job_progress':
       inv(qk.taskCentre)
-      if (e.type === 'job_changed') inv(qk.summary)
+      inv(qk.summary)
+      break
+    case 'job_progress':
+      // Per step of a job, on top of the Task Centre's own poll.
+      later(qk.taskCentre)
       break
     case 'dig_status_changed':
       inv(qk.digs)
@@ -63,22 +104,24 @@ export function handleEvent(qc: QueryClient, e: RiddleEvent): void {
       if (e.type === 'find_changed') inv(qk.find(e.find_id))
       break
     case 'activity_appended':
-      inv(qk.activity)
+      later(qk.activity)
       break
     case 'message_classified':
     case 'messages_changed':
-      inv(qk.messages)
-      inv(['thread'])
-      inv(['message'])
-      inv(qk.summary)
-      inv(qk.recentTraces)
+      // One per message during a pass: the families wait for the storm to pause.
+      later(qk.messages)
+      later(['thread'])
+      later(['message'])
+      later(qk.summary)
+      later(qk.recentTraces)
       if (e.type === 'message_classified') {
+        // The one message open, if it is this one, updates at once; nothing is mounted for the rest.
         inv(qk.explain(e.dig_id, e.message_id))
         inv(qk.message(e.dig_id, e.message_id))
       }
       break
     case 'summary_changed':
-      inv(qk.summary)
+      later(qk.summary)
       break
     case 'store_fault':
       useBanners.getState().setStoreFault(e.message)
@@ -173,6 +216,7 @@ export function useEvents(): void {
       off()
       unlisten?.()
       source?.close()
+      clearPendingInvalidations()
     }
   }, [qc])
 }
