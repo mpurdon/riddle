@@ -2448,8 +2448,8 @@ EXPERIMENT      shadow evaluation, replay
 
 Rules:
 
-- one rate limiter per resource, shared across Digs, fair between Digs
-- back-pressure when a resource saturates; lower classes yield
+- one rate limiter per resource, in the client that calls it (the Gmail quota bucket per Dig, the judge's limiter, the LLM's breaker and backoff), shared across Digs
+- back-pressure when a resource saturates: the limiter waits first come, first served. A class-ordered gate per resource was built so a waiting INTERACTIVE request would pre-empt BACKFILL's next one, but nothing ever acquired it, so it went (19 Oct 2026); class precedence belongs in the clients, once, if the Director is ever seen to wait behind a catch-up
 - jobs checkpoint progress, retry with backoff, declare dependencies, cancel cleanly, and pause on sleep, network loss or provider outage
 - job steps are idempotent (52)
 - a daily budget per Dig for judge and LLM spend; exhaustion pauses BACKFILL and EXPERIMENT first

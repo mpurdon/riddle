@@ -25,10 +25,7 @@ pub mod task_centre;
 pub use actions::actions;
 pub use connectivity::{Connectivity, ConnectivityMonitor, DnsProbe, FixedConnectivity};
 pub use queue::JobQueue;
-pub use resources::{
-    BudgetClass, BudgetGate, PriorityGate, Resource, ResourceConfig, ResourceGuard, ResourceGuards,
-    Resources, UnlimitedBudget, UsageBudgetGate,
-};
+pub use resources::{BudgetClass, BudgetGate, Resources, UnlimitedBudget, UsageBudgetGate};
 pub use runner::{
     CancelToken, JobContext, JobHandler, JobOutcome, Notifier, NullNotifier, ProgressReporter,
     RecordingNotifier, Runner, DEFAULT_MAX_CONCURRENT, MAX_ATTEMPTS,

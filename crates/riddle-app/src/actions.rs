@@ -1071,8 +1071,10 @@ impl Action for DiscardHeldChanges {
 const APPLY_LIMIT: usize = 2_000;
 
 /// What applying a Mesh to past mail would touch, computed the same way for
-/// the preview and the run: the run simulates again rather than trusting a
-/// plan shown minutes earlier, because mail moves on between the two.
+/// the preview and the run. The run reuses the preview's plan only while
+/// every Dig's classifications are exactly as they were when it was made
+/// (`ApplyPlanCache`); mail that moved on in between means a fresh plan.
+#[derive(Clone)]
 struct ApplyPlan {
     mesh: Mesh,
     redecide: Vec<(DigId, MessageId)>,
@@ -1083,6 +1085,49 @@ struct ApplyPlan {
     /// the estimated cost of the judge calls that scores them.
     rescore: u64,
     rescore_cost_usd: Option<f64>,
+}
+
+/// The plan the preview showed, kept for the confirm that follows it: the
+/// run simulated again, up to 50,000 messages a Dig, with nothing on
+/// screen meanwhile (19 Oct 2026). A plan is handed back only for the
+/// same Mesh version and window, and only while every Dig's
+/// classifications carry the fingerprint they had when it was computed.
+#[derive(Default)]
+pub struct ApplyPlanCache(std::sync::Mutex<Option<CachedPlan>>);
+
+struct CachedPlan {
+    key: (MeshId, u32, u32),
+    fingerprint: Vec<(DigId, repo::classifications::Fingerprint)>,
+    plan: ApplyPlan,
+}
+
+impl ApplyPlanCache {
+    fn get(
+        &self,
+        key: &(MeshId, u32, u32),
+        fingerprint: &[(DigId, repo::classifications::Fingerprint)],
+    ) -> Option<ApplyPlan> {
+        let guard = self.0.lock().ok()?;
+        guard
+            .as_ref()
+            .filter(|c| &c.key == key && c.fingerprint == fingerprint)
+            .map(|c| c.plan.clone())
+    }
+
+    fn put(
+        &self,
+        key: (MeshId, u32, u32),
+        fingerprint: Vec<(DigId, repo::classifications::Fingerprint)>,
+        plan: ApplyPlan,
+    ) {
+        if let Ok(mut guard) = self.0.lock() {
+            *guard = Some(CachedPlan {
+                key,
+                fingerprint,
+                plan,
+            });
+        }
+    }
 }
 
 fn apply_plan(ctx: &ActionContext, args: &Value) -> Result<ApplyPlan> {
@@ -1103,6 +1148,18 @@ fn apply_plan(ctx: &ActionContext, args: &Value) -> Result<ApplyPlan> {
         )));
     }
     let digs = repo::digs::list_enabled(&index)?;
+    let key = (mesh.id.clone(), mesh.version, window_days);
+    let fingerprint = digs
+        .iter()
+        .map(|d| {
+            let store = ctx.services.stores.dig(&d.id)?;
+            Ok((d.id.clone(), repo::classifications::fingerprint(&store)?))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let cache = ctx.services.get::<ApplyPlanCache>();
+    if let Some(plan) = cache.as_ref().and_then(|c| c.get(&key, &fingerprint)) {
+        return Ok(plan);
+    }
     let mut input = riddle_mesh::simulate::SimulationInput::new(&ctx.services.stores, digs, &mesh);
     input.window_days = window_days;
     input.now = ctx.services.clock.now();
@@ -1147,6 +1204,9 @@ fn apply_plan(ctx: &ActionContext, args: &Value) -> Result<ApplyPlan> {
         rescore: report.rescore,
         rescore_cost_usd: per_call.map(|c| c * report.rescore as f64),
     };
+    if let Some(c) = &cache {
+        c.put(key, fingerprint, plan.clone());
+    }
     // Said when the plan is made, so the two-step dialog refuses before the
     // user confirms rather than after.
     if plan.redecide.len() > APPLY_LIMIT {

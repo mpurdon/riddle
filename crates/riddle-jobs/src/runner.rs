@@ -15,7 +15,7 @@
 //! scheduler down.
 
 use crate::queue::JobQueue;
-use crate::resources::{BudgetClass, ResourceGuards, Resources};
+use crate::resources::{BudgetClass, Resources};
 use crate::spec::{is_long_running, resource_class, JobEnvelope, ResourceClass};
 use async_trait::async_trait;
 use parking_lot::{Mutex, RwLock};
@@ -213,7 +213,6 @@ pub struct JobContext {
     pub checkpoint: Value,
     pub progress: ProgressReporter,
     pub cancel: CancelToken,
-    pub resources: ResourceGuards,
     pub services: Arc<Services>,
 }
 
@@ -442,11 +441,6 @@ impl Runner {
             checkpoint: env.checkpoint,
             progress: progress.clone(),
             cancel: token.clone(),
-            resources: ResourceGuards::new(
-                self.resources.clone(),
-                job.priority,
-                job.dig_id.clone(),
-            ),
             services: self.services.clone(),
             job: job.clone(),
         };

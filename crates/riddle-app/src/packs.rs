@@ -18,7 +18,7 @@ use riddle_errors::Result;
 use riddle_mesh::packs::{self, InstallReport, PackDetection};
 use riddle_observability::{rinfo, swallowed, Category};
 use riddle_store::Store;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 /// How far back detection looks when the sync has no window: the GitHub
@@ -58,6 +58,40 @@ pub fn install_always_packs(index: &Arc<Store>, by: CreatedBy) -> Result<AlwaysI
     Ok(out)
 }
 
+/// The accounts asked about, the installed packs with their versions and
+/// the declined offers: everything an offer depends on except the mail.
+type OfferKey = (Vec<DigId>, Vec<(String, u32)>, Vec<String>);
+
+/// Pack offers kept for a few minutes: the Summary computed them on every
+/// read, two count queries per Dig over the detection window, on a 30 s
+/// poll and every summary invalidation (19 Oct 2026). The key carries the
+/// installed and declined packs, so turning one on or declining it misses
+/// at once; only new mail waits for the TTL.
+#[derive(Default)]
+pub struct PackOfferCache(
+    std::sync::Mutex<HashMap<OfferKey, (std::time::Instant, Vec<PackOffer>)>>,
+);
+
+const PACK_OFFER_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+impl PackOfferCache {
+    fn get(&self, key: &OfferKey) -> Option<Vec<PackOffer>> {
+        let guard = self.0.lock().ok()?;
+        guard
+            .get(key)
+            .filter(|(at, _)| at.elapsed() < PACK_OFFER_TTL)
+            .map(|(_, offers)| offers.clone())
+    }
+
+    fn put(&self, key: OfferKey, offers: Vec<PackOffer>) {
+        if let Ok(mut guard) = self.0.lock() {
+            // A handful of keys at most (all accounts, or one); stale ones go.
+            guard.retain(|_, (at, _)| at.elapsed() < PACK_OFFER_TTL);
+            guard.insert(key, (std::time::Instant::now(), offers));
+        }
+    }
+}
+
 impl App {
     /// Whether a completed first listing turns the always packs on
     /// (`Settings::install_packs_on_first_sync`; on unless the settings
@@ -84,6 +118,17 @@ impl App {
     /// largest account's count, so the sentence and its number agree.
     pub fn pack_offers(&self, only: &[DigId]) -> Result<Vec<PackOffer>> {
         let index = self.stores.index();
+        let installed: Vec<(String, u32)> = packs::installed(&index)?
+            .into_iter()
+            .map(|p| (p.id, p.version))
+            .collect();
+        let mut dismissed: Vec<String> = packs::dismissed_offers(&index)?.into_iter().collect();
+        dismissed.sort();
+        let key: OfferKey = (only.to_vec(), installed, dismissed);
+        let cache = self.services.get::<PackOfferCache>();
+        if let Some(offers) = cache.as_ref().and_then(|c| c.get(&key)) {
+            return Ok(offers);
+        }
         let since = self.detect_since();
         let mut by_pack: BTreeMap<String, PackDetection> = BTreeMap::new();
         for dig in self.list_digs()? {
@@ -114,6 +159,9 @@ impl App {
                 .cmp(&a.matched_messages)
                 .then_with(|| a.name.cmp(&b.name))
         });
+        if let Some(c) = &cache {
+            c.put(key, offers.clone());
+        }
         Ok(offers)
     }
 

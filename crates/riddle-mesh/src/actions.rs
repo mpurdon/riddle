@@ -177,28 +177,47 @@ impl Action for UpdateMesh {
         let svc = MeshService::new(ctx.services.stores.index());
         let prior = svc.latest(&id)?;
         let m = svc.update(&id, text, note, created_by(&ctx.principal))?;
+        // A caller that reads no report (a one-click correction, a restore)
+        // passes `simulate: false` and has the version back at once: the
+        // 30-day check ran for every correction and was thrown away
+        // (19 Oct 2026). The editor asks for its report separately.
+        let simulate_now = args
+            .get("simulate")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
         let window = riddle_core::window_days(&args, 30);
-        let mut input = SimulationInput::new(&ctx.services.stores, digs(ctx)?, &m);
-        input.window_days = window;
-        input.now = ctx.services.clock.now();
-        let simulation = simulate(input).unwrap_or_else(|e| {
-            riddle_observability::rwarn!(
-                riddle_observability::Category::Mesh,
-                "simulation of {} v{} failed: {}",
-                m.id,
-                m.version,
-                e.message
-            );
-            SimulationReport {
-                mesh_id: Some(m.id.clone()),
-                mesh_name: m.name.clone(),
-                from_version: Some(prior.version),
-                to_version: m.version,
-                window_days: window,
-                ..Default::default()
-            }
-        });
-        Ok(ActionResult::ok(json!({ "mesh": m, "simulation": simulation, "report": simulation }), format!("Changed Mesh {} to v{} ({:?}); {} of {} messages would change", m.name, m.version, m.status, simulation.changed, simulation.historical_messages))
+        let simulation = if simulate_now {
+            let mut input = SimulationInput::new(&ctx.services.stores, digs(ctx)?, &m);
+            input.window_days = window;
+            input.now = ctx.services.clock.now();
+            Some(simulate(input).unwrap_or_else(|e| {
+                riddle_observability::rwarn!(
+                    riddle_observability::Category::Mesh,
+                    "simulation of {} v{} failed: {}",
+                    m.id,
+                    m.version,
+                    e.message
+                );
+                SimulationReport {
+                    mesh_id: Some(m.id.clone()),
+                    mesh_name: m.name.clone(),
+                    from_version: Some(prior.version),
+                    to_version: m.version,
+                    window_days: window,
+                    ..Default::default()
+                }
+            }))
+        } else {
+            None
+        };
+        let sentence = match &simulation {
+            Some(s) => format!(
+                "Changed Mesh {} to v{} ({:?}); {} of {} messages would change",
+                m.name, m.version, m.status, s.changed, s.historical_messages
+            ),
+            None => format!("Changed Mesh {} to v{} ({:?})", m.name, m.version, m.status),
+        };
+        Ok(ActionResult::ok(json!({ "mesh": m, "simulation": simulation, "report": simulation }), sentence)
             .with_affected(vec![mesh_ref(&m)])
             .with_inputs(json!({ "meshId": m.id, "version": m.version }))
             .with_undo(json!({ "meshId": m.id, "version": m.version, "priorVersion": prior.version, "priorStatus": prior.status }), format!("Revert to v{}", prior.version)))

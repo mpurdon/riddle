@@ -184,6 +184,12 @@ pub fn compute_thread_state(
     }
 }
 
+/// How many of a thread's newest messages are read with their bodies when
+/// its state is recomputed; the older ones contribute sender, date and
+/// count, and their asks fall out of the state as they would have scrolled
+/// out of view.
+pub const NEWEST_WITH_BODIES: usize = 20;
+
 /// Recompute and store the Thread State for one thread.
 pub fn update_thread_state(
     store: &Store,
@@ -192,7 +198,12 @@ pub fn update_thread_state(
     profile: &UserProfile,
     now: DateTime<Utc>,
 ) -> Result<ThreadState> {
-    let messages = repo::messages::thread_messages(store, dig_id, thread_id)?;
+    let messages = repo::messages::thread_messages_bodies_newest(
+        store,
+        dig_id,
+        thread_id,
+        NEWEST_WITH_BODIES,
+    )?;
     let mut state = compute_thread_state(&messages, profile, now);
     if messages.is_empty() {
         state.thread_id = thread_id.clone();

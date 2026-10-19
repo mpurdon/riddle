@@ -25,7 +25,10 @@ use std::future::Future;
 /// runner allows one judge-class job per account, so two accounts make
 /// twelve streams, which the client's bucket then paces). Six also bounds
 /// what a 5 s judge timeout can hold up and how many escalations can pass
-/// the cap's check before the first books its cost.
+/// the cap's check before the first books its cost. Since a message's
+/// Sets are asked together (19 Oct 2026) the judge sees up to
+/// `riddle_sift::JUDGE_CALLS_IN_FLIGHT` calls at once from these streams;
+/// that wrapper, not the stream count, is the bound the judge sees.
 pub const JUDGE_CONCURRENCY: usize = 6;
 
 /// Decide `items` through a stream of at most `concurrency` decisions at

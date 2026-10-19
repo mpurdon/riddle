@@ -200,6 +200,15 @@ fn with_body_text(mut m: Message) -> Message {
     m
 }
 
+/// `with_body_text` for a page of bodies, off the async workers: fifty
+/// HTML bodies are CPU work that held up the judge streams and the IPC
+/// reads sharing the runtime (19 Oct 2026).
+async fn with_body_texts(messages: Vec<Message>) -> Result<Vec<Message>> {
+    tokio::task::spawn_blocking(move || messages.into_iter().map(with_body_text).collect())
+        .await
+        .map_err(riddle_errors::internal)
+}
+
 fn parse_time(s: Option<String>) -> Option<DateTime<Utc>> {
     s.and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
         .map(|t| t.with_timezone(&Utc))
@@ -456,10 +465,22 @@ impl SyncEngine {
                 total = Some(estimate);
             }
             let ids: Vec<String> = page.refs.iter().map(|r| r.provider_id.clone()).collect();
-            let messages = self
-                .provider
-                .get_messages_batch(&ids, Detail::Metadata)
-                .await?;
+            // The very first page is headers only, so the list shows within
+            // seconds; every page after it comes with bodies. Each page was
+            // fetched twice, headers now and bodies later, at 20 quota units
+            // a message each time, so the first sync spent half its quota
+            // and half its time fetching what it already had (19 Oct 2026).
+            let detail = if listed == 0 {
+                Detail::Metadata
+            } else {
+                Detail::Full
+            };
+            let messages = self.provider.get_messages_batch(&ids, detail).await?;
+            let messages = if detail == Detail::Full {
+                with_body_texts(messages).await?
+            } else {
+                messages
+            };
             let (n, threads) = self.write_page(&store, &messages)?;
             report.added += n;
             listed += ids.len() as u64;
@@ -633,7 +654,7 @@ impl SyncEngine {
                     .provider
                     .get_messages_batch(chunk, Detail::Full)
                     .await?;
-                messages.extend(full.into_iter().map(with_body_text));
+                messages.extend(with_body_texts(full).await?);
             }
             let (n, threads) = self.write_page(&store, &messages)?;
             report.added += n;
@@ -825,10 +846,11 @@ impl SyncEngine {
                 .provider
                 .get_messages_batch(&provider_ids, Detail::Full)
                 .await?;
+            let full = with_body_texts(full).await?;
             let mut fetched: HashSet<MessageId> = HashSet::new();
             store.write(|c| {
-                for m in full.iter().cloned().map(with_body_text) {
-                    repo::messages::upsert_in(c, &m)?;
+                for m in &full {
+                    repo::messages::upsert_in(c, m)?;
                     fetched.insert(m.id.clone());
                 }
                 Ok(())

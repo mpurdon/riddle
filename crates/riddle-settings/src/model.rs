@@ -512,7 +512,11 @@ impl Default for ComparisonSettings {
     fn default() -> Self {
         Self {
             roster: DEFAULT_ROSTER.iter().map(|s| s.to_string()).collect(),
-            challengers: true,
+            // Off until the person turns them on: every real escalation
+            // fanned out to every other usable model, three Bedrock calls
+            // for one decision, and escalation already dominates cost
+            // (19 Oct 2026).
+            challengers: false,
             daily_usd: 3.0,
         }
     }

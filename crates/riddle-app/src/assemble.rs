@@ -19,6 +19,9 @@ impl App {
         let services = Arc::new(Services::new(stores.clone(), sink, config.build.clone()));
         services.insert(Arc::new(crate::engine::SiftLocks::default()));
         services.insert(Arc::new(crate::engine::Housekeeping::default()));
+        services.insert(Arc::new(crate::actions::ApplyPlanCache::default()));
+        services.insert(Arc::new(crate::ops::BootStage::default()));
+        services.insert(Arc::new(crate::packs::PackOfferCache::default()));
         let mut builder = RuntimeBuilder::new(services.clone());
         builder = builder.registry(riddle_actions::actions::register_all);
         let mut policy = riddle_actions::policy::AutonomyPolicy {

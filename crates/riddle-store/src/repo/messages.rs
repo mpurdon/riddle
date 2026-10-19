@@ -193,6 +193,40 @@ pub fn thread_messages(store: &Store, dig_id: &DigId, thread: &ThreadId) -> Resu
     })
 }
 
+/// A thread's messages in date order with bodies only on the newest
+/// `newest`: Thread State scans the newest for asks and commitments and
+/// needs only senders, dates and the count from the rest. Every body of
+/// a hundred-message thread was loaded and normalised each time one
+/// message of it landed (19 Oct 2026).
+pub fn thread_messages_bodies_newest(
+    store: &Store,
+    dig_id: &DigId,
+    thread: &ThreadId,
+    newest: usize,
+) -> Result<Vec<Message>> {
+    let mut rows: Vec<Message> = store.read(|c| {
+        let mut st = c.prepare(&format!(
+            "SELECT {SUMMARY_COLS} FROM messages WHERE thread_id = ?1 AND deleted_at IS NULL ORDER BY date"
+        ))?;
+        let rows = st
+            .query_map([thread.as_str()], |r| row_to_message(r, dig_id))?
+            .collect();
+        rows
+    })?;
+    let from = rows.len().saturating_sub(newest);
+    let ids: Vec<MessageId> = rows[from..].iter().map(|m| m.id.clone()).collect();
+    let mut bodies: std::collections::HashMap<MessageId, Message> = get_many(store, dig_id, &ids)?
+        .into_iter()
+        .map(|m| (m.id.clone(), m))
+        .collect();
+    for row in &mut rows[from..] {
+        if let Some(full) = bodies.remove(&row.id) {
+            *row = full;
+        }
+    }
+    Ok(rows)
+}
+
 pub fn count(store: &Store) -> Result<u64> {
     store.read(|c| {
         c.query_row(
@@ -545,6 +579,10 @@ pub fn search(
                     shadow_review: r
                         .get::<_, Option<String>>("shadow_review")?
                         .and_then(|v| riddle_core::ShadowReview::parse(&v)),
+                    held_reason: class
+                        .as_ref()
+                        .filter(|k| k.disposition.kind() == riddle_core::DispositionKind::Unresolved)
+                        .map(|k| k.reason.clone()),
                     superseded_by: r.get::<_, Option<String>>("superseded_by")?.map(MessageId),
                     importance: riddle_core::Importance::from_rank(r.get("importance")?),
                     importance_set_by_you: r.get("importance_set_by_you")?,

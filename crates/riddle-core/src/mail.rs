@@ -141,6 +141,11 @@ pub struct MessageSummary {
     /// The user's review of the Shadow proposal, when they gave one.
     #[serde(default)]
     pub shadow_review: Option<ShadowReview>,
+    /// Why an Unresolved message waits, in the decision's words; the
+    /// Unresolved tray read it with one explain call per row (19 Oct 2026).
+    #[serde(default)]
+    #[ts(optional)]
+    pub held_reason: Option<String>,
     /// A newer message of the same `+ Replaces` series (a store's next sale)
     /// made this one moot: it reads as read and sinks below its list.
     #[serde(default)]

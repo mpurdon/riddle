@@ -33,7 +33,7 @@ fn harness(max_concurrent: usize) -> Harness {
         BuildStamp::from_env_vars("0", None, None, None, "test"),
     ));
     let queue = JobQueue::open(stores.index(), clock.clone(), events.clone()).unwrap();
-    let resources = Resources::new(ResourceConfig::default());
+    let resources = Resources::new();
     let runner = Runner::new(queue.clone(), services, resources)
         .with_max_concurrent(max_concurrent)
         .with_backoff_base(Duration::from_millis(10));
@@ -109,15 +109,6 @@ impl JobHandler for Chatty {
         for i in 0..100 {
             ctx.progress.report(i + 1, Some(100), "chatting");
         }
-        Ok(JobOutcome::done())
-    }
-}
-
-struct NeedsJudge;
-#[async_trait]
-impl JobHandler for NeedsJudge {
-    async fn run(&self, ctx: JobContext) -> Result<JobOutcome> {
-        ctx.resources.acquire(Resource::Judge, 1.0).await?;
         Ok(JobOutcome::done())
     }
 }
@@ -415,6 +406,16 @@ async fn orphaned_running_jobs_are_requeued_on_open() {
     assert_eq!(reopened.runnable().len(), 1);
 }
 
+/// Runs only if the scheduler let it start: the budget is checked before a
+/// budgeted job starts, not inside it.
+struct BudgetProbe;
+#[async_trait]
+impl JobHandler for BudgetProbe {
+    async fn run(&self, _ctx: JobContext) -> Result<JobOutcome> {
+        Ok(JobOutcome::done())
+    }
+}
+
 struct Exhausted;
 impl BudgetGate for Exhausted {
     fn remaining(&self, _d: Option<&DigId>, _c: BudgetClass) -> f64 {
@@ -427,8 +428,8 @@ async fn an_exhausted_budget_holds_backfill_and_lets_incoming_run() {
     let h = harness(2);
     h.runner.resources().set_budget_gate(Arc::new(Exhausted));
     h.runner
-        .register(JobKind::HistoricalSift, Arc::new(NeedsJudge));
-    h.runner.register(JobKind::Sift, Arc::new(NeedsJudge));
+        .register(JobKind::HistoricalSift, Arc::new(BudgetProbe));
+    h.runner.register(JobKind::Sift, Arc::new(BudgetProbe));
     let backfill = h
         .queue
         .enqueue(spec(JobKind::HistoricalSift, "historical"))

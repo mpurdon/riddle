@@ -179,4 +179,10 @@ pub struct TaskCentre {
     #[serde(default)]
     pub llm: Option<crate::traits::ServiceHealth>,
     pub as_of: DateTime<Utc>,
+    /// What the core is still doing before it can answer (resolving the
+    /// judge key, say); `None` once booted. The first seconds read as
+    /// "Connecting…" from a failed read (19 Oct 2026).
+    #[serde(default)]
+    #[ts(optional)]
+    pub booting: Option<String>,
 }

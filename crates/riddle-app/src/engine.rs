@@ -461,30 +461,49 @@ impl App {
         // The batch is one window (`crate::window`). 1. Its inputs, in
         // series: the facts read the store and are cheap. A message whose
         // input fails is counted here and stays unclassified.
-        let mut inputs: Vec<SiftInput> = Vec::with_capacity(ids.len());
-        for id in ids {
-            if cancel.is_some_and(|c| c.is_cancelled()) {
-                break;
-            }
-            let Some(message) = repo::messages::get(&store, &dig.id, &id)? else {
-                continue;
-            };
-            match self.sift_input_with(dig, message, &pass_context, &profile) {
-                Ok(mut input) => {
-                    input.pass_id = pass_id.clone();
-                    inputs.push(input);
+        // Built on a blocking thread: a hundred inputs are a hundred store
+        // reads and normalisations, and they ran on the async workers the
+        // judge streams and the IPC share (19 Oct 2026).
+        let (inputs, failed) = {
+            let app = self.clone();
+            let dig = dig.clone();
+            let pass_context = pass_context.clone();
+            let profile = profile.clone();
+            let pass_id = pass_id.clone();
+            let cancel = cancel.cloned();
+            tokio::task::spawn_blocking(move || -> Result<(Vec<SiftInput>, u64)> {
+                let store = app.stores.dig(&dig.id)?;
+                let mut inputs: Vec<SiftInput> = Vec::with_capacity(ids.len());
+                let mut failed = 0u64;
+                for id in ids {
+                    if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+                        break;
+                    }
+                    let Some(message) = repo::messages::get(&store, &dig.id, &id)? else {
+                        continue;
+                    };
+                    match app.sift_input_with(&dig, message, &pass_context, &profile) {
+                        Ok(mut input) => {
+                            input.pass_id = pass_id.clone();
+                            inputs.push(input);
+                        }
+                        Err(e) => {
+                            rwarn!(
+                                Category::Sift,
+                                "input for {} failed: {}",
+                                id,
+                                e.kind.as_str()
+                            );
+                            failed += 1;
+                        }
+                    }
                 }
-                Err(e) => {
-                    rwarn!(
-                        Category::Sift,
-                        "input for {} failed: {}",
-                        id,
-                        e.kind.as_str()
-                    );
-                    report.failed += 1;
-                }
-            }
-        }
+                Ok((inputs, failed))
+            })
+            .await
+            .map_err(RiddleError::internal)??
+        };
+        report.failed += failed;
         report.window = inputs.len() as u64;
         report.concurrency = JUDGE_CONCURRENCY as u64;
         // What the window's decisions share, read once here rather than by

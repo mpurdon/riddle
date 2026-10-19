@@ -11,8 +11,8 @@ use riddle_activity::{NoProviderCheck, RuntimeHandle, UndoEngine};
 use riddle_core::*;
 use riddle_errors::Result;
 use riddle_jobs::{
-    DigStatusSource, JobContext, JobHandler, JobOutcome, JobQueue, JobSpec, ResourceConfig,
-    Resources, Runner, SleepDetector, UsageBudgetGate, WakeHook, WakeReason,
+    DigStatusSource, JobContext, JobHandler, JobOutcome, JobQueue, JobSpec, Resources, Runner,
+    SleepDetector, UsageBudgetGate, WakeHook, WakeReason,
 };
 use riddle_observability::{rdebug, rinfo, rwarn, swallowed, Category};
 use riddle_settings::{
@@ -27,6 +27,22 @@ use std::sync::Arc;
 /// meanwhile, not what it lacks. "Judge unavailable" read as an outage on
 /// an install that had never been given a key (17 Oct 2026).
 pub const NO_JUDGE_KEY: &str = "Sorting by rules until you add a judge key; nothing hidden";
+
+/// What boot is doing, for the Task Centre to show before the core is up.
+#[derive(Default)]
+pub struct BootStage(std::sync::Mutex<Option<String>>);
+
+impl BootStage {
+    pub fn set(&self, stage: Option<&str>) {
+        if let Ok(mut g) = self.0.lock() {
+            *g = stage.map(str::to_string);
+        }
+    }
+
+    pub fn current(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|g| g.clone())
+    }
+}
 
 pub struct Ops {
     pub settings: Arc<SettingsStore>,
@@ -521,7 +537,7 @@ impl App {
             s.budgets.daily_judge_usd,
             s.budgets.daily_llm_usd,
         ));
-        let resources = Resources::new(ResourceConfig::default());
+        let resources = Resources::new();
         resources.set_budget_gate(budget.clone());
         let runner = Runner::new(queue.clone(), self.services.clone(), resources);
         for kind in [
@@ -806,7 +822,9 @@ impl App {
     }
 
     pub fn task_centre(&self) -> Result<TaskCentre> {
-        let ops = self.services.require::<Ops>()?;
+        let Some(ops) = self.services.get::<Ops>() else {
+            return Ok(self.booting_task_centre());
+        };
         let src = self.services.require::<AppDigStatus>()?;
         let mut tc = riddle_jobs::snapshot(
             &self.stores,
@@ -817,6 +835,36 @@ impl App {
         tc.judge = self.judge_health();
         tc.llm = self.llm_health();
         Ok(tc)
+    }
+
+    /// The Task Centre before the core is up: the accounts as last saved,
+    /// no jobs, and what boot is doing right now.
+    fn booting_task_centre(&self) -> TaskCentre {
+        let digs = self
+            .list_digs()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|d| DigStatusRow {
+                dig_id: d.id,
+                name: d.name,
+                status: d.status,
+            })
+            .collect();
+        TaskCentre {
+            overall: OverallStatus::CatchingUp,
+            digs,
+            jobs: vec![],
+            store_fault: self.stores.any_fault(),
+            judge: None,
+            llm: None,
+            as_of: self.services.clock.now(),
+            booting: Some(
+                self.services
+                    .get::<BootStage>()
+                    .and_then(|b| b.current())
+                    .unwrap_or_else(|| "Starting".into()),
+            ),
+        }
     }
 
     /// Unclassified mail inside the sync window (`sync_options().window_days`;
@@ -892,6 +940,13 @@ impl App {
         background: bool,
         override_settings: Option<Settings>,
     ) -> Result<Arc<Ops>> {
+        let stage = self.services.get::<BootStage>();
+        let at = |what: &str| {
+            if let Some(s) = &stage {
+                s.set(Some(what));
+            }
+        };
+        at("Loading settings");
         let settings = self.attach_settings()?;
         let override_settings = override_settings.or_else(|| {
             self.config.offline.then(|| {
@@ -912,10 +967,17 @@ impl App {
         let s = settings.settings();
         self.services
             .insert(Arc::new(crate::live::SecretsChanged::default()));
+        at("Connecting the mailbox");
         self.attach_domains(crate::live::gmail_config(&s))?;
+        at("Starting the model client");
         self.attach_ai(&ai_config(&s));
+        at("Resolving the judge key");
         self.attach_judge(&judge_config(&s)).await;
+        at("Starting jobs");
         let ops = self.attach_ops(settings.clone())?;
+        if let Some(s) = &stage {
+            s.set(None);
+        }
         self.watch_settings(ops.clone(), settings);
         for d in self.list_digs()? {
             self.refresh_dig_status(&d.id);

@@ -116,3 +116,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 57 | perf(desktop): triage actions patch rows and return at once, events coalesce, settings apply ahead, Review runs in parallel | 183 | 0 | 0 | 0 | 0 |
 | 58 | perf(core): a message's Sets are judged together, the judge retries a blip once and judge-less Unresolved return to Sift, one profile read per pass, indexed and set-based reads | 0 | 0 | 0 | 0 | 0 |
 | 59 | perf(desktop): corrections save without a simulation, apply-to-past-mail shows what it checks, Unresolved rows carry their reason, the Task Centre says what boot is doing | 28 | 0 | 0 | 0 | 0 |
+| 60 | perf(core): Mesh writes return at once, the apply plan is kept, held reasons ride on rows, boot reports its stage; first sync fetches bodies once, challengers opt in, the unused gates go, body work and inputs run off the async workers, Thread State reads twenty bodies | 0 | 0 | 0 | 0 | 0 |

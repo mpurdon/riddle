@@ -88,6 +88,7 @@ pub fn snapshot(
         judge: None,
         llm: None,
         as_of: clock.now(),
+        booting: None,
     }
 }
 

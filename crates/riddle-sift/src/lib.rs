@@ -20,6 +20,7 @@
 //! structured telemetry (§92).
 
 pub mod actions;
+pub mod bounded;
 pub mod dated;
 pub mod expiry;
 pub mod explain;
@@ -27,6 +28,7 @@ pub mod facts;
 pub mod gates;
 pub mod pipeline;
 
+pub use bounded::{BoundedJudge, JUDGE_CALLS_IN_FLIGHT};
 pub use explain::explain;
 pub use facts::{compute_facts, gmail_categories_from_labels, parse_deadlines};
 pub use gates::{contamination_evidence, never_hidden_reason};
@@ -366,7 +368,12 @@ impl Sift {
             services.events.clone(),
             services.build.clone(),
         );
-        s.judge = services.judge();
+        // Bounded by calls in flight, since a message's Sets are asked
+        // together and the window's streams are not the count the judge
+        // sees (19 Oct 2026).
+        s.judge = services.judge().map(|j| {
+            Arc::new(BoundedJudge::new(j, JUDGE_CALLS_IN_FLIGHT)) as Arc<dyn SemanticJudge>
+        });
         s.refiner = services.refiner();
         s.projection = services.get::<ProjectionHookHandle>().map(|h| h.0.clone());
         s

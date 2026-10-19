@@ -115,6 +115,32 @@ pub fn counts(
     })
 }
 
+/// What a plan computed from the current classifications depends on: how
+/// many there are and the newest creation and supersession. Any decision
+/// made or superseded since changes it. For `ApplyPlanCache`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fingerprint {
+    pub count: i64,
+    pub newest_created: i64,
+    pub newest_superseded: i64,
+}
+
+pub fn fingerprint(store: &Store) -> Result<Fingerprint> {
+    store.read(|c| {
+        c.query_row(
+            "SELECT count(*), coalesce(max(created_at), 0), coalesce(max(superseded_at), 0) FROM classifications",
+            [],
+            |r| {
+                Ok(Fingerprint {
+                    count: r.get(0)?,
+                    newest_created: r.get(1)?,
+                    newest_superseded: r.get(2)?,
+                })
+            },
+        )
+    })
+}
+
 /// Current classifications for a set of messages in one query, for
 /// simulation diffs and the resync.
 pub fn current_many(

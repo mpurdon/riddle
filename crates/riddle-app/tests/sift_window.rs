@@ -10,6 +10,7 @@
 use riddle_app::window::JUDGE_CONCURRENCY;
 use riddle_core::*;
 use riddle_judge::ScriptedJudge;
+use riddle_sift::JUDGE_CALLS_IN_FLIGHT;
 use riddle_store::repo;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -134,9 +135,13 @@ async fn a_window_of_slow_judge_calls_finishes_in_parallel_with_one_disposition_
     );
     // In series the pass could not finish before every wait had passed.
     let serial_floor_ms = calls as u64 * 50;
+    // A message's Sets are asked together, so its judge time is the longer
+    // Set's wait, not their sum (19 Oct 2026): the summed judge time still
+    // counts one wait per message.
+    let per_message_floor_ms = 24 * 50;
     assert!(
-        report.judge_ms >= serial_floor_ms * 9 / 10,
-        "summed judge time counts every wait: {calls} calls, {report:?}"
+        report.judge_ms >= per_message_floor_ms * 9 / 10,
+        "summed judge time counts a wait per message: {calls} calls, {report:?}"
     );
     assert!(
         report.elapsed_ms < serial_floor_ms / 2,
@@ -144,7 +149,9 @@ async fn a_window_of_slow_judge_calls_finishes_in_parallel_with_one_disposition_
     );
     let peak = judge.peak();
     assert!(peak >= 2, "calls overlapped: peak {peak}");
-    assert!(peak <= JUDGE_CONCURRENCY, "the bound held: peak {peak}");
+    // A message's Sets are asked together, so the judge sees more calls at
+    // once than there are streams; the bound it sees is calls in flight.
+    assert!(peak <= JUDGE_CALLS_IN_FLIGHT, "the bound held: peak {peak}");
 
     let store = app.stores.dig(&dig.id).unwrap();
     for id in &ids {

@@ -155,6 +155,7 @@ async fn models_are_compared_on_your_decisions_and_nothing_is_applied() {
 async fn usable_challengers_answer_beside_a_real_escalation() {
     let (app, ops) = common::boot_scripted(false, |s| {
         s.comparison.roster = vec!["challenger-a".into(), "not-enabled-b".into()];
+        s.comparison.challengers = true;
     })
     .await;
     let dig =
