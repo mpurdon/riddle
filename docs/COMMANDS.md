@@ -186,7 +186,7 @@ meaning every type. Saved with the rest of the settings through
 `save_settings`; the Priority page saves on every change.
 
 `settings.judge` production defaults: `keySource = "keychain"` with no key
-and no SSM profile or parameter (the dev profile keeps SSM `dev`). Until a
+and no SSM profile or parameter (the dev profile takes SSM from `RIDDLE_DEV_AWS_PROFILE` and `RIDDLE_DEV_JEV_SSM_PARAMETER`). Until a
 key is pasted (`set_secret { secret: "jev_api_key" }`, which also sets
 `keySource` to `keychain` so the key pasted is the key used) Riddle sorts by
 rules and hides nothing: the account status reads "Sorting by rules until

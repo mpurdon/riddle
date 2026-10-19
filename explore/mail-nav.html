@@ -188,16 +188,16 @@ table.eval td.s.best { color: var(--moss); font-weight: 600; }
 
   // Believable rows per place, so the list changes as you click.
   var SAMPLES = {
-    Accounting: [['FreshBooks', 'Invoice #2291 from Harbour Light Studio is due Friday'], ['CRA My Business', 'Your HST return has been received'], ['QuickBooks', 'September reconciliation is ready']],
-    Bills: [['Enbridge', 'Your October bill is ready'], ['Rogers', 'Your bill is ready to view'], ['Lakeshore Hydro', 'Your bill for account 4471 is available']],
-    Newsletters: [['The Stack', 'Runtime: the father of Java on the art of code'], ['InfoQ', 'Causal AI, SafeChat, JEP 540'], ['Nate', 'Codex, Grok and Claude all agree']],
-    Promos: [['Canada Computers', 'Save up to $700 on laptops'], ['Holt Renfrew', 'Colour Coded: a new take on hues'], ['Storage Plus', 'Last chance to save!']],
-    Receipts: [['Uber', 'Your Tuesday trip with Uber'], ['Kilo Code', 'Your receipt #2633-0984'], ['AWS', 'Thank you for your payment']],
-    Security: [['Microsoft', 'Your single-use code'], ['Moniker', 'Login notification from 203.0.113.7'], ['Kickstarter', '035277 is your sign-in code']],
+    Accounting: [['FreshBooks', 'Invoice #2291 from Harbour Light Studio is due Friday'], ['Tax Office', 'Your sales tax return has been received'], ['QuickBooks', 'September reconciliation is ready']],
+    Bills: [['Northern Gas', 'Your October bill is ready'], ['Telco', 'Your bill is ready to view'], ['Lakeshore Hydro', 'Your bill for account 4471 is available']],
+    Newsletters: [['Runtime Weekly', 'The father of Java on the art of code'], ['InfoQ', 'Causal AI, SafeChat, JEP 540'], ['Nate', 'Codex, Grok and Claude all agree']],
+    Promos: [['Laptop Depot', 'Save up to $700 on laptops'], ['Maison Row', 'Colour Coded: a new take on hues'], ['Storage Plus', 'Last chance to save!']],
+    Receipts: [['Uber', 'Your Tuesday trip with Uber'], ['Cloud IDE', 'Your receipt #2633-0984'], ['AWS', 'Thank you for your payment']],
+    Security: [['Microsoft', 'Your single-use code'], ['Registrar', 'Login notification from 203.0.113.7'], ['Kickstarter', '035277 is your sign-in code']],
     Rowing: [['Rowing Club', 'October meeting notes'], ['Jo R.', 'Re: Saturday potluck'], ['Rowing Club', 'Membership renewal']],
     Github: [['GitHub', '[northwind/platform] fix(api): URL-encode'], ['GitHub', 'Re: [northwind/event-bus] bump actions'], ['GitHub', 'Run failed: CI on main']],
     Community: [['Nextdoor', 'Car break-in on Elm St last night'], ['Nextdoor', '96 free items from your neighbours'], ['Nextdoor', 'Weather alert for Lakeview']],
-    Inbox: [['Sam Carter', 'Re: Follow-up on the quote'], ['IcePanel', 'CA$76.84 payment was unsuccessful'], ['Moniker', '2 of your domain names expire soon']]
+    Inbox: [['Sam Carter', 'Re: Follow-up on the quote'], ['Diagram Tool', 'CA$76.84 payment was unsuccessful'], ['Registrar', '2 of your domain names expire soon']]
   };
   function rowsFor(name, total, unread) {
     var leaf = name.split('/').pop();

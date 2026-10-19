@@ -96,12 +96,8 @@ pub fn judge_config(s: &Settings) -> JudgeConfig {
             KeySource::Ssm => "ssm",
         }
         .into(),
-        ssm_profile: s.judge.ssm_profile.clone().unwrap_or_else(|| "dev".into()),
-        ssm_parameter: s
-            .judge
-            .ssm_parameter
-            .clone()
-            .unwrap_or_else(|| "/riddle/jev_api_key".into()),
+        ssm_profile: s.judge.ssm_profile.clone().unwrap_or_default(),
+        ssm_parameter: s.judge.ssm_parameter.clone().unwrap_or_default(),
     }
 }
 

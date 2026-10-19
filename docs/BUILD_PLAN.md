@@ -28,7 +28,7 @@ declare. Cross-track needs go through traits in `riddle-core`.
 |---|---|---|
 | A mail | riddle-mail, riddle-gmail, riddle-sync, riddle-projection, riddle-people, riddle-context, riddle-search, riddle-embeddings, riddle-credentials | `MailProvider` trait; MIME/HTML normalization; `FixtureProvider` with a realistic synthetic mailbox and runtime injection; Gmail OAuth PKCE loopback, REST client, history sync, batchModify, quota limiter, error mapping; sync engine (initial, incremental, full resync, attribution); projection outbox processor; People aggregation; Thread State; search operators over FTS; keychain wrapper |
 | B sift | riddle-signals, riddle-judge, riddle-mesh, riddle-sift, riddle-finds, riddle-scheduler | system Signal vocabulary and Sets with state builders; registry service; calibration; Jev judge with SSM key resolution, rate limit, circuit breaker, raw capture; Null and Scripted judges; Mesh DSL parser, evaluator, scope resolution, defaults, simulation; the Sift pipeline with facts, gates, selection, judge, routes, confidence policy, escalation, guards, disposition, traces, shadow; Finds with dedupe and Temporal Sift |
-| C ai | riddle-ai, riddle-agent, riddle-expeditions, riddle-privacy | `Llm` trait; Bedrock via the `dev` profile; `SignalRefiner` for escalation; versioned prompt files; usage rows; circuit breaker; Director loop over Actions with untrusted marking and egress gating; semantic-compiler flow; Expedition runner with plan, checkpoints, budget, resume; redaction and privacy statement |
+| C ai | riddle-ai, riddle-agent, riddle-expeditions, riddle-privacy | `Llm` trait; Bedrock via the owner's AWS profile; `SignalRefiner` for escalation; versioned prompt files; usage rows; circuit breaker; Director loop over Actions with untrusted marking and egress gating; semantic-compiler flow; Expedition runner with plan, checkpoints, budget, resume; redaction and privacy statement |
 | D ops | riddle-settings, riddle-jobs, riddle-activity | settings with serde defaults, atomic writes, schema version, compatibility tests; job queue with priority classes, rate limiters, checkpoints, pause reasons, Task Centre snapshot, sleep detection; Activity helpers and the undo engine (non-linear, Undo All, correction retraction, provider check hook) |
 | E ui | apps/desktop/src | every product surface in `docs/COMMANDS.md` against mocks: morning summary, Finds, Unresolved, Spoil review, message and thread view with sanitized HTML, Task Centre, Activity with undo, Mesh editor with simulation preview, Signal registry, Strata, Director panel, Expeditions, Settings, Developer Mode (ops pane, log tail, in-flight, inspectors), keyboard table and help sheet, empty states, confirmation tiers |
 
@@ -68,7 +68,7 @@ escalation, so Finds, Unresolved, Activity and traces are populated.
   signing key exists.
 - Fairness between Digs on the shared judge bucket is FIFO.
 - Sonnet 5 and Opus 5 are unpriced in the catalog and Sonnet 5 is not
-  enabled on the dev account; the Director runs on Sonnet 4.5.
+  enabled on the owner's AWS account; the Director runs on Sonnet 4.5.
 - Escalation cost dominates: ~$0.009 per escalated message on Haiku 4.5
   against ~$0.00002 per judge call. The per-Dig escalation budget exists
   but the prompt could be trimmed (it sends all 27 definitions).

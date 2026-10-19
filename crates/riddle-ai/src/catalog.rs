@@ -74,7 +74,7 @@ pub struct ModelCatalog {
 
 pub const HAIKU_4_5: &str = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
 pub const SONNET_5: &str = "us.anthropic.claude-sonnet-5";
-/// The Director default: accessible on the dev account and priced. Sonnet 5
+/// The Director default: accessible on the owner's account and priced. Sonnet 5
 /// returned AccessDenied on 2026-09-22; switch back once access is granted.
 pub const SONNET_4_5: &str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
 pub const OPUS_5: &str = "us.anthropic.claude-opus-5";

@@ -31,13 +31,21 @@ pub struct JudgeConfig {
 }
 
 impl Default for JudgeConfig {
+    /// The owner's dev setup when the environment names it
+    /// (`riddle_settings::DevAws`), else the production shape: a keychain
+    /// source with no key. Live tests rely on the former.
     fn default() -> Self {
+        let aws = riddle_settings::DevAws::from_env();
+        let (key_source, ssm_profile, ssm_parameter) = match (aws.profile, aws.jev_parameter) {
+            (Some(profile), Some(parameter)) => ("ssm", profile, parameter),
+            _ => ("keychain", String::new(), String::new()),
+        };
         Self {
             provider: "jev".into(),
             model: "jev-1.13.0".into(),
-            key_source: "ssm".into(),
-            ssm_profile: "dev".into(),
-            ssm_parameter: "/riddle/jev_api_key".into(),
+            key_source: key_source.into(),
+            ssm_profile,
+            ssm_parameter,
         }
     }
 }

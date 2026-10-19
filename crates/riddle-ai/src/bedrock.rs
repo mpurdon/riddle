@@ -52,7 +52,7 @@ pub struct BedrockConfig {
 impl Default for BedrockConfig {
     fn default() -> Self {
         Self {
-            profile: Some("dev".into()),
+            profile: None,
             region: "us-east-1".into(),
             default_model: crate::catalog::HAIKU_4_5.into(),
             retry: RetryPolicy::default(),
@@ -905,7 +905,7 @@ mod tests {
         );
     }
 
-    /// Live: proves the `dev` profile can call Haiku 4.5 through Converse
+    /// Live: proves the dev profile (`RIDDLE_DEV_AWS_PROFILE`) can call Haiku 4.5 through Converse
     /// with a tool, and that the response has the documented shape (text or
     /// tool use, token counts, a priced cost). Run with
     /// `cargo test -p riddle-ai --release -- --ignored live_bedrock`.
@@ -913,7 +913,13 @@ mod tests {
     #[ignore]
     async fn live_bedrock_haiku_answers_with_the_documented_shape() {
         let usage = Arc::new(crate::usage::RecordingUsage::default());
-        let llm = BedrockLlm::new(BedrockConfig::default(), Arc::new(ModelCatalog::default()))
+        let config = BedrockConfig {
+            profile: std::env::var("RIDDLE_DEV_AWS_PROFILE")
+                .ok()
+                .filter(|p| !p.trim().is_empty()),
+            ..BedrockConfig::default()
+        };
+        let llm = BedrockLlm::new(config, Arc::new(ModelCatalog::default()))
             .with_recorder(usage.recorder());
         let req = LlmRequest::new(
             "You are a terse assistant. Use the tool when asked to look something up; otherwise answer in one short sentence.",

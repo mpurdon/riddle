@@ -18,7 +18,7 @@
 //! A judge that failed to resolve its key at start (an expired SSO session,
 //! a keychain item added later) is tried again on the same floor, at most
 //! once every ten minutes across accounts, instead of waiting for a restart:
-//! an hour of live checks ran judge-less after the dev session expired,
+//! an hour of live checks ran judge-less after the SSO session expired,
 //! and the Summary looked healthy because nothing was waiting (18 Oct 2026).
 
 use crate::domains::Domains;

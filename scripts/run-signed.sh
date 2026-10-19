@@ -10,6 +10,15 @@
 # "Developer ID Application" or "Apple Development" identity in the keychain;
 # with neither, the binary runs as cargo built it.
 set -e
+# The owner's dev-profile environment (RIDDLE_DEV_AWS_PROFILE and the
+# like) lives in a git-ignored .env at the repository root; see
+# .env.example. Exported here so `tauri dev`, the CLI and live tests see it.
+root="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$root/.env" ]; then
+  set -a
+  . "$root/.env"
+  set +a
+fi
 bin="$1"
 case "$(basename "$bin")" in
   riddle|riddle-desktop)

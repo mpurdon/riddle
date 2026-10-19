@@ -1,5 +1,5 @@
 //! Where the Jev key comes from (§57): the environment for scripts, the OS
-//! keychain for daily use, SSM Parameter Store for the user's `dev`
+//! keychain for daily use, SSM Parameter Store for the owner's dev
 //! profile. Resolution happens at runtime and the value is never written to
 //! disk in this repository. An SSM failure says which parameter and profile
 //! were tried, never what was found.
@@ -41,9 +41,20 @@ impl JevKeySource {
             region: "us-east-1".into(),
         }
     }
-    /// The user's setup: profile `dev`, parameter `/riddle/jev_api_key`.
-    pub fn dev_ssm() -> Self {
-        Self::ssm("dev", "/riddle/jev_api_key")
+    /// The owner's setup for live tests, from `RIDDLE_DEV_AWS_PROFILE` and
+    /// `RIDDLE_DEV_JEV_SSM_PARAMETER` (a git-ignored `.env` at the repository
+    /// root; see `.env.example`). `None` until both are set.
+    pub fn dev_ssm() -> Option<Self> {
+        let read = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        Some(Self::ssm(
+            read("RIDDLE_DEV_AWS_PROFILE")?,
+            read("RIDDLE_DEV_JEV_SSM_PARAMETER")?,
+        ))
     }
 
     pub fn describe(&self) -> String {

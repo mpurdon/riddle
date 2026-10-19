@@ -12,6 +12,13 @@
 `RIDDLE_DATA_DIR` overrides the root for all of these; `RIDDLE_LOG` sets the
 level for one launch (`trace`, `debug`, `info`, `warn`, `error`).
 
+The dev profile takes its AWS setup from `RIDDLE_DEV_AWS_PROFILE` (the
+profile the judge key and Bedrock use) and `RIDDLE_DEV_JEV_SSM_PARAMETER`
+(the Parameter Store name of the Jev key). A git-ignored `.env` at the
+repository root holds them (copy `.env.example`); `scripts/run-signed.sh`
+exports it for every binary cargo runs. Without them the dev profile is
+the production profile: keychain, and no judge until a key is pasted.
+
 Developer Mode → Storage has "Reveal in Finder" for each of these.
 
 ## What logs contain

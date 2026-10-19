@@ -1,6 +1,6 @@
 //! `JevJudge`: TypeSafe AI's System One endpoint behind `SemanticJudge`.
 //!
-//! Wire shape (from the vendor docs and the `dev` wrapper that already runs
+//! Wire shape (from the vendor docs and the wrapper that already runs
 //! in production): `POST /v1/systemone` with a bearer token and a body
 //! `{model, state, questions: {id: {type, instructions, criteria?}}}`;
 //! answers come back keyed by id as `{noul: p}` or `{choice, confidence,
@@ -565,8 +565,8 @@ mod tests {
         );
     }
 
-    /// Proves: the Jev key resolves from SSM (profile `dev`, parameter
-    /// `/riddle/jev_api_key`) and one real System One request with a
+    /// Proves: the Jev key resolves from SSM (the profile and parameter in
+    /// `RIDDLE_DEV_AWS_PROFILE` and `RIDDLE_DEV_JEV_SSM_PARAMETER`) and one real System One request with a
     /// noul and a choice question returns answers of the expected shape:
     /// one answer per question, distributions over the option names summing
     /// to one, tokens and latency recorded. Asserts on shape only; never
@@ -575,9 +575,14 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_jev_resolves_the_key_from_ssm_and_answers_a_noul_and_a_choice_question() {
-        let judge = JevJudge::from_source(JevConfig::default(), &JevKeySource::dev_ssm())
-            .await
-            .expect("key resolution and client construction");
+        let judge = JevJudge::from_source(
+            JevConfig::default(),
+            &JevKeySource::dev_ssm().expect(
+                "RIDDLE_DEV_AWS_PROFILE and RIDDLE_DEV_JEV_SSM_PARAMETER name the owner's key",
+            ),
+        )
+        .await
+        .expect("key resolution and client construction");
         let state = JudgeState::new("Subject: Review requested: Add retry to the sync worker\nFrom: notifications@github.com\n\n@you requested your review on #482. CI passed.".into());
         let choice = JudgeQuestion {
             id: "kind@v1".into(),

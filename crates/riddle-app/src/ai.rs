@@ -33,10 +33,12 @@ pub struct AiConfig {
 }
 
 impl Default for AiConfig {
+    /// The owner's AWS profile when the environment names it
+    /// (`riddle_settings::DevAws`), else the default credential chain.
     fn default() -> Self {
         Self {
             provider: "bedrock".into(),
-            profile: Some("dev".into()),
+            profile: riddle_settings::DevAws::from_env().profile,
             region: "us-east-1".into(),
             escalation_model: riddle_ai::catalog::HAIKU_4_5.into(),
             director_model: riddle_ai::catalog::SONNET_4_5.into(),

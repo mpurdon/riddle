@@ -136,14 +136,60 @@ impl Default for JudgeSettings {
     }
 }
 
-impl JudgeSettings {
-    /// The dev profile's judge: the key resolved from the owner's SSM.
-    pub fn dev_defaults() -> Self {
+/// The owner's AWS setup for the dev profile, read from the environment
+/// so the repository names nobody's account: `RIDDLE_DEV_AWS_PROFILE` is
+/// the profile the judge key and Bedrock use, `RIDDLE_DEV_JEV_SSM_PARAMETER`
+/// the Parameter Store name of the Jev key. A git-ignored `.env` at the
+/// repository root carries them and `scripts/run-signed.sh` exports it for
+/// every binary cargo runs. Unset, the dev profile is the production
+/// profile: keychain, and no judge until a key is pasted. The values used
+/// to be compiled in, which put the owner's account names in the source
+/// (18 Oct 2026).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DevAws {
+    pub profile: Option<String>,
+    pub jev_parameter: Option<String>,
+}
+
+pub const DEV_AWS_PROFILE_VAR: &str = "RIDDLE_DEV_AWS_PROFILE";
+pub const DEV_JEV_SSM_PARAMETER_VAR: &str = "RIDDLE_DEV_JEV_SSM_PARAMETER";
+
+impl DevAws {
+    /// The environment as the process sees it.
+    pub fn from_env() -> Self {
+        Self::from_lookup(|name| std::env::var(name).ok())
+    }
+
+    /// `lookup` stands in for the environment; blank values count as unset.
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Self {
+        let read = |name: &str| {
+            lookup(name)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
         Self {
-            key_source: KeySource::Ssm,
-            ssm_profile: Some("dev".into()),
-            ssm_parameter: Some("/riddle/jev_api_key".into()),
-            ..Self::default()
+            profile: read(DEV_AWS_PROFILE_VAR),
+            jev_parameter: read(DEV_JEV_SSM_PARAMETER_VAR),
+        }
+    }
+}
+
+impl JudgeSettings {
+    /// The dev profile's judge: the key resolved from the owner's SSM when
+    /// the environment names it, else the production default.
+    pub fn dev_defaults() -> Self {
+        Self::dev_defaults_for(&DevAws::from_env())
+    }
+
+    pub fn dev_defaults_for(aws: &DevAws) -> Self {
+        match (&aws.profile, &aws.jev_parameter) {
+            (Some(profile), Some(parameter)) => Self {
+                key_source: KeySource::Ssm,
+                ssm_profile: Some(profile.clone()),
+                ssm_parameter: Some(parameter.clone()),
+                ..Self::default()
+            },
+            _ => Self::default(),
         }
     }
 
@@ -187,10 +233,15 @@ impl Default for LlmSettings {
 }
 
 impl LlmSettings {
-    /// The dev profile's LLM: the owner's AWS profile.
+    /// The dev profile's LLM: the owner's AWS profile when the environment
+    /// names one, else the default credential chain.
     pub fn dev_defaults() -> Self {
+        Self::dev_defaults_for(&DevAws::from_env())
+    }
+
+    pub fn dev_defaults_for(aws: &DevAws) -> Self {
         Self {
-            profile: "dev".into(),
+            profile: aws.profile.clone().unwrap_or_default(),
             ..Self::default()
         }
     }
@@ -444,7 +495,7 @@ pub struct ComparisonSettings {
     pub daily_usd: f64,
 }
 
-/// The roster as of October 2026: the newest of each family the dev
+/// The roster as of October 2026: the newest of each family the owner's
 /// account could call, then the ones Bedrock lists that it could not yet.
 pub const DEFAULT_ROSTER: &[&str] = &[
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -834,7 +885,8 @@ mod tests {
     }
 
     #[test]
-    fn production_defaults_carry_no_ssm_profile_and_the_dev_profile_keeps_it() {
+    fn production_defaults_carry_no_ssm_profile_and_the_dev_profile_takes_it_from_the_environment()
+    {
         let prod = Settings::prod_defaults();
         assert_eq!(prod.judge.key_source, KeySource::Keychain);
         assert_eq!(prod.judge.ssm_profile, None);
@@ -848,18 +900,30 @@ mod tests {
             .expect("a keychain source needs no SSM parameter");
         assert!(prod.install_packs_on_first_sync);
         assert!(Settings::dev_defaults().install_packs_on_first_sync);
-        let dev = Settings::dev_defaults();
-        assert_eq!(dev.judge.key_source, KeySource::Ssm);
-        assert_eq!(dev.judge.ssm_profile.as_deref(), Some("dev"));
-        assert_eq!(
-            dev.judge.ssm_parameter.as_deref(),
-            Some("/riddle/jev_api_key")
-        );
-        assert_eq!(dev.llm.profile, "dev");
+        let aws = DevAws::from_lookup(|name| match name {
+            DEV_AWS_PROFILE_VAR => Some("owner".into()),
+            DEV_JEV_SSM_PARAMETER_VAR => Some("/owner/jev_api_key".into()),
+            _ => None,
+        });
+        let judge = JudgeSettings::dev_defaults_for(&aws);
+        assert_eq!(judge.key_source, KeySource::Ssm);
+        assert_eq!(judge.ssm_profile.as_deref(), Some("owner"));
+        assert_eq!(judge.ssm_parameter.as_deref(), Some("/owner/jev_api_key"));
+        assert_eq!(LlmSettings::dev_defaults_for(&aws).profile, "owner");
         assert!(
-            !dev.judge.not_set_up(),
+            !judge.not_set_up(),
             "an SSM lookup is a lookup, not a missing setup"
         );
+        let unnamed = DevAws::from_lookup(|_| Some("  ".into()));
+        let judge = JudgeSettings::dev_defaults_for(&unnamed);
+        assert_eq!(
+            judge.key_source,
+            KeySource::Keychain,
+            "without the owner's environment the dev profile is the production profile"
+        );
+        assert_eq!(judge.ssm_profile, None);
+        assert_eq!(judge.ssm_parameter, None);
+        assert_eq!(LlmSettings::dev_defaults_for(&unnamed).profile, "");
         let mut null = prod.clone();
         null.judge.provider = JudgeProvider::Null;
         assert!(null.judge.not_set_up());
