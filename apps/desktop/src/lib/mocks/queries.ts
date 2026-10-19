@@ -77,7 +77,10 @@ export function toSummary(state: MockState, m: Message, shadowOnly = false): Mes
   // The proposal outlives a disagreement, as the backend's shadow row does.
   const proposal = state.shadowProposals.get(m.id) ?? (raw?.shadow ? raw.disposition : undefined)
   const c = shadowOnly ? (proposal ? { ...(raw ?? { strata: [], findId: null, handledByUserAt: null, shadow: true }), disposition: proposal, shadow: true } : undefined) : raw?.shadow ? undefined : raw
+  // The decision's reason rides on an Unresolved row, as the backend's summary row carries it; the same sentence `explain` gives.
+  const heldReason = c?.disposition?.kind === 'unresolved' ? (state.specs.get(m.id)?.reason ?? state.traces.get(`tr_${m.id}`)?.matchedRule ?? '') : ''
   return {
+    ...(heldReason ? { heldReason } : {}),
     id: m.id,
     digId: m.digId,
     threadId: m.threadId,

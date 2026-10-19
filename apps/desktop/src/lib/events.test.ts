@@ -5,8 +5,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
 import type { RiddleEvent } from '@/bindings/RiddleEvent'
+import type { TaskCentre } from '@/bindings/TaskCentre'
 import { qk } from './api'
-import { clearPendingInvalidations, COALESCE_MAX_MS, COALESCE_MS, handleEvent } from './events'
+import { clearPendingInvalidations, COALESCE_MAX_MS, COALESCE_MS, handleEvent, watchBoot } from './events'
 
 const classified = (n: number): RiddleEvent => ({ type: 'message_classified', message_id: `m_${n}`, dig_id: 'dig-1', disposition: { kind: 'unresolved' }, shadow: false })
 
@@ -15,8 +16,10 @@ function client() {
   const qc = new QueryClient()
   const spy = vi.spyOn(qc, 'invalidateQueries').mockResolvedValue()
   const hits = (key: readonly unknown[]) => spy.mock.calls.filter((c) => JSON.stringify(c[0]?.queryKey) === JSON.stringify(key)).length
-  return { qc, hits }
+  return { qc, hits, spy }
 }
+
+const taskCentre = (over: Partial<TaskCentre> = {}): TaskCentre => ({ overall: 'caught_up', digs: [], jobs: [], storeFault: null, judge: null, llm: null, asOf: '2026-10-19T07:00:00.000Z', ...over })
 
 describe('refetching on events during a pass', () => {
   beforeEach(() => vi.useFakeTimers())
@@ -65,5 +68,30 @@ describe('refetching on events during a pass', () => {
     expect(hits(qk.taskCentre)).toBe(0)
     vi.advanceTimersByTime(COALESCE_MS)
     expect(hits(qk.taskCentre)).toBe(1)
+  })
+})
+
+describe('the core booting', () => {
+  it('refetches everything once when booting ends, and not again', () => {
+    const { qc, spy } = client()
+    const off = watchBoot(qc)
+    qc.setQueryData(qk.taskCentre, taskCentre({ booting: 'Resolving the judge key' }))
+    qc.setQueryData(qk.taskCentre, taskCentre({ booting: 'Opening the store' }))
+    expect(spy).not.toHaveBeenCalled()
+    qc.setQueryData(qk.taskCentre, taskCentre())
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy).toHaveBeenCalledWith()
+    qc.setQueryData(qk.taskCentre, taskCentre())
+    expect(spy).toHaveBeenCalledTimes(1)
+    off()
+  })
+
+  it('refetches nothing when the core was up before the first read', () => {
+    const { qc, spy } = client()
+    const off = watchBoot(qc)
+    qc.setQueryData(qk.taskCentre, taskCentre())
+    qc.setQueryData(qk.taskCentre, taskCentre())
+    expect(spy).not.toHaveBeenCalled()
+    off()
   })
 })

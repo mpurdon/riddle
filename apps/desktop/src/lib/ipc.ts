@@ -62,6 +62,18 @@ const UNLOGGED = new Set(['ui_log', 'read_app_logs', 'log_categories', 'dev_info
 
 const SLOW_CALL_MS = 2_000
 const TIMEOUT_MS = 60_000
+/**
+ * A simulation runs over up to 50,000 messages per account; the flat minute
+ * fired while the backend kept going, and the toast said "timed out" about
+ * work that then finished. Actions arrive as `invoke_action`, so the name
+ * inside the invocation is what is matched.
+ */
+const LONG_TIMEOUT_MS = 5 * 60_000
+const LONG_CALLS = new Set(['apply_mesh_to_history', 'simulate_mesh'])
+function timeoutFor(command: string, args: Record<string, unknown>): number {
+  const name = command === 'invoke_action' ? (args.invocation as { action?: unknown } | undefined)?.action : command
+  return typeof name === 'string' && LONG_CALLS.has(name) ? LONG_TIMEOUT_MS : TIMEOUT_MS
+}
 
 let seq = 0
 const inFlight = new Map<number, { command: string; started: number }>()
@@ -119,9 +131,10 @@ export async function call<T>(command: string, args: Record<string, unknown> = {
   try {
     let result: T
     if (isTauri) {
+      const timeoutMs = timeoutFor(command, args)
       result = await Promise.race([
         rawInvoke<T>(command, args),
-        new Promise<never>((_, reject) => setTimeout(() => reject({ kind: 'internal', message: `${command} timed out after ${TIMEOUT_MS / 1000}s`, detail: null }), TIMEOUT_MS)),
+        new Promise<never>((_, reject) => setTimeout(() => reject({ kind: 'internal', message: `${command} timed out after ${timeoutMs / 1000}s`, detail: null }), timeoutMs)),
       ])
     } else if (bridge) {
       result = await bridgeCall<T>(command, args)

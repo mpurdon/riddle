@@ -18,7 +18,7 @@
 import { NeverHideButton } from '@/components/NeverHideButton'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { ListChecks } from 'lucide-react'
 import type { Disposition } from '@/bindings/Disposition'
 import type { FindType } from '@/bindings/FindType'
@@ -65,12 +65,8 @@ export default function UnresolvedPage() {
   const current = list.current
   const { runBulk, bulkError } = useBulkRun(list)
   const ex = useQuery({ queryKey: current ? qk.explain(current.digId, current.id) : ['explain', 'none'], queryFn: () => explain(current!.digId, current!.id), enabled: !!current })
-  /** Each row's reason: undefined until read, null when the explanation has none or could not be read. */
-  const reasons = useQueries({
-    queries: ordered.map((m) => ({ queryKey: qk.explain(m.digId, m.id), queryFn: () => explain(m.digId, m.id), staleTime: 60_000, retry: false })),
-    combine: (rs) => rs.map((r) => (r.data ? r.data.reason.trim() || null : r.error ? null : undefined)),
-  })
-  const reasonOf = (m: MessageSummary) => reasons[indexOf.get(m.id) ?? -1]
+  /** Each row's reason rides on the row (`heldReason`); null when the decision gave none. The tray once asked `explain` for every one of its 200 rows. */
+  const reasonOf = (m: MessageSummary) => m.heldReason?.trim() || null
   const heldLine = reasonLine(reasonGroups(ordered, reasonOf))
   const [neverHiddenBusy, setNeverHiddenBusy] = useState(false)
   /** The messages a keyboard `f` or a cluster's "Find…" is choosing a type for. */

@@ -15,7 +15,8 @@ export function useSummary() {
 }
 /** Pending Director proposals, fetched on launch so they survive a restart. */
 export const usePending = () => useQuery({ queryKey: qk.pending, queryFn: api.listPending, staleTime: 15_000 })
-export const useTaskCentre = () => useQuery({ queryKey: qk.taskCentre, queryFn: api.taskCentre, refetchInterval: 5_000 })
+/** Polled every second while the core is still booting, so "Starting" ends when it does; every five once it answers. */
+export const useTaskCentre = () => useQuery({ queryKey: qk.taskCentre, queryFn: api.taskCentre, refetchInterval: (q) => (q.state.data?.booting ? 1_000 : 5_000) })
 /** The accounts Riddle works on: disabled ones are left out of every view, as the backend leaves them out of every read. */
 export const useDigs = () => useQuery({ queryKey: qk.digs, queryFn: api.listDigs, staleTime: 30_000, select: enabledOnly })
 /** Every account, disabled ones included, for managing accounts. */

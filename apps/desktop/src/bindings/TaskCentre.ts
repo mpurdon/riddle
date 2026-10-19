@@ -19,4 +19,10 @@ judge: ServiceHealth | null,
 /**
  * The LLM client's breaker and last calls; `None` with no LLM.
  */
-llm: ServiceHealth | null, asOf: string, };
+llm: ServiceHealth | null, asOf: string, 
+/**
+ * What the core is still doing before it can answer (resolving the
+ * judge key, say); `None` once booted. The first seconds read as
+ * "Connecting…" from a failed read (19 Oct 2026).
+ */
+booting?: string, };

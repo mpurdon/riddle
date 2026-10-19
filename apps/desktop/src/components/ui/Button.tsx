@@ -13,6 +13,8 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
   disabled?: boolean
   icon?: ReactNode
   busy?: boolean
+  /** What the button says while busy, when "Working…" would not say what it is waiting for. */
+  busyLabel?: ReactNode
 }
 
 const variants: Record<ButtonVariant, string> = {
@@ -50,7 +52,7 @@ const sizes: Record<ButtonSize, string> = {
   md: 'h-8 px-3 text-sm gap-1.5',
 }
 
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button({ variant = 'secondary', size = 'md', disabledReason, disabled, icon, busy, className, children, title, ...rest }, ref) {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button({ variant = 'secondary', size = 'md', disabledReason, disabled, icon, busy, busyLabel, className, children, title, ...rest }, ref) {
   const isDisabled = !!disabled || !!disabledReason || !!busy
   const btn = (
     <button
@@ -76,7 +78,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       }}
     >
       {icon ? <span className="shrink-0 [&>svg]:size-3.5">{icon}</span> : null}
-      {busy ? 'Working…' : children}
+      {busy ? (busyLabel ?? 'Working…') : children}
     </button>
   )
   if (disabledReason) {

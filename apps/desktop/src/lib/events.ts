@@ -13,11 +13,12 @@
  * at once: it is what a notification points at.
  */
 import { useEffect } from 'react'
-import { useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
+import { hashKey, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import { bridge, isTauri, log } from './ipc'
 import { qk } from './api'
 import { useBanners, useDirector, useEventLog, usePipeline, toast } from './stores'
 import type { RiddleEvent } from '@/bindings/RiddleEvent'
+import type { TaskCentre } from '@/bindings/TaskCentre'
 import { num } from './format'
 
 export const EVENT_NAME = 'riddle://event'
@@ -49,6 +50,25 @@ function invalidateLater(qc: QueryClient, key: QueryKey): void {
 export function clearPendingInvalidations(): void {
   for (const w of waiting.values()) clearTimeout(w.timer)
   waiting.clear()
+}
+
+/**
+ * Refetch everything once, the moment the core has booted. The Task Centre
+ * is polled every second while `booting` is set; the settings, the rail,
+ * the Summary and the lists had all been read while the core could not
+ * answer and sat on that answer until their own intervals came round.
+ * Returns the unsubscribe.
+ */
+export function watchBoot(qc: QueryClient): () => void {
+  const hash = hashKey(qk.taskCentre)
+  // Unknown until the first read; a core that was up before the UI asked refetches nothing.
+  let booting: boolean | null = null
+  return qc.getQueryCache().subscribe((e) => {
+    if (e.type !== 'updated' || e.action.type !== 'success' || e.query.queryHash !== hash) return
+    const now = !!(e.query.state.data as TaskCentre | undefined)?.booting
+    if (booting && !now) void qc.invalidateQueries()
+    booting = now
+  })
 }
 
 type Listener = (e: RiddleEvent) => void
@@ -188,6 +208,7 @@ export function useEvents(): void {
   const qc = useQueryClient()
   useEffect(() => {
     const off = onEvent((e) => handleEvent(qc, e))
+    const offBoot = watchBoot(qc)
     let unlisten: (() => void) | null = null
     let cancelled = false
     if (isTauri) {
@@ -214,6 +235,7 @@ export function useEvents(): void {
     return () => {
       cancelled = true
       off()
+      offBoot()
       unlisten?.()
       source?.close()
       clearPendingInvalidations()

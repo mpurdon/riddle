@@ -22,6 +22,11 @@ shadow: boolean,
  */
 shadowReview: ShadowReview | null, 
 /**
+ * Why an Unresolved message waits, in the decision's words; the
+ * Unresolved tray read it with one explain call per row (19 Oct 2026).
+ */
+heldReason?: string, 
+/**
  * A newer message of the same `+ Replaces` series (a store's next sale)
  * made this one moot: it reads as read and sinks below its list.
  */

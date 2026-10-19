@@ -33,6 +33,12 @@
  * - "Your corrections" (features/rules) is a Mesh like any other, listed
  *   first and labelled as the user's own, with a note that says where its
  *   lines come from and where else they can be removed.
+ * - Apply saves without simulating and returns at once; the report the
+ *   panel shows afterwards is the preview run in the background over the
+ *   saved text. Applying used to wait on a simulation of up to 50,000
+ *   messages per account before the new version existed. "Apply to past
+ *   mail" previews before it asks, so its trigger says what it is checking
+ *   until the confirmation appears.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -48,7 +54,7 @@ import { issuesFrom } from '@/lib/meshIssues'
 import { useDigContext, useMeshes, useSignals, useTrustStats } from '@/lib/queries'
 import { dispositionLabel } from '@/lib/selectors'
 import { keyHint } from '@/lib/shortcuts'
-import { useDirector } from '@/lib/stores'
+import { useConfirmQueue, useDirector } from '@/lib/stores'
 import type { MeshParseIssue } from '@/lib/types'
 import { useAction } from '@/lib/useAction'
 import { useShortcuts } from '@/lib/useShortcuts'
@@ -94,6 +100,9 @@ export function StatusChip({ status }: { status: MeshStatus }) {
 
 /** The window the live line checks against; short so it is cheap on blur. */
 const LIVE_WINDOW_DAYS = 30
+/** The full preview's window; said beside the panel's note so the note and the request agree. */
+const PREVIEW_WINDOW_DAYS = 90
+const windowLabel = (days: number) => (days === 365 ? 'The last year' : `The last ${days} days`)
 /** The window the precision line counts over; the trust card's longest. */
 const PRECISION_WINDOW_DAYS = 30
 
@@ -233,10 +242,35 @@ function MeshDetail({ meshId, draftText }: { meshId: string; draftText: string |
   const mesh = useQuery({ queryKey: qk.mesh(meshId, null), queryFn: () => getMesh(meshId, null) })
   const versions = useQuery({ queryKey: qk.meshVersions(meshId), queryFn: () => meshVersions(meshId) })
   const [tab, setTab] = useState('editor')
+  /** The window "Apply to past mail" is previewing, while it is. */
+  const [checking, setChecking] = useState<number | null>(null)
+  /** The version Apply just saved; its editor previews on mount, since Apply itself no longer simulates. */
+  const [savedVersion, setSavedVersion] = useState<number | null>(null)
   const m = mesh.data
   if (mesh.error) return <ErrorCard error={mesh.error} onRetry={() => mesh.refetch()} />
   if (!m) return <div className="p-6 text-sm text-clay">Loading Mesh…</div>
   const setStatus = (status: MeshStatus) => run('set_mesh_status', { meshId, status }, { invalidate: [qk.mesh(meshId, null), qk.meshVersions(meshId)] })
+  /**
+   * The preview over the window is the slow part of "Apply to past mail";
+   * the trigger says so from the click until the Action asks for the
+   * confirmation (the dialog takes over) or the run settles.
+   */
+  const applyToPast = async (windowDays: number) => {
+    if (checking !== null) return
+    setChecking(windowDays)
+    try {
+      await run('apply_mesh_to_history', { meshId, windowDays }, {
+        confirmWith: (pending) => {
+          setChecking(null)
+          return useConfirmQueue.getState().ask(pending)
+        },
+      })
+    } catch {
+      // `run` has shown the error.
+    } finally {
+      setChecking(null)
+    }
+  }
   const spoils = proposesSpoil(m)
   const agree = m.shadowProposed ? m.shadowAgreed / m.shadowProposed : null
   const yours = m.name === YOUR_CORRECTIONS_MESH
@@ -293,13 +327,13 @@ function MeshDetail({ meshId, draftText }: { meshId: string; draftText: string |
                 <Menu
                   label="Apply to past mail"
                   trigger={
-                    <Button size="sm" icon={<HistoryIcon />} title="Activating decides new mail only. This sends the mail this Mesh would decide differently back to Sift, after a preview you confirm; what you decided yourself is kept, and it can be undone.">
+                    <Button size="sm" icon={<HistoryIcon />} busy={checking !== null} busyLabel={`Checking ${windowLabel(checking ?? 30).toLowerCase()}…`} title="Activating decides new mail only. This sends the mail this Mesh would decide differently back to Sift, after a preview you confirm; what you decided yourself is kept, and it can be undone.">
                       Apply to past mail
                     </Button>
                   }
                   items={[30, 90, 365].map((windowDays) => ({
-                    label: windowDays === 365 ? 'The last year' : `The last ${windowDays} days`,
-                    onSelect: () => run('apply_mesh_to_history', { meshId, windowDays }),
+                    label: windowLabel(windowDays),
+                    onSelect: () => void applyToPast(windowDays),
                   }))}
                 />
               ) : null}
@@ -337,7 +371,12 @@ function MeshDetail({ meshId, draftText }: { meshId: string; draftText: string |
                 </Note>
               ) : null
             }
-            onSaved={() => { void qc.invalidateQueries({ queryKey: qk.mesh(meshId, null) }); void qc.invalidateQueries({ queryKey: qk.meshVersions(meshId) }) }}
+            previewOnMount={m.version === savedVersion}
+            onSaved={(_id, version) => {
+              setSavedVersion(version)
+              void qc.invalidateQueries({ queryKey: qk.mesh(meshId, null) })
+              void qc.invalidateQueries({ queryKey: qk.meshVersions(meshId) })
+            }}
           />
         </TabPanel>
         <TabPanel value="structure">
@@ -464,7 +503,7 @@ function History({ versions, current }: { versions: Mesh[]; current: Mesh }) {
                 {chosen.changeNote ? <span className="text-ink-2"> · {chosen.changeNote}</span> : null}
               </span>
               {chosen.version !== current.version ? (
-                <Button size="sm" onClick={() => run('update_mesh', { meshId: current.id, text: chosen.sourceText.replace(/ v\d+/, ` v${current.version + 1}`), changeNote: `Restored from v${chosen.version}` })}>
+                <Button size="sm" onClick={() => run('update_mesh', { meshId: current.id, text: chosen.sourceText.replace(/ v\d+/, ` v${current.version + 1}`), changeNote: `Restored from v${chosen.version}`, simulate: false })}>
                   Restore as v{current.version + 1}
                 </Button>
               ) : null}
@@ -519,7 +558,20 @@ Text: = != CONTAINS (any case)
 GUARDS
 NEVER Spoil IF sender IN never_hidden`
 
-export function MeshEditor({ mesh, onSaved, initialText = null, banner = null }: { mesh: Mesh | null; onSaved: (id: string) => void; initialText?: string | null; banner?: ReactNode }) {
+export function MeshEditor({
+  mesh,
+  onSaved,
+  initialText = null,
+  banner = null,
+  previewOnMount = false,
+}: {
+  mesh: Mesh | null
+  onSaved: (id: string, version: number) => void
+  initialText?: string | null
+  banner?: ReactNode
+  /** Run Preview impact as soon as the editor opens: the version just saved shows what it does over the window. */
+  previewOnMount?: boolean
+}) {
   const { run } = useAction()
   const nav = useNavigate()
   const { digName } = useDigContext()
@@ -533,6 +585,7 @@ export function MeshEditor({ mesh, onSaved, initialText = null, banner = null }:
   const wantLive = useRef<string | null>(null)
   const [report, setReport] = useState<SimulationReport | null>(null)
   const [simulating, setSimulating] = useState(false)
+  const [applying, setApplying] = useState(false)
   const [simError, setSimError] = useState<unknown>(null)
   const [note, setNote] = useState('')
   const [status, setStatus] = useState<'draft' | 'shadow'>('shadow')
@@ -611,7 +664,7 @@ export function MeshEditor({ mesh, onSaved, initialText = null, banner = null }:
     setSimulating(true)
     setSimError(null)
     try {
-      const r = await simulateMesh({ text, meshId: mesh?.id })
+      const r = await simulateMesh({ text, meshId: mesh?.id, windowDays: PREVIEW_WINDOW_DAYS })
       setReport(r)
       // The full report covers the live line's window, so it answers the line too.
       setLive({ text, report: r })
@@ -621,13 +674,25 @@ export function MeshEditor({ mesh, onSaved, initialText = null, banner = null }:
       setSimulating(false)
     }
   }
+  /** Save without the simulation, then preview the saved text in the background; a new Mesh leaves this editor for its page. */
   const apply = async () => {
-    const out = mesh ? await run<{ mesh: Mesh; report: SimulationReport }>('update_mesh', { meshId: mesh.id, text, changeNote: note || null }) : await run<{ mesh: Mesh; report: SimulationReport }>('create_mesh', { text, status, changeNote: note || null })
-    if (out) {
-      setReport(out.result.report)
-      onSaved(out.result.mesh.id)
+    if (applying) return
+    setApplying(true)
+    let out: { result: { mesh: Mesh } } | null = null
+    try {
+      out = mesh ? await run<{ mesh: Mesh; report: SimulationReport | null }>('update_mesh', { meshId: mesh.id, text, changeNote: note || null, simulate: false }) : await run<{ mesh: Mesh; report: SimulationReport | null }>('create_mesh', { text, status, changeNote: note || null })
+    } catch {
+      // `run` has shown the error; the text stays to try again.
+    } finally {
+      setApplying(false)
     }
+    if (!out) return
+    // The editor is keyed by version, so the saved version's editor is a new instance; it runs the preview on mount.
+    onSaved(out.result.mesh.id, out.result.mesh.version)
   }
+  useEffect(() => {
+    if (previewOnMount) void preview()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const insert = (s: Snippet) => {
     const el = ta.current
     const start = el?.selectionStart ?? text.length
@@ -740,7 +805,7 @@ export function MeshEditor({ mesh, onSaved, initialText = null, banner = null }:
           <Button size="sm" busy={simulating} onClick={preview} disabledReason={issues.length ? 'Fix the errors first' : null} title={`Preview impact (${keyHint('mesh_preview')})`}>
             Preview impact
           </Button>
-          <Button size="sm" variant="primary" onClick={apply} disabledReason={issues.length ? 'Fix the errors first' : !dirty ? 'No changes' : null} title={`Apply (${keyHint('mesh_save')})`}>
+          <Button size="sm" variant="primary" busy={applying} onClick={apply} disabledReason={issues.length ? 'Fix the errors first' : !dirty ? 'No changes' : null} title={`Apply (${keyHint('mesh_save')})`}>
             {mesh ? `Apply as v${mesh.version + 1}` : 'Create'}
           </Button>
           {mesh && dirty ? (
@@ -753,6 +818,7 @@ export function MeshEditor({ mesh, onSaved, initialText = null, banner = null }:
       <Resizable as="aside" id="mesh-preview" side="right" initial={320} min={240} max={640} label="Resize the preview" className="overflow-auto border-l border-line p-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-clay">Preview impact</h3>
         {simError ? <Note tone="bad" className="mt-2">{toRiddleError(simError).message}</Note> : null}
+        {simulating ? <p className="mt-2 text-xs text-clay">Checking the last {PREVIEW_WINDOW_DAYS} days…</p> : null}
         {report ? (
           <div className="mt-2">
             <SimulationTable r={report} compact fallback={mesh?.fallback} />

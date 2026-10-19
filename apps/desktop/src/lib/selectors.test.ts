@@ -120,6 +120,12 @@ describe('the Task Centre indicator', () => {
   it('is Caught up when nothing is catching up and nothing is degraded', () => {
     expect(taskCentreIndicator(tc({})).label).toBe('Caught up')
   })
+  it('is Starting, with what the core is doing, while it boots, even with no account listed yet', () => {
+    const i = taskCentreIndicator(tc({ digs: [], booting: 'Resolving the judge key' }))
+    expect(i.label).toBe('Starting')
+    expect(i.tone).toBe('busy')
+    expect(i.detail).toBe('Resolving the judge key')
+  })
   it('says Nothing connected, in a neutral tone, when there is no account to be caught up with', () => {
     const i = taskCentreIndicator(tc({ digs: [] }))
     expect(i.label).toBe('Nothing connected')

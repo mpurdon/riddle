@@ -193,7 +193,7 @@ export function digPipeline(s: DigStatus, job?: Job | null): DigPipeline {
 // Task Centre indicator (§55)
 
 export interface TaskCentreIndicator {
-  label: 'Caught up' | 'Catching up' | 'Degraded' | 'Nothing connected'
+  label: 'Starting' | 'Caught up' | 'Catching up' | 'Degraded' | 'Nothing connected'
   tone: Tone
   detail: string
   running: number
@@ -210,6 +210,9 @@ export function taskCentreIndicator(tc: TaskCentre | undefined): TaskCentreIndic
   const running = tc.jobs.filter((j) => j.status.state === 'running').length
   const queued = tc.jobs.filter((j) => j.status.state === 'queued').length
   const paused = tc.jobs.filter((j) => j.status.state === 'paused').length
+  // Before the core can answer, what it is still doing; the first seconds
+  // once read as "Connecting…" from a failed read, with no account listed.
+  if (tc.booting) return { label: 'Starting', tone: 'busy', detail: tc.booting, running, queued, paused }
   // With no account there is nothing to be caught up with. "Caught up" here
   // read as praise on a first run that had not started.
   if (tc.digs.length === 0 && !tc.storeFault) {
