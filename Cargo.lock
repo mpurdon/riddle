@@ -4915,6 +4915,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "chrono-tz",
+ "futures",
  "log",
  "regex",
  "riddle-actions",

@@ -123,7 +123,13 @@ impl AppDigStatus {
         let initial_done = repo::sync_state::get(&store, repo::sync_state::INITIAL_SYNC_DONE)?
             .as_deref()
             == Some("1");
-        let total = repo::messages::count(&store)?;
+        // Only read before the first sync finishes: it was a full count of
+        // the messages table at every job end (19 Oct 2026).
+        let total = if initial_done {
+            0
+        } else {
+            repo::messages::count(&store)?
+        };
         // Inside the sync window only: the history backfill fills older mail
         // behind a caught-up account, and that mail is not "remaining".
         let unclassified = self.0.unclassified_in_window(&store)?;

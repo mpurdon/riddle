@@ -266,6 +266,32 @@ impl JevJudge {
         }
     }
 
+    /// One bounded retry on a transient failure before the breaker hears
+    /// of it: a single timeout stranded a message as Unresolved with
+    /// nothing to decide it again until a rule changed (19 Oct 2026). The
+    /// wait honours Retry-After, capped so a window never waits long on
+    /// one message; the retry takes its own turn at the rate limiter.
+    async fn post_with_one_retry(
+        &self,
+        body: &serde_json::Value,
+    ) -> Result<(serde_json::Value, u64)> {
+        match self.post(body).await {
+            Err(e) if is_transient(&e) => {
+                let wait = retry_after(&e).unwrap_or(RETRY_DELAY).min(MAX_RETRY_WAIT);
+                rdebug!(
+                    Category::Judge,
+                    "{}; retrying once after {}ms",
+                    e.message,
+                    wait.as_millis()
+                );
+                tokio::time::sleep(wait).await;
+                self.limiter.acquire().await;
+                self.post(body).await
+            }
+            r => r,
+        }
+    }
+
     async fn post(&self, body: &serde_json::Value) -> Result<(serde_json::Value, u64)> {
         let started = Instant::now();
         let resp = self
@@ -289,6 +315,12 @@ impl JevJudge {
         let latency = started.elapsed().as_millis() as u64;
         if !status.is_success() {
             let code = status.as_u16();
+            let retry_after_ms = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.trim().parse::<u64>().ok())
+                .map(|secs| secs * 1000);
             let kind = match code {
                 429 => "rate limited",
                 401 | 403 => "authentication rejected",
@@ -302,7 +334,7 @@ impl JevJudge {
             );
             return Err(
                 RiddleError::judge_unavailable(format!("Jev HTTP {code}: {kind}"))
-                    .with_detail(serde_json::json!({ "status": code, "latencyMs": latency })),
+                    .with_detail(serde_json::json!({ "status": code, "latencyMs": latency, "retryAfterMs": retry_after_ms })),
             );
         }
         let value: serde_json::Value = resp
@@ -324,6 +356,35 @@ fn usage_tokens(v: &serde_json::Value) -> Option<u64> {
     ]
     .iter()
     .find_map(|k| u.get(k).and_then(|x| x.as_u64()))
+}
+
+/// The pause before the one retry of a transient failure, and the most
+/// Retry-After may stretch it.
+const RETRY_DELAY: Duration = Duration::from_millis(500);
+const MAX_RETRY_WAIT: Duration = Duration::from_secs(5);
+
+/// A failure the next attempt may not repeat: a timeout, a connection
+/// that did not open, a rate limit, a server error. A rejected request
+/// or key, or a malformed answer, is not retried.
+fn is_transient(e: &RiddleError) -> bool {
+    match e
+        .detail
+        .as_ref()
+        .and_then(|d| d.get("status"))
+        .and_then(|s| s.as_u64())
+    {
+        Some(429) | Some(500..=599) => true,
+        Some(_) => false,
+        None => e.message.ends_with("timeout") || e.message.ends_with("connect failure"),
+    }
+}
+
+fn retry_after(e: &RiddleError) -> Option<Duration> {
+    e.detail
+        .as_ref()?
+        .get("retryAfterMs")?
+        .as_u64()
+        .map(Duration::from_millis)
 }
 
 struct ProbeGuard<'a> {
@@ -372,7 +433,7 @@ impl SemanticJudge for JevJudge {
                 .iter()
                 .map(|q| (q.definition.len() / 4) as u64)
                 .sum::<u64>();
-        match self.post(&body).await {
+        match self.post_with_one_retry(&body).await {
             Ok((value, latency)) => {
                 let Some(answers) = value.get("answers").and_then(|a| a.as_object()) else {
                     self.breaker.record_failure();
@@ -619,6 +680,35 @@ mod tests {
             "live Jev: {} answers in {latency}ms, ~{} input tokens",
             answers.len(),
             answers[0].input_tokens
+        );
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+
+    #[test]
+    fn a_timeout_a_rate_limit_or_a_server_error_is_transient_and_a_rejection_is_not() {
+        assert!(is_transient(&RiddleError::judge_unavailable("Jev timeout")));
+        assert!(is_transient(&RiddleError::judge_unavailable(
+            "Jev connect failure"
+        )));
+        let http = |code: u16| {
+            RiddleError::judge_unavailable(format!("Jev HTTP {code}"))
+                .with_detail(serde_json::json!({ "status": code, "retryAfterMs": 2000 }))
+        };
+        assert!(is_transient(&http(429)));
+        assert!(is_transient(&http(503)));
+        assert!(!is_transient(&http(401)));
+        assert!(!is_transient(&http(400)));
+        assert!(!is_transient(&RiddleError::judge_unavailable(
+            "Jev response has no answers"
+        )));
+        assert_eq!(retry_after(&http(429)), Some(Duration::from_secs(2)));
+        assert_eq!(
+            retry_after(&RiddleError::judge_unavailable("Jev timeout")),
+            None
         );
     }
 }

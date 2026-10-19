@@ -297,6 +297,13 @@ pub fn from_json<T: serde::de::DeserializeOwned>(s: String) -> rusqlite::Result<
     })
 }
 
+/// The ids as a JSON array for `IN (SELECT value FROM json_each(?))`, the
+/// one way the repos take a set of ids: three helpers looped one query per
+/// id while their doc comments promised a batch (19 Oct 2026).
+pub(crate) fn ids_json<'a>(ids: impl IntoIterator<Item = &'a str>) -> String {
+    serde_json::to_string(&ids.into_iter().collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

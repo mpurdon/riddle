@@ -213,6 +213,11 @@ pub(crate) fn known_context(
 /// few escalations a pass rather than all at once.
 const STALE_PER_PASS: u32 = 25;
 
+/// How old a judge-less Unresolved must be before a working judge sees it
+/// again, so a judge that comes and goes does not re-decide the same rows
+/// every pass.
+const JUDGE_RETRY_AFTER_MINUTES: i64 = 10;
+
 impl App {
     /// Unresolved mail Riddle decided under rules that have changed since,
     /// or that ran out of escalation budget before today, goes back to Sift.
@@ -227,10 +232,16 @@ impl App {
             .date_naive()
             .and_hms_opt(0, 0, 0)
             .map_or(now, |d| d.and_utc());
+        // Decided without a judge while one answers now; a local-only Dig
+        // never has one and is left alone (19 Oct 2026).
+        let judge_lost_before = (dig.privacy != PrivacyMode::LocalOnly
+            && self.services.judge().is_some())
+        .then(|| now - chrono::Duration::minutes(JUDGE_RETRY_AFTER_MINUTES));
         let ids = repo::classifications::stale_unresolved(
             store,
             rules_changed.as_ref(),
             &today,
+            judge_lost_before.as_ref(),
             STALE_PER_PASS,
         )?;
         if ids.is_empty() {
@@ -274,7 +285,19 @@ impl App {
     pub fn sift_input(&self, dig: &Dig, message: Message) -> Result<SiftInput> {
         let store = self.stores.dig(&dig.id)?;
         let pass = riddle_context::PassContext::load(&store)?;
-        self.sift_input_with(dig, message, &pass)
+        let profile = self.profile_for(dig)?;
+        self.sift_input_with(dig, message, &pass, &profile)
+    }
+
+    /// The user's profile as this Dig sees it: the Dig's own address counts
+    /// as the user's. Read once per pass; it was read per message and again
+    /// per Thread State update (19 Oct 2026).
+    pub fn profile_for(&self, dig: &Dig) -> Result<UserProfile> {
+        let mut profile = repo::user_profile::get(&self.stores.index())?;
+        if !profile.is_me(&dig.email) {
+            profile.addresses.push(dig.email.clone());
+        }
+        Ok(profile)
     }
 
     /// `sift_input` with the pass's Context: the standing corrections, read
@@ -286,18 +309,15 @@ impl App {
         dig: &Dig,
         message: Message,
         pass: &riddle_context::PassContext,
+        profile: &UserProfile,
     ) -> Result<SiftInput> {
         let index = self.stores.index();
         let store = self.stores.dig(&dig.id)?;
-        let mut profile = repo::user_profile::get(&index)?;
-        if !profile.is_me(&dig.email) {
-            profile.addresses.push(dig.email.clone());
-        }
         let normalized = riddle_mail::normalize::normalize_message(&message);
         let person = riddle_people::lookup(&index, &message.from.email)?;
         let mut people = PeopleFacts::from_person(person.as_ref());
         (people.known_thread, people.known_domain) =
-            known_context(&index, &store, &message, &profile)?;
+            known_context(&index, &store, &message, profile)?;
         let thread_state = repo::thread_state::get(&store, &message.thread_id)?;
         let has_calendar_part = riddle_mail::normalize::has_calendar_part(&message);
         let has_structured_receipt = riddle_mail::normalize::has_structured_receipt(&message);
@@ -306,8 +326,12 @@ impl App {
             thread_state: thread_state.as_ref(),
             pass,
         };
-        let mut input =
-            SiftInput::simple(message.clone(), profile, people, DigContext::from_dig(dig));
+        let mut input = SiftInput::simple(
+            message.clone(),
+            profile.clone(),
+            people,
+            DigContext::from_dig(dig),
+        );
         let mut slices: BTreeMap<String, String> = input.context_slices.clone();
         for s in
             riddle_context::slices_with(&store, &message, &sources, riddle_context::SLICE_NAMES)?
@@ -431,6 +455,7 @@ impl App {
         let mut superseded: MeshGroups<MessageId> = std::collections::BTreeMap::new();
         // The pass's Context: the standing corrections, read once.
         let pass_context = riddle_context::PassContext::load(&store)?;
+        let profile = self.profile_for(dig)?;
         let pass_id = riddle_sift::new_pass_id();
         report.pass_id = pass_id.clone();
         // The batch is one window (`crate::window`). 1. Its inputs, in
@@ -444,7 +469,7 @@ impl App {
             let Some(message) = repo::messages::get(&store, &dig.id, &id)? else {
                 continue;
             };
-            match self.sift_input_with(dig, message, &pass_context) {
+            match self.sift_input_with(dig, message, &pass_context, &profile) {
                 Ok(mut input) => {
                     input.pass_id = pass_id.clone();
                     inputs.push(input);
@@ -534,7 +559,6 @@ impl App {
                         _ => {}
                     }
                     if let Some(update) = &outcome.thread_state_update {
-                        let profile = repo::user_profile::get(&self.stores.index())?;
                         // Bookkeeping: the decision stands without its Thread State.
                         if let Err(e) = riddle_context::update_thread_state(
                             &store,

@@ -1153,6 +1153,9 @@ impl SyncEngine {
         let mut listed = 0u64;
         let mut total: Option<u64> = None;
         let mut threads: HashSet<ThreadId> = HashSet::new();
+        // People are refreshed once for the run, as the first sync does; it
+        // was once per page (19 Oct 2026).
+        let mut run_threads: HashSet<ThreadId> = HashSet::new();
         let mut resolver = self.resolver.lock().await;
         if resolver.id_of("INBOX").is_none() {
             resolver.seed(&self.provider.list_labels().await?);
@@ -1184,10 +1187,19 @@ impl SyncEngine {
                 .provider
                 .get_messages_batch(&ids, Detail::Metadata)
                 .await?;
+            // The page's classifications and labels in two reads, not two
+            // per message (19 Oct 2026).
+            let page_ids: Vec<MessageId> = messages.iter().map(|m| m.id.clone()).collect();
+            let current = repo::classifications::current_many(&store, &page_ids)?;
+            let existing: HashMap<MessageId, Vec<String>> =
+                repo::messages::labels_for_ids(&store, &page_ids)?
+                    .into_iter()
+                    .map(|(id, _, labels)| (id, labels))
+                    .collect();
             for m in &messages {
                 seen.insert(m.provider_id.clone());
-                if let Some(k) = repo::classifications::current(&store, &m.id)? {
-                    let plan = riddle_projection::expected_managed_labels(&self.dig, Some(&k));
+                if let Some(k) = current.get(&m.id) {
+                    let plan = riddle_projection::expected_managed_labels(&self.dig, Some(k));
                     let mut missing = Vec::new();
                     for name in &plan.add {
                         let id = resolver.resolve(self.provider.as_ref(), name).await?;
@@ -1210,10 +1222,10 @@ impl SyncEngine {
                         });
                     }
                 }
-                let existed = repo::messages::labels_of(&store, &m.id)?;
+                let existed = existing.get(&m.id).map(Vec::as_slice).unwrap_or(&[]);
                 if existed.is_empty() {
                     report.added += 1;
-                } else if existed != m.labels {
+                } else if existed != m.labels.as_slice() {
                     report.updated += 1;
                 }
             }
@@ -1224,13 +1236,13 @@ impl SyncEngine {
                 repo::sync_state::set(&store, BODIES_PENDING, "1")?;
             }
             self.after_page(&store, &threads, messages.len() as u64);
-            self.refresh_people(&store, &threads);
-            threads.clear();
+            run_threads.extend(threads.drain());
             page_token = page.next_page_token;
             if page_token.is_none() {
                 break;
             }
         }
+        self.refresh_people(&store, &run_threads);
         // Anything we knew in the window that the provider no longer lists is gone.
         for (pid, mid, _) in known {
             if !seen.contains(&pid) {

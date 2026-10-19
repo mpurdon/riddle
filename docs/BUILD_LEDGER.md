@@ -114,3 +114,4 @@ Output tokens 1,083,416 (of which 650,721 estimated for subagents), fresh input 
 | 55 | fix: Engineering pack v3: a cost alert or a health notice is one Know, the newest of the same subject | 6 | 0 | 0 | 0 | 0 |
 | 56 | chore: the repository names nobody's account: the dev AWS setup comes from .env, fixtures and the UX study use invented data, MIT license | 3208 | 1179848 | 480528457 | 1494 | 17 |
 | 57 | perf(desktop): triage actions patch rows and return at once, events coalesce, settings apply ahead, Review runs in parallel | 183 | 0 | 0 | 0 | 0 |
+| 58 | perf(core): a message's Sets are judged together, the judge retries a blip once and judge-less Unresolved return to Sift, one profile read per pass, indexed and set-based reads | 0 | 0 | 0 | 0 | 0 |

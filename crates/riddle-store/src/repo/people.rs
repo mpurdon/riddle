@@ -52,16 +52,64 @@ pub fn search(store: &Store, q: &str, limit: u32) -> Result<Vec<Person>> {
 }
 
 /// Whether the user knows anyone at this domain: a contact, or someone
-/// they replied to. For `Facts::known_domain`.
+/// they replied to. For `Facts::known_domain`. Looked up by the indexed
+/// `domain` column; `LIKE '%@domain'` scanned every address ever seen,
+/// once per message of a pass (19 Oct 2026).
 pub fn known_at_domain(store: &Store, domain: &str) -> Result<bool> {
     let people: Vec<Person> = store.read(|c| {
         let mut st = c.prepare(
-            "SELECT DISTINCT p.json FROM people p JOIN person_emails e ON e.person_id = p.id WHERE e.email LIKE ?1",
+            "SELECT DISTINCT p.json FROM people p JOIN person_emails e ON e.person_id = p.id WHERE e.domain = ?1",
         )?;
         let rows = st
-            .query_map([format!("%@{}", domain.to_lowercase())], |r| from_json(r.get::<_, String>(0)?))?
+            .query_map([domain.to_lowercase()], |r| from_json(r.get::<_, String>(0)?))?
             .collect();
         rows
     })?;
     Ok(people.iter().any(|p| p.replied_to_by_user || p.in_contacts))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn person(email: &str, replied: bool) -> Person {
+        Person {
+            id: PersonId::new(),
+            emails: vec![email.into()],
+            name: None,
+            organisation: None,
+            relationship_strength: 0.5,
+            first_contact_at: None,
+            last_contact_at: None,
+            replied_to_by_user: replied,
+            messages_from: 3,
+            messages_to: 1,
+            automated: false,
+            mailing_list: false,
+            auth_failures: 0,
+            spam_verdicts: 0,
+            in_contacts: false,
+            dig_ids: vec![],
+            updated_at: chrono::Utc::now(),
+            cadence: None,
+            on_schedule: false,
+        }
+    }
+
+    #[test]
+    fn a_domain_is_known_through_someone_replied_to_and_not_through_a_stranger_or_a_suffix() {
+        let store = Store::in_memory(crate::StoreKind::Index).unwrap();
+        upsert(&store, &person("Ana@Northwind.example", true)).unwrap();
+        upsert(&store, &person("bob@stranger.example", false)).unwrap();
+        assert!(known_at_domain(&store, "northwind.example").unwrap());
+        assert!(known_at_domain(&store, "NORTHWIND.example").unwrap());
+        assert!(
+            !known_at_domain(&store, "stranger.example").unwrap(),
+            "seen but never replied to"
+        );
+        assert!(
+            !known_at_domain(&store, "example").unwrap(),
+            "a suffix is not the domain"
+        );
+    }
 }

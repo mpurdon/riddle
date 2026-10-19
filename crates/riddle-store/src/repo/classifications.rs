@@ -115,18 +115,31 @@ pub fn counts(
     })
 }
 
-/// Current classifications for a set of messages, for simulation diffs.
+/// Current classifications for a set of messages in one query, for
+/// simulation diffs and the resync.
 pub fn current_many(
     store: &Store,
     ids: &[MessageId],
 ) -> Result<HashMap<MessageId, Classification>> {
-    let mut out = HashMap::new();
-    for id in ids {
-        if let Some(k) = current(store, id)? {
-            out.insert(id.clone(), k);
-        }
+    if ids.is_empty() {
+        return Ok(HashMap::new());
     }
-    Ok(out)
+    let json = crate::ids_json(ids.iter().map(|id| id.as_str()));
+    store.read(|c| {
+        let mut st = c.prepare(
+            "SELECT message_id, json FROM classifications
+             WHERE shadow = 0 AND superseded_at IS NULL AND message_id IN (SELECT value FROM json_each(?1))",
+        )?;
+        let rows = st
+            .query_map([json], |r| {
+                Ok((
+                    MessageId::from(r.get::<_, String>(0)?),
+                    from_json::<Classification>(r.get::<_, String>(1)?)?,
+                ))
+            })?
+            .collect();
+        rows
+    })
 }
 
 /// Mark every current classification produced by a Mesh version superseded,
@@ -367,12 +380,17 @@ pub fn retire_shadow(store: &Store, id: &MessageId) -> Result<()> {
 }
 
 /// Unresolved messages Riddle decided (not the user) under rules older than
-/// `rules_changed_at`, or that ran out of escalation budget before
-/// `budget_reset_at`: worth deciding again. Oldest first.
+/// `rules_changed_at`, that ran out of escalation budget before
+/// `budget_reset_at`, or that were decided without a judge (mechanism
+/// `deterministic`: no key yet, a blip, an open breaker) before
+/// `judge_lost_before`, which the caller passes only while a judge
+/// answers: worth deciding again. Oldest first. A judge blip stranded
+/// messages as Unresolved until the next rule edit (19 Oct 2026).
 pub fn stale_unresolved(
     store: &Store,
     rules_changed_at: Option<&chrono::DateTime<chrono::Utc>>,
     budget_reset_at: &chrono::DateTime<chrono::Utc>,
+    judge_lost_before: Option<&chrono::DateTime<chrono::Utc>>,
     limit: u32,
 ) -> Result<Vec<MessageId>> {
     store.read(|c| {
@@ -380,12 +398,20 @@ pub fn stale_unresolved(
             "SELECT message_id FROM classifications
              WHERE superseded_at IS NULL AND shadow = 0 AND disposition_kind = 'unresolved'
                AND coalesce(json_extract(json, '$.mechanism'), '') <> 'user'
-               AND (created_at < ?1 OR (instr(json_extract(json, '$.reason'), ?4) > 0 AND created_at < ?2))
+               AND (created_at < ?1
+                    OR (instr(json_extract(json, '$.reason'), ?4) > 0 AND created_at < ?2)
+                    OR (json_extract(json, '$.mechanism') = 'deterministic' AND created_at < ?5))
              ORDER BY created_at LIMIT ?3",
         )?;
         let rows = st
             .query_map(
-                params![rules_changed_at.map(ts).unwrap_or(0), ts(budget_reset_at), limit, riddle_core::BUDGET_EXHAUSTED],
+                params![
+                    rules_changed_at.map(ts).unwrap_or(0),
+                    ts(budget_reset_at),
+                    limit,
+                    riddle_core::BUDGET_EXHAUSTED,
+                    judge_lost_before.map(ts).unwrap_or(0)
+                ],
                 |r| Ok(MessageId::from(r.get::<_, String>(0)?)),
             )?
             .collect();

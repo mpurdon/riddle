@@ -97,14 +97,41 @@ pub fn get(store: &Store, dig_id: &DigId, id: &MessageId) -> Result<Option<Messa
     })
 }
 
+/// Rows with bodies for a set of ids, one query, in the order asked.
 pub fn get_many(store: &Store, dig_id: &DigId, ids: &[MessageId]) -> Result<Vec<Message>> {
-    let mut out = Vec::with_capacity(ids.len());
-    for id in ids {
-        if let Some(m) = get(store, dig_id, id)? {
-            out.push(m);
-        }
+    rows_for_ids(store, dig_id, ids, COLS)
+}
+
+/// `COLS` without the bodies, for lists and summaries.
+const SUMMARY_COLS: &str = "id, provider_id, thread_id, subject, from_email, from_name, to_json, cc_json, bcc_json, date, snippet, labels_json, headers_json, attachments_json, size_bytes, is_sent, NULL AS body_text, NULL AS body_html, synced_at";
+
+fn rows_for_ids(
+    store: &Store,
+    dig_id: &DigId,
+    ids: &[MessageId],
+    cols: &str,
+) -> Result<Vec<Message>> {
+    if ids.is_empty() {
+        return Ok(vec![]);
     }
-    Ok(out)
+    let json = crate::ids_json(ids.iter().map(|id| id.as_str()));
+    let mut rows: Vec<Message> = store.read(|c| {
+        let mut st = c.prepare(&format!(
+            "SELECT {cols} FROM messages WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?1))"
+        ))?;
+        let rows = st
+            .query_map([json], |r| row_to_message(r, dig_id))?
+            .collect();
+        rows
+    })?;
+    // In the order asked: callers walk their ids.
+    let order: std::collections::HashMap<&str, usize> = ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+    rows.sort_by_key(|m| order.get(m.id.as_str()).copied().unwrap_or(usize::MAX));
+    Ok(rows)
 }
 
 pub fn set_body(
@@ -865,21 +892,10 @@ pub fn get_by_provider_id(
     })
 }
 
-/// Rows without bodies matching a set of ids, in one query.
+/// Rows without bodies matching a set of ids, in one query, in the order
+/// asked.
 pub fn summaries_for_ids(store: &Store, dig_id: &DigId, ids: &[MessageId]) -> Result<Vec<Message>> {
-    let mut out = Vec::with_capacity(ids.len());
-    for id in ids {
-        let m = store.read(|c| {
-            c.query_row(
-                "SELECT id, provider_id, thread_id, subject, from_email, from_name, to_json, cc_json, bcc_json, date, snippet, labels_json, headers_json, attachments_json, size_bytes, is_sent, NULL AS body_text, NULL AS body_html, synced_at FROM messages WHERE id = ?1 AND deleted_at IS NULL",
-                [id.as_str()], |r| row_to_message(r, dig_id),
-            ).optional()
-        })?;
-        if let Some(m) = m {
-            out.push(m);
-        }
-    }
-    Ok(out)
+    rows_for_ids(store, dig_id, ids, SUMMARY_COLS)
 }
 
 /// Who wrote in a thread before a moment: each earlier message's sender and
@@ -1028,8 +1044,7 @@ pub fn labels_for_ids(
     if ids.is_empty() {
         return Ok(vec![]);
     }
-    let list: Vec<&str> = ids.iter().map(|id| id.as_str()).collect();
-    let json = serde_json::to_string(&list).unwrap_or_else(|_| "[]".into());
+    let json = crate::ids_json(ids.iter().map(|id| id.as_str()));
     store.read(|c| {
         let mut st = c.prepare(
             "SELECT id, thread_id, labels_json FROM messages

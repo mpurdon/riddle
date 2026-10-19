@@ -53,6 +53,11 @@ const DIG: &[Migration] = &[
         name: "sift_markers",
         sql: include_str!("../migrations/dig/0008_sift_markers.sql"),
     },
+    Migration {
+        version: 9,
+        name: "outbox_message",
+        sql: include_str!("../migrations/dig/0009_outbox_message.sql"),
+    },
 ];
 const INDEX: &[Migration] = &[
     Migration {
@@ -94,6 +99,11 @@ const INDEX: &[Migration] = &[
         version: 8,
         name: "proposal_outcome_columns",
         sql: include_str!("../migrations/index/0008_proposal_outcome_columns.sql"),
+    },
+    Migration {
+        version: 9,
+        name: "person_email_domain",
+        sql: include_str!("../migrations/index/0009_person_email_domain.sql"),
     },
 ];
 

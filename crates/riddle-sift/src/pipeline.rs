@@ -345,25 +345,34 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
             thread_state_summary: input.thread_state.as_ref().map(|t| t.summary()),
             context_slices: input.context_slices.clone(),
         };
-        for (set, signals) in &assigned {
-            let built = builder.build(*set, signals, &state_input);
-            draft.truncated.extend(
-                built
-                    .truncated
-                    .iter()
-                    .map(|x| format!("{}: {x}", set.as_str())),
-            );
-            match cached_or_evaluate(
+        // The Sets of one message are asked together: asked in series, two
+        // Sets of about 400 ms each cost their sum, not the longer one
+        // (19 Oct 2026). Each Set answers or fails on its own; the first
+        // failure names the reason, as the serial `break` did, and the Sets
+        // that answered keep their evaluations.
+        let built: Vec<_> = assigned
+            .iter()
+            .map(|(set, signals)| (*set, signals, builder.build(*set, signals, &state_input)))
+            .collect();
+        for (set, _, b) in &built {
+            draft
+                .truncated
+                .extend(b.truncated.iter().map(|x| format!("{}: {x}", set.as_str())));
+        }
+        let outcomes = futures::future::join_all(built.iter().map(|(_, signals, b)| {
+            cached_or_evaluate(
                 &dig_store,
                 judge.as_ref(),
                 &message_id,
                 signals,
-                &built.state,
-                &built.context_hash,
+                &b.state,
+                &b.context_hash,
                 true,
             )
-            .await
-            {
+        }))
+        .await;
+        for ((set, _, _), outcome) in built.iter().zip(outcomes) {
+            match outcome {
                 Ok(outcome) => {
                     draft.cached += outcome.cached;
                     draft.fresh += outcome.fresh;
@@ -386,8 +395,7 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
                         message_id,
                         e.message
                     );
-                    judge_reason = Some(format!("judge unavailable: {}", e.message));
-                    break;
+                    judge_reason.get_or_insert_with(|| format!("judge unavailable: {}", e.message));
                 }
                 Err(e) => {
                     rwarn!(
@@ -397,8 +405,7 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
                         set.as_str(),
                         e.message
                     );
-                    judge_reason = Some(format!("judge failed: {}", e.message));
-                    break;
+                    judge_reason.get_or_insert_with(|| format!("judge failed: {}", e.message));
                 }
             }
         }
