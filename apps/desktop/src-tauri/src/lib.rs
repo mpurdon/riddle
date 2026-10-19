@@ -56,12 +56,22 @@ pub fn run() {
                             );
                             system::start(handle, core.clone(), ops.settings.clone());
                         }
-                        Err(e) => riddle_observability::rerror!(
-                            Category::App,
-                            "core boot failed: {}: {}",
-                            e.kind.as_str(),
-                            e.message
-                        ),
+                        Err(e) => {
+                            riddle_observability::rerror!(
+                                Category::App,
+                                "core boot failed: {}: {}",
+                                e.kind.as_str(),
+                                e.message
+                            );
+                            // The Task Centre says so instead of "Starting" for ever.
+                            if let Some(stage) = core.services.get::<riddle_app::ops::BootStage>() {
+                                stage.set(riddle_app::ops::BootState::Failed(format!(
+                                    "{}: {}",
+                                    e.kind.as_str(),
+                                    e.message
+                                )));
+                            }
+                        }
                     }
                 });
             }

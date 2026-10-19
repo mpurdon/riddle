@@ -34,6 +34,7 @@ export function TaskCentrePopover() {
   const finished = jobs.filter((j) => !isJobActive(j)).slice(0, 5)
   // Queued counts too: a first sync waiting behind another job once showed no card at all.
   const onboarding = jobs.find((j) => j.kind === 'initial_sync' && (j.status.state === 'running' || j.status.state === 'queued'))
+  const waiting = onboarding?.status.state === 'queued'
   const { run } = useAction()
   const digs = tc.data?.digs ?? []
   const allBusy = digs.length > 0 && digs.every((d) => digPipeline(d.status, jobFor(d.digId)).busy)
@@ -116,9 +117,9 @@ export function TaskCentrePopover() {
           </ul>
           {onboarding ? (
             <div className="mt-3 rounded-md border border-ochre/40 bg-ochre/10 p-2">
-              <div className="text-xs font-medium">{onboarding.status.state === 'queued' ? 'First sync waiting to start' : 'First sync in progress'}</div>
+              <div className="text-xs font-medium">{waiting ? 'First sync waiting to start' : 'First sync in progress'}</div>
               <div className="text-xs text-ink-2">
-                {onboarding.label}: {onboarding.status.state === 'queued' ? 'waiting for its turn' : onboarding.progress.step}. Riddle only works while the machine is awake; Attention Zero cannot be promised for mail it has not seen yet.
+                {onboarding.label}: {waiting ? 'waiting for its turn' : onboarding.progress.step}. Riddle only works while the machine is awake; Attention Zero cannot be promised for mail it has not seen yet.
               </div>
               <div className="mt-1">
                 <ProgressBar done={num(onboarding.progress.done)} total={onboarding.progress.total === null ? null : num(onboarding.progress.total)} label={onboarding.label} />

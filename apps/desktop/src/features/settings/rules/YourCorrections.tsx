@@ -40,7 +40,7 @@ export function YourCorrections() {
     try {
       const text = withoutCorrection(mesh.sourceText, r.line)
       if (text === null) await run('delete_mesh', { meshId: mesh.id }, { successToast: 'Correction removed', toastErrors: false })
-      else await run('update_mesh', { meshId: mesh.id, text, changeNote: 'Removed a correction', simulate: false }, { successToast: 'Correction removed', toastErrors: false })
+      else await run('update_mesh', { meshId: mesh.id, text, changeNote: 'Removed a correction' }, { successToast: 'Correction removed', toastErrors: false })
     } catch (e) {
       setError(toRiddleError(e).message)
     } finally {

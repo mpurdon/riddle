@@ -10,7 +10,7 @@
 use riddle_app::window::JUDGE_CONCURRENCY;
 use riddle_core::*;
 use riddle_judge::ScriptedJudge;
-use riddle_sift::JUDGE_CALLS_IN_FLIGHT;
+use riddle_signals::SetId;
 use riddle_store::repo;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -149,9 +149,13 @@ async fn a_window_of_slow_judge_calls_finishes_in_parallel_with_one_disposition_
     );
     let peak = judge.peak();
     assert!(peak >= 2, "calls overlapped: peak {peak}");
-    // A message's Sets are asked together, so the judge sees more calls at
-    // once than there are streams; the bound it sees is calls in flight.
-    assert!(peak <= JUDGE_CALLS_IN_FLIGHT, "the bound held: peak {peak}");
+    // A message's Sets are asked together, so a stream may have one call
+    // per Set in flight; the judge client bounds its own calls
+    // (`JevConfig::max_in_flight`), which this scripted judge is not.
+    assert!(
+        peak <= JUDGE_CONCURRENCY * SetId::ALL.len(),
+        "the bound held: peak {peak}"
+    );
 
     let store = app.stores.dig(&dig.id).unwrap();
     for id in &ids {

@@ -232,10 +232,14 @@ impl App {
             .date_naive()
             .and_hms_opt(0, 0, 0)
             .map_or(now, |d| d.and_utc());
-        // Decided without a judge while one answers now; a local-only Dig
-        // never has one and is left alone (19 Oct 2026).
+        // Decided without a judge while one answers now (attached, breaker
+        // closed); a local-only Dig never has one and is left alone
+        // (19 Oct 2026).
         let judge_lost_before = (dig.privacy != PrivacyMode::LocalOnly
-            && self.services.judge().is_some())
+            && self
+                .services
+                .judge()
+                .is_some_and(|j| !matches!(j.health().breaker, BreakerHealth::Open { .. })))
         .then(|| now - chrono::Duration::minutes(JUDGE_RETRY_AFTER_MINUTES));
         let ids = repo::classifications::stale_unresolved(
             store,
@@ -293,11 +297,7 @@ impl App {
     /// as the user's. Read once per pass; it was read per message and again
     /// per Thread State update (19 Oct 2026).
     pub fn profile_for(&self, dig: &Dig) -> Result<UserProfile> {
-        let mut profile = repo::user_profile::get(&self.stores.index())?;
-        if !profile.is_me(&dig.email) {
-            profile.addresses.push(dig.email.clone());
-        }
-        Ok(profile)
+        Ok(repo::user_profile::get(&self.stores.index())?.with_dig_address(&dig.email))
     }
 
     /// `sift_input` with the pass's Context: the standing corrections, read

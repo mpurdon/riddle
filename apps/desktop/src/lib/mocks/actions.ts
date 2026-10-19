@@ -646,18 +646,16 @@ function execute(state: MockState, action: string, args: Args): Exec {
       const text = str(args, 'text')
       const prev = latestMesh(state, meshId)
       if (!prev) throw err('not_found', 'Mesh not found')
-      // `simulate: false` saves without the report, as the backend does for callers that read none.
-      const report = args.simulate === false ? null : simulate(state, { text, meshId })
       // A guard-only Mesh (the user's own sender rules) keeps Active: guards veto and never hide mail.
       const guardOnly = /^\s*GUARDS\s*$/m.test(text) && !/^\s*ROUTES\s*$/m.test(text)
       const mesh = newMeshVersion(state, meshId, text, (args.changeNote as string | null) ?? null, prev.status === 'active' && !guardOnly ? 'shadow' : prev.status, 'user')
       return {
-        result: { mesh, report } satisfies { mesh: Mesh; report: SimulationReport | null },
+        result: { mesh } satisfies { mesh: Mesh },
         summary: `You updated Mesh: ${mesh.name} v${prev.version} → v${mesh.version}`,
         why: mesh.status === 'shadow' && prev.status === 'active' ? 'A changed Mesh starts by suggesting; it acts again after a Shadow Period.' : null,
         affected: [{ kind: 'mesh', id: mesh.id }],
         undo: { state: 'undoable', restore: { kind: 'mesh_version', meshId: mesh.id, version: prev.version, status: prev.status }, label: `Go back to v${prev.version}` },
-        provenance: { mechanism: 'user', meshId: mesh.id, meshVersion: mesh.version, meshName: mesh.name, traceId: null, note: report ? `Simulated against ${Number(report.historicalMessages)} messages before applying: ${Number(report.changed)} changed, ${Number(report.newJudgeCallsRequired)} new judge calls.` : 'Saved without a simulation.' },
+        provenance: { mechanism: 'user', meshId: mesh.id, meshVersion: mesh.version, meshName: mesh.name, traceId: null, note: `Applied as v${mesh.version}; preview it for what it does over the window.` },
       }
     }
     case 'set_mesh_status': {

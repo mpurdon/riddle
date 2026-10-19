@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { type InfiniteData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Clock, HelpCircle, Lightbulb, RefreshCw, Tag, X, XCircle } from 'lucide-react'
 import type { Find } from '@/bindings/Find'
 import type { FindType } from '@/bindings/FindType'
@@ -22,6 +22,7 @@ import { explain, getFind, getThread, qk } from '@/lib/api'
 import { cx, fmtDue, fmtRelative, fmtTime, num, plural } from '@/lib/format'
 import { useLevelTip } from '@/lib/level'
 import { useDigContext } from '@/lib/queries'
+import { patchRows } from '@/lib/refresh'
 import { findTypeLabel, FIND_TYPES, importanceOfPriority } from '@/lib/selectors'
 import { keyHint } from '@/lib/shortcuts'
 import { useListNav } from '@/lib/useListNav'
@@ -126,11 +127,7 @@ export default function FindsPage() {
   /** The targets a verb can still change: open or snoozed among the checked rows, else the cursor row. */
   const openTargets = () => actionable(list.targets())
 
-  const optimistic = (ids: Set<string>, patch: Partial<Find>) => {
-    qc.setQueriesData<InfiniteData<{ items: Find[] }>>({ queryKey: [...qk.finds, 'paged'] }, (old) =>
-      old ? { ...old, pages: old.pages.map((p) => ({ ...p, items: p.items.map((f) => (ids.has(f.id) ? { ...f, ...patch } : f)) })) } : old,
-    )
-  }
+  const optimistic = (ids: Set<string>, patch: Partial<Find>) => patchRows<Find>(qc, [[...qk.finds, 'paged']], (f) => (ids.has(f.id) ? { ...f, ...patch } : f))
   const act = (fs: Find[], action: FindAction, extra: Record<string, unknown> = {}, patch: Partial<Find> = {}) => {
     if (!fs.length) return
     optimistic(new Set(fs.map((f) => f.id)), patch)

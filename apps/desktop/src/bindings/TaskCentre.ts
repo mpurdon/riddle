@@ -25,4 +25,9 @@ llm: ServiceHealth | null, asOf: string,
  * judge key, say); `None` once booted. The first seconds read as
  * "Connecting…" from a failed read (19 Oct 2026).
  */
-booting?: string, };
+booting?: string, 
+/**
+ * Why the core did not start, when boot failed; the first seconds
+ * otherwise read as "Starting" for ever (19 Oct 2026).
+ */
+bootError?: string, };

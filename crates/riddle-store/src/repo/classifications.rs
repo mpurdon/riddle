@@ -115,32 +115,6 @@ pub fn counts(
     })
 }
 
-/// What a plan computed from the current classifications depends on: how
-/// many there are and the newest creation and supersession. Any decision
-/// made or superseded since changes it. For `ApplyPlanCache`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Fingerprint {
-    pub count: i64,
-    pub newest_created: i64,
-    pub newest_superseded: i64,
-}
-
-pub fn fingerprint(store: &Store) -> Result<Fingerprint> {
-    store.read(|c| {
-        c.query_row(
-            "SELECT count(*), coalesce(max(created_at), 0), coalesce(max(superseded_at), 0) FROM classifications",
-            [],
-            |r| {
-                Ok(Fingerprint {
-                    count: r.get(0)?,
-                    newest_created: r.get(1)?,
-                    newest_superseded: r.get(2)?,
-                })
-            },
-        )
-    })
-}
-
 /// Current classifications for a set of messages in one query, for
 /// simulation diffs and the resync.
 pub fn current_many(
@@ -407,8 +381,8 @@ pub fn retire_shadow(store: &Store, id: &MessageId) -> Result<()> {
 
 /// Unresolved messages Riddle decided (not the user) under rules older than
 /// `rules_changed_at`, that ran out of escalation budget before
-/// `budget_reset_at`, or that were decided without a judge (mechanism
-/// `deterministic`: no key yet, a blip, an open breaker) before
+/// `budget_reset_at`, or that were decided without a judge (the trace says
+/// so: no key yet, a blip, an open breaker) before
 /// `judge_lost_before`, which the caller passes only while a judge
 /// answers: worth deciding again. Oldest first. A judge blip stranded
 /// messages as Unresolved until the next rule edit (19 Oct 2026).
@@ -426,7 +400,10 @@ pub fn stale_unresolved(
                AND coalesce(json_extract(json, '$.mechanism'), '') <> 'user'
                AND (created_at < ?1
                     OR (instr(json_extract(json, '$.reason'), ?4) > 0 AND created_at < ?2)
-                    OR (json_extract(json, '$.mechanism') = 'deterministic' AND created_at < ?5))
+                    OR (created_at < ?5 AND EXISTS (
+                        SELECT 1 FROM decision_traces t
+                        WHERE t.id = json_extract(classifications.json, '$.traceId')
+                          AND json_extract(t.json, '$.strategy') = ?6)))
              ORDER BY created_at LIMIT ?3",
         )?;
         let rows = st
@@ -436,7 +413,8 @@ pub fn stale_unresolved(
                     ts(budget_reset_at),
                     limit,
                     riddle_core::BUDGET_EXHAUSTED,
-                    judge_lost_before.map(ts).unwrap_or(0)
+                    judge_lost_before.map(ts).unwrap_or(0),
+                    riddle_core::JUDGE_UNAVAILABLE_STRATEGY,
                 ],
                 |r| Ok(MessageId::from(r.get::<_, String>(0)?)),
             )?

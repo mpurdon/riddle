@@ -33,8 +33,7 @@ fn harness(max_concurrent: usize) -> Harness {
         BuildStamp::from_env_vars("0", None, None, None, "test"),
     ));
     let queue = JobQueue::open(stores.index(), clock.clone(), events.clone()).unwrap();
-    let resources = Resources::new();
-    let runner = Runner::new(queue.clone(), services, resources)
+    let runner = Runner::new(queue.clone(), services)
         .with_max_concurrent(max_concurrent)
         .with_backoff_base(Duration::from_millis(10));
     Harness {
@@ -426,7 +425,7 @@ impl BudgetGate for Exhausted {
 #[tokio::test]
 async fn an_exhausted_budget_holds_backfill_and_lets_incoming_run() {
     let h = harness(2);
-    h.runner.resources().set_budget_gate(Arc::new(Exhausted));
+    h.runner.set_budget_gate(Arc::new(Exhausted));
     h.runner
         .register(JobKind::HistoricalSift, Arc::new(BudgetProbe));
     h.runner.register(JobKind::Sift, Arc::new(BudgetProbe));
@@ -449,9 +448,7 @@ async fn an_exhausted_budget_holds_backfill_and_lets_incoming_run() {
     );
     assert!(h.queue.is_held(&backfill));
     // Budget restored: the hold is released and the job runs.
-    h.runner
-        .resources()
-        .set_budget_gate(Arc::new(UnlimitedBudget));
+    h.runner.set_budget_gate(Arc::new(UnlimitedBudget));
     h.runner.recheck_budgets();
     assert!(h.runner.run_until_idle(Duration::from_secs(5)).await);
     assert_eq!(

@@ -70,7 +70,16 @@ export interface InvokeOptions {
   idempotencyKey?: string | null
   /** The user has already confirmed inline (a held button); the Action layer re-validates. */
   confirmed?: boolean
+  /** For an Action that simulates before it acts; see `SIMULATION_TIMEOUT_MS`. */
+  timeoutMs?: number
 }
+
+/**
+ * A simulation runs over up to 50,000 messages per account. The flat
+ * minute fired while the backend kept going, and the toast said "timed
+ * out" about work that then finished.
+ */
+export const SIMULATION_TIMEOUT_MS = 5 * 60_000
 
 export function invoke<T = unknown>(action: string, args: Record<string, unknown> = {}, opts: InvokeOptions = {}): Promise<ActionOutcome & { result: T }> {
   const invocation: ActionInvocation = {
@@ -82,7 +91,7 @@ export function invoke<T = unknown>(action: string, args: Record<string, unknown
     confirmed: opts.confirmed ?? false,
     pendingId: null,
   }
-  return call<ActionOutcome & { result: T }>('invoke_action', { invocation })
+  return call<ActionOutcome & { result: T }>('invoke_action', { invocation }, { timeoutMs: opts.timeoutMs })
 }
 
 /** Re-invoke a pending action with its id: the Action layer re-validates and executes. */
@@ -97,7 +106,7 @@ export function confirm<T = unknown>(pending: PendingAction, opts: InvokeOptions
     confirmed: true,
     pendingId: pending.id,
   }
-  return call<ActionOutcome & { result: T }>('invoke_action', { invocation })
+  return call<ActionOutcome & { result: T }>('invoke_action', { invocation }, { timeoutMs: opts.timeoutMs })
 }
 
 export const listActions = () => call<ActionMeta[]>('list_actions')
@@ -153,7 +162,7 @@ export const getMesh = (meshId: string, version?: number | null) => call<Mesh>('
 export const meshVersions = (meshId: string) => call<Mesh[]>('mesh_versions', { meshId })
 export const parseMesh = (text: string) => call<Mesh>('parse_mesh', { text })
 export const simulateMesh = (args: { text?: string; meshId?: string; version?: number; windowDays?: number }) =>
-  call<SimulationReport>('simulate_mesh', { text: args.text ?? null, meshId: args.meshId ?? null, version: args.version ?? null, windowDays: args.windowDays ?? null })
+  call<SimulationReport>('simulate_mesh', { text: args.text ?? null, meshId: args.meshId ?? null, version: args.version ?? null, windowDays: args.windowDays ?? null }, { timeoutMs: SIMULATION_TIMEOUT_MS })
 
 /** Every running Mesh with its graded spot checks. */
 export const ruleCheck = () => call<RuleCheckRow[]>('rule_check')

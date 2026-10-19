@@ -14,18 +14,18 @@
 //! `JobQueue` in `Services` so the Actions can reach it.
 
 pub mod actions;
+pub mod budget;
 pub mod connectivity;
 pub mod queue;
-pub mod resources;
 pub mod runner;
 pub mod sleep;
 pub mod spec;
 pub mod task_centre;
 
 pub use actions::actions;
+pub use budget::{BudgetClass, BudgetGate, UnlimitedBudget, UsageBudgetGate};
 pub use connectivity::{Connectivity, ConnectivityMonitor, DnsProbe, FixedConnectivity};
 pub use queue::JobQueue;
-pub use resources::{BudgetClass, BudgetGate, Resources, UnlimitedBudget, UsageBudgetGate};
 pub use runner::{
     CancelToken, JobContext, JobHandler, JobOutcome, Notifier, NullNotifier, ProgressReporter,
     RecordingNotifier, Runner, DEFAULT_MAX_CONCURRENT, MAX_ATTEMPTS,

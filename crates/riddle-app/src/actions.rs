@@ -105,6 +105,7 @@ impl Action for InstallPack {
             replace,
             riddle_mesh::actions::created_by(&ctx.principal),
         )?;
+        crate::packs::forget_offers(&ctx.services);
         ctx.services.emit(RiddleEvent::SettingsChanged);
         rinfo!(
             Category::Actions,
@@ -131,6 +132,7 @@ impl Action for InstallPack {
             serde_json::from_value(restore["report"].clone())
                 .map_err(|e| RiddleError::invalid(format!("report: {e}")))?;
         riddle_mesh::packs::undo_install(&ctx.services.stores.index(), &id, &report)?;
+        crate::packs::forget_offers(&ctx.services);
         Ok(ActionResult::ok(
             json!({ "packId": id }),
             format!("Undid the install of {id}"),
@@ -178,6 +180,7 @@ impl Action for InstallDetectedPacks {
             &ctx.services.stores.index(),
             riddle_mesh::actions::created_by(&ctx.principal),
         )?;
+        crate::packs::forget_offers(&ctx.services);
         if !done.installed.is_empty() {
             ctx.services.emit(RiddleEvent::SettingsChanged);
             rinfo!(
@@ -239,6 +242,7 @@ impl Action for DismissPackOffer {
         let id = pack_arg(&args, "packId")?;
         let (pack, _) = riddle_mesh::packs::find_pack(&index, id)?;
         riddle_mesh::packs::dismiss_offer(&index, &pack.id)?;
+        crate::packs::forget_offers(&ctx.services);
         ctx.services.emit(RiddleEvent::SettingsChanged);
         Ok(ActionResult::ok(
             json!({ "packId": pack.id }),
@@ -250,6 +254,7 @@ impl Action for DismissPackOffer {
     async fn undo(&self, ctx: &ActionContext, restore: Value) -> Result<ActionResult> {
         let id = pack_arg(&restore, "packId")?.to_string();
         riddle_mesh::packs::restore_offer(&ctx.services.stores.index(), &id)?;
+        crate::packs::forget_offers(&ctx.services);
         ctx.services.emit(RiddleEvent::SettingsChanged);
         Ok(ActionResult::ok(
             json!({ "packId": id }),
@@ -279,6 +284,7 @@ impl Action for RemovePack {
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
         let id = pack_arg(&args, "packId")?;
         let inst = riddle_mesh::packs::remove(&ctx.services.stores.index(), id)?;
+        crate::packs::forget_offers(&ctx.services);
         ctx.services.emit(RiddleEvent::SettingsChanged);
         let mut r = ActionResult::ok(
             json!({ "packId": id, "meshes": inst.meshes }),
@@ -313,6 +319,7 @@ impl Action for ImportPack {
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
         let text = pack_arg(&args, "text")?;
         let pack = riddle_mesh::packs::save_imported(&ctx.services.stores.index(), text)?;
+        crate::packs::forget_offers(&ctx.services);
         Ok(ActionResult::ok(
             json!({ "packId": pack.id, "name": pack.name, "version": pack.version }),
             format!(
@@ -1073,8 +1080,7 @@ const APPLY_LIMIT: usize = 2_000;
 /// What applying a Mesh to past mail would touch, computed the same way for
 /// the preview and the run. The run reuses the preview's plan only while
 /// every Dig's classifications are exactly as they were when it was made
-/// (`ApplyPlanCache`); mail that moved on in between means a fresh plan.
-#[derive(Clone)]
+/// (`ApplyPlanCache`).
 struct ApplyPlan {
     mesh: Mesh,
     redecide: Vec<(DigId, MessageId)>,
@@ -1089,48 +1095,55 @@ struct ApplyPlan {
 
 /// The plan the preview showed, kept for the confirm that follows it: the
 /// run simulated again, up to 50,000 messages a Dig, with nothing on
-/// screen meanwhile (19 Oct 2026). A plan is handed back only for the
-/// same Mesh version and window, and only while every Dig's
-/// classifications carry the fingerprint they had when it was computed.
+/// screen meanwhile (19 Oct 2026). The confirm takes the plan once, for the
+/// same Mesh version and window, within ten minutes of the preview; a
+/// message the person decided in between is left alone by
+/// `send_back_to_sift`, and one Sift re-decided is sent again, which costs
+/// one needless pass. Anything else plans afresh.
 #[derive(Default)]
-pub struct ApplyPlanCache(std::sync::Mutex<Option<CachedPlan>>);
+pub struct ApplyPlanCache(
+    parking_lot::Mutex<Option<(PlanKey, std::time::Instant, Arc<ApplyPlan>)>>,
+);
 
-struct CachedPlan {
-    key: (MeshId, u32, u32),
-    fingerprint: Vec<(DigId, repo::classifications::Fingerprint)>,
-    plan: ApplyPlan,
-}
+type PlanKey = (MeshId, u32, u32);
+const PLAN_FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(600);
 
 impl ApplyPlanCache {
-    fn get(
-        &self,
-        key: &(MeshId, u32, u32),
-        fingerprint: &[(DigId, repo::classifications::Fingerprint)],
-    ) -> Option<ApplyPlan> {
-        let guard = self.0.lock().ok()?;
-        guard
-            .as_ref()
-            .filter(|c| &c.key == key && c.fingerprint == fingerprint)
-            .map(|c| c.plan.clone())
+    fn put(&self, key: PlanKey, plan: Arc<ApplyPlan>) {
+        *self.0.lock() = Some((key, std::time::Instant::now(), plan));
     }
 
-    fn put(
-        &self,
-        key: (MeshId, u32, u32),
-        fingerprint: Vec<(DigId, repo::classifications::Fingerprint)>,
-        plan: ApplyPlan,
-    ) {
-        if let Ok(mut guard) = self.0.lock() {
-            *guard = Some(CachedPlan {
-                key,
-                fingerprint,
-                plan,
-            });
+    fn take(&self, key: &PlanKey) -> Option<Arc<ApplyPlan>> {
+        let mut slot = self.0.lock();
+        match slot.take() {
+            Some((k, at, plan)) if &k == key && at.elapsed() < PLAN_FRESH_FOR => Some(plan),
+            _ => None,
         }
     }
 }
 
-fn apply_plan(ctx: &ActionContext, args: &Value) -> Result<ApplyPlan> {
+fn plan_key(plan: &ApplyPlan) -> PlanKey {
+    (plan.mesh.id.clone(), plan.mesh.version, plan.window_days)
+}
+
+/// The preview's plan for these arguments, if one was made just now.
+fn cached_plan(ctx: &ActionContext, args: &Value) -> Result<Option<Arc<ApplyPlan>>> {
+    let Some(cache) = ctx.services.get::<ApplyPlanCache>() else {
+        return Ok(None);
+    };
+    let mesh_id = MeshId(
+        args.get("meshId")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RiddleError::invalid("which Mesh? pass meshId"))?
+            .to_string(),
+    );
+    let Some(mesh) = repo::meshes::latest(&ctx.services.stores.index(), &mesh_id)? else {
+        return Ok(None);
+    };
+    Ok(cache.take(&(mesh.id, mesh.version, window_days(args, 30))))
+}
+
+fn apply_plan(ctx: &ActionContext, args: &Value) -> Result<Arc<ApplyPlan>> {
     let mesh_id = MeshId(
         args.get("meshId")
             .and_then(|v| v.as_str())
@@ -1148,18 +1161,6 @@ fn apply_plan(ctx: &ActionContext, args: &Value) -> Result<ApplyPlan> {
         )));
     }
     let digs = repo::digs::list_enabled(&index)?;
-    let key = (mesh.id.clone(), mesh.version, window_days);
-    let fingerprint = digs
-        .iter()
-        .map(|d| {
-            let store = ctx.services.stores.dig(&d.id)?;
-            Ok((d.id.clone(), repo::classifications::fingerprint(&store)?))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let cache = ctx.services.get::<ApplyPlanCache>();
-    if let Some(plan) = cache.as_ref().and_then(|c| c.get(&key, &fingerprint)) {
-        return Ok(plan);
-    }
     let mut input = riddle_mesh::simulate::SimulationInput::new(&ctx.services.stores, digs, &mesh);
     input.window_days = window_days;
     input.now = ctx.services.clock.now();
@@ -1204,9 +1205,6 @@ fn apply_plan(ctx: &ActionContext, args: &Value) -> Result<ApplyPlan> {
         rescore: report.rescore,
         rescore_cost_usd: per_call.map(|c| c * report.rescore as f64),
     };
-    if let Some(c) = &cache {
-        c.put(key, fingerprint, plan.clone());
-    }
     // Said when the plan is made, so the two-step dialog refuses before the
     // user confirms rather than after.
     if plan.redecide.len() > APPLY_LIMIT {
@@ -1215,7 +1213,7 @@ fn apply_plan(ctx: &ActionContext, args: &Value) -> Result<ApplyPlan> {
             plan.redecide.len()
         )));
     }
-    Ok(plan)
+    Ok(Arc::new(plan))
 }
 
 /// Re-decide past mail after a Mesh change (§38). A new Mesh version only
@@ -1244,6 +1242,9 @@ impl Action for ApplyMeshToHistory {
 
     async fn preview(&self, ctx: &ActionContext, args: &Value) -> Result<Preview> {
         let plan = apply_plan(ctx, args)?;
+        if let Some(cache) = ctx.services.get::<ApplyPlanCache>() {
+            cache.put(plan_key(&plan), plan.clone());
+        }
         Ok(Preview {
             summary: format!(
                 "Re-decide {} messages from the last {} days under Mesh {} v{}{}{}",
@@ -1282,7 +1283,10 @@ impl Action for ApplyMeshToHistory {
     }
 
     async fn execute(&self, ctx: &ActionContext, args: Value) -> Result<ActionResult> {
-        let plan = apply_plan(ctx, &args)?;
+        let plan = match cached_plan(ctx, &args)? {
+            Some(plan) => plan,
+            None => apply_plan(ctx, &args)?,
+        };
         let sent = send_back_to_sift(&ctx.services, plan.redecide.iter().cloned())?;
         rinfo!(
             Category::Sift,

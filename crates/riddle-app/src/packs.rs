@@ -58,37 +58,33 @@ pub fn install_always_packs(index: &Arc<Store>, by: CreatedBy) -> Result<AlwaysI
     Ok(out)
 }
 
-/// The accounts asked about, the installed packs with their versions and
-/// the declined offers: everything an offer depends on except the mail.
-type OfferKey = (Vec<DigId>, Vec<(String, u32)>, Vec<String>);
-
-/// Pack offers kept for a few minutes: the Summary computed them on every
-/// read, two count queries per Dig over the detection window, on a 30 s
-/// poll and every summary invalidation (19 Oct 2026). The key carries the
-/// installed and declined packs, so turning one on or declining it misses
-/// at once; only new mail waits for the TTL.
+/// Pack offers for a set of accounts, computed once and kept until the
+/// mail or the packs change: the Summary computed them on every read, two
+/// count queries per Dig over the detection window (19 Oct 2026). Every
+/// sync job end and every pack install, removal, import or decline clears
+/// it (`forget_offers`), so the answer is exact and the hot path is one
+/// lookup.
 #[derive(Default)]
-pub struct PackOfferCache(
-    std::sync::Mutex<HashMap<OfferKey, (std::time::Instant, Vec<PackOffer>)>>,
-);
-
-const PACK_OFFER_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+pub struct PackOfferCache(parking_lot::Mutex<HashMap<Vec<DigId>, Vec<PackOffer>>>);
 
 impl PackOfferCache {
-    fn get(&self, key: &OfferKey) -> Option<Vec<PackOffer>> {
-        let guard = self.0.lock().ok()?;
-        guard
-            .get(key)
-            .filter(|(at, _)| at.elapsed() < PACK_OFFER_TTL)
-            .map(|(_, offers)| offers.clone())
+    fn get(&self, only: &[DigId]) -> Option<Vec<PackOffer>> {
+        self.0.lock().get(only).cloned()
     }
 
-    fn put(&self, key: OfferKey, offers: Vec<PackOffer>) {
-        if let Ok(mut guard) = self.0.lock() {
-            // A handful of keys at most (all accounts, or one); stale ones go.
-            guard.retain(|_, (at, _)| at.elapsed() < PACK_OFFER_TTL);
-            guard.insert(key, (std::time::Instant::now(), offers));
-        }
+    fn put(&self, only: Vec<DigId>, offers: Vec<PackOffer>) {
+        self.0.lock().insert(only, offers);
+    }
+
+    pub fn clear(&self) {
+        self.0.lock().clear();
+    }
+}
+
+/// The mail or the packs changed: the next Summary computes its offers.
+pub fn forget_offers(services: &riddle_actions::Services) {
+    if let Some(cache) = services.get::<PackOfferCache>() {
+        cache.clear();
     }
 }
 
@@ -118,15 +114,8 @@ impl App {
     /// largest account's count, so the sentence and its number agree.
     pub fn pack_offers(&self, only: &[DigId]) -> Result<Vec<PackOffer>> {
         let index = self.stores.index();
-        let installed: Vec<(String, u32)> = packs::installed(&index)?
-            .into_iter()
-            .map(|p| (p.id, p.version))
-            .collect();
-        let mut dismissed: Vec<String> = packs::dismissed_offers(&index)?.into_iter().collect();
-        dismissed.sort();
-        let key: OfferKey = (only.to_vec(), installed, dismissed);
         let cache = self.services.get::<PackOfferCache>();
-        if let Some(offers) = cache.as_ref().and_then(|c| c.get(&key)) {
+        if let Some(offers) = cache.as_ref().and_then(|c| c.get(only)) {
             return Ok(offers);
         }
         let since = self.detect_since();
@@ -160,7 +149,7 @@ impl App {
                 .then_with(|| a.name.cmp(&b.name))
         });
         if let Some(c) = &cache {
-            c.put(key, offers.clone());
+            c.put(only.to_vec(), offers.clone());
         }
         Ok(offers)
     }
@@ -171,6 +160,7 @@ impl App {
     /// sync that triggered it still succeeds; the next first listing, or a
     /// person, can run `install_detected_packs` again.
     pub fn install_packs_after_first_listing(&self, dig: &Dig) {
+        forget_offers(&self.services);
         match install_always_packs(&self.stores.index(), CreatedBy::System) {
             Ok(done) if done.installed.is_empty() => {}
             Ok(done) => {

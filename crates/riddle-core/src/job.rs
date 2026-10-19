@@ -185,4 +185,9 @@ pub struct TaskCentre {
     #[serde(default)]
     #[ts(optional)]
     pub booting: Option<String>,
+    /// Why the core did not start, when boot failed; the first seconds
+    /// otherwise read as "Starting" for ever (19 Oct 2026).
+    #[serde(default)]
+    #[ts(optional)]
+    pub boot_error: Option<String>,
 }

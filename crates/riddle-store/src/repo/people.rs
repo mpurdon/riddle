@@ -56,16 +56,16 @@ pub fn search(store: &Store, q: &str, limit: u32) -> Result<Vec<Person>> {
 /// `domain` column; `LIKE '%@domain'` scanned every address ever seen,
 /// once per message of a pass (19 Oct 2026).
 pub fn known_at_domain(store: &Store, domain: &str) -> Result<bool> {
-    let people: Vec<Person> = store.read(|c| {
-        let mut st = c.prepare(
-            "SELECT DISTINCT p.json FROM people p JOIN person_emails e ON e.person_id = p.id WHERE e.domain = ?1",
-        )?;
-        let rows = st
-            .query_map([domain.to_lowercase()], |r| from_json(r.get::<_, String>(0)?))?
-            .collect();
-        rows
-    })?;
-    Ok(people.iter().any(|p| p.replied_to_by_user || p.in_contacts))
+    store.read(|c| {
+        c.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM person_emails e JOIN people p ON p.id = e.person_id
+                WHERE e.domain = ?1
+                  AND (json_extract(p.json, '$.repliedToByUser') OR json_extract(p.json, '$.inContacts')))",
+            [domain.to_lowercase()],
+            |r| r.get::<_, bool>(0),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -73,27 +73,9 @@ mod tests {
     use super::*;
 
     fn person(email: &str, replied: bool) -> Person {
-        Person {
-            id: PersonId::new(),
-            emails: vec![email.into()],
-            name: None,
-            organisation: None,
-            relationship_strength: 0.5,
-            first_contact_at: None,
-            last_contact_at: None,
-            replied_to_by_user: replied,
-            messages_from: 3,
-            messages_to: 1,
-            automated: false,
-            mailing_list: false,
-            auth_failures: 0,
-            spam_verdicts: 0,
-            in_contacts: false,
-            dig_ids: vec![],
-            updated_at: chrono::Utc::now(),
-            cadence: None,
-            on_schedule: false,
-        }
+        let mut p = Person::blank(email, chrono::Utc::now());
+        p.replied_to_by_user = replied;
+        p
     }
 
     #[test]

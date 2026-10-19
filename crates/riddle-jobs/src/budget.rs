@@ -1,19 +1,12 @@
 //! The daily spend budgets jobs yield to (§55, §56).
 //!
-//! Pacing against the Gmail quota and the judge's and LLM's rate limits
-//! lives in each client (`riddle_gmail::quota`, the judge's limiter, the
-//! LLM's breaker and backoff). This module once held a priority-aware gate
-//! per resource as well, built so a waiting INTERACTIVE acquisition would
-//! pre-empt BACKFILL's next one; nothing ever acquired it, so the clients'
-//! own first-come buckets were the pacing all along, and the gates went
-//! (19 Oct 2026). Class precedence is a change to make in the clients,
-//! once, if the Director is ever seen to wait behind a catch-up.
-//!
-//! Budgets: `BudgetGate::remaining` is asked before a budgeted job starts.
-//! When it is exhausted, BACKFILL and EXPERIMENT jobs are held, which the
-//! runner shows as "budget"; higher classes proceed, because a
-//! user-triggered Sift still needs an answer and the judge crate applies
-//! its own hard cap on the usage ledger.
+//! `BudgetGate::remaining` is asked before a budgeted job starts. When it
+//! is exhausted, BACKFILL and EXPERIMENT jobs are held, which the runner
+//! shows as "budget"; higher classes proceed, because a user-triggered
+//! Sift still needs an answer and the judge crate applies its own hard cap
+//! on the usage ledger. Pacing against the Gmail quota and the judge's and
+//! LLM's rate limits lives in each client; a priority-aware gate per
+//! resource once lived here too, never acquired, and went (19 Oct 2026).
 
 use parking_lot::RwLock;
 use riddle_core::{DigId, Priority};
@@ -93,57 +86,5 @@ impl BudgetGate for UsageBudgetGate {
                 .sum(),
         };
         limit - spent
-    }
-}
-
-/// The budget every job's start is checked against, shared by every job.
-pub struct Resources {
-    budget: RwLock<Arc<dyn BudgetGate>>,
-}
-
-impl Resources {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            budget: RwLock::new(Arc::new(UnlimitedBudget)),
-        })
-    }
-
-    pub fn set_budget_gate(&self, gate: Arc<dyn BudgetGate>) {
-        *self.budget.write() = gate;
-    }
-    pub fn budget_gate(&self) -> Arc<dyn BudgetGate> {
-        self.budget.read().clone()
-    }
-
-    /// The scheduler asks this before starting a budgeted job.
-    pub fn budget_exhausted(
-        &self,
-        dig: Option<&DigId>,
-        class: BudgetClass,
-        priority: Priority,
-    ) -> bool {
-        yields_to_budget(priority) && self.budget.read().remaining(dig, class) <= 0.0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Exhausted;
-    impl BudgetGate for Exhausted {
-        fn remaining(&self, _d: Option<&DigId>, _c: BudgetClass) -> f64 {
-            -0.5
-        }
-    }
-
-    #[test]
-    fn an_exhausted_budget_holds_backfill_and_experiment_but_not_incoming() {
-        let r = Resources::new();
-        r.set_budget_gate(Arc::new(Exhausted));
-        assert!(r.budget_exhausted(None, BudgetClass::Judge, Priority::Backfill));
-        assert!(r.budget_exhausted(None, BudgetClass::Llm, Priority::Experiment));
-        assert!(!r.budget_exhausted(None, BudgetClass::Judge, Priority::Incoming));
-        assert!(!r.budget_exhausted(None, BudgetClass::Llm, Priority::Interactive));
     }
 }

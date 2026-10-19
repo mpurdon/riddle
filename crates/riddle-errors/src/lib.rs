@@ -97,6 +97,30 @@ pub struct RiddleError {
 }
 
 impl RiddleError {
+    /// Whether a retry after a pause is a reasonable response: a transient
+    /// kind, unless whoever made the error said `retryable: false` in its
+    /// detail (a rejected key, a malformed answer, an open breaker). The
+    /// judge and LLM clients and the Director's failure report read the
+    /// same two detail keys, `retryable` and `retryAfterSecs` (19 Oct 2026).
+    pub fn is_retryable(&self) -> bool {
+        self.kind.is_transient()
+            && self
+                .detail
+                .as_ref()
+                .and_then(|d| d.get("retryable"))
+                .and_then(|v| v.as_bool())
+                != Some(false)
+    }
+
+    /// The pause the service asked for, from `retryAfterSecs` in the detail.
+    pub fn retry_after(&self) -> Option<std::time::Duration> {
+        self.detail
+            .as_ref()?
+            .get("retryAfterSecs")?
+            .as_u64()
+            .map(std::time::Duration::from_secs)
+    }
+
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self {
             kind,
@@ -173,6 +197,32 @@ impl From<std::fmt::Error> for RiddleError {
 /// Convenience for `map_err(internal)`.
 pub fn internal(e: impl std::fmt::Display) -> RiddleError {
     RiddleError::internal(e)
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+
+    #[test]
+    fn a_transient_kind_is_retryable_unless_its_maker_said_otherwise() {
+        assert!(RiddleError::judge_unavailable("Jev timeout").is_retryable());
+        let marked = |code: u16, retryable: bool| {
+            RiddleError::judge_unavailable(format!("Jev HTTP {code}")).with_detail(
+                serde_json::json!({ "status": code, "retryable": retryable, "retryAfterSecs": 2 }),
+            )
+        };
+        assert!(marked(429, true).is_retryable());
+        assert!(!marked(401, false).is_retryable());
+        assert!(!RiddleError::invalid("bad request").is_retryable());
+        assert_eq!(
+            marked(429, true).retry_after(),
+            Some(std::time::Duration::from_secs(2))
+        );
+        assert_eq!(
+            RiddleError::judge_unavailable("Jev timeout").retry_after(),
+            None
+        );
+    }
 }
 
 #[cfg(test)]

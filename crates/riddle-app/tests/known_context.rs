@@ -42,27 +42,10 @@ fn message(
 }
 
 fn person(email: &str, replied: bool) -> Person {
-    Person {
-        id: PersonId::new(),
-        emails: vec![email.into()],
-        name: None,
-        organisation: None,
-        relationship_strength: 0.5,
-        first_contact_at: None,
-        last_contact_at: None,
-        replied_to_by_user: replied,
-        messages_from: 3,
-        messages_to: 1,
-        automated: false,
-        mailing_list: false,
-        auth_failures: 0,
-        spam_verdicts: 0,
-        in_contacts: false,
-        dig_ids: vec![],
-        updated_at: chrono::Utc::now(),
-        cadence: None,
-        on_schedule: false,
-    }
+    let mut p = Person::blank(email, chrono::Utc::now());
+    p.replied_to_by_user = replied;
+    p.messages_from = 3;
+    p
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

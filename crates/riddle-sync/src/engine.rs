@@ -309,11 +309,7 @@ impl SyncEngine {
         self.store()
     }
     fn profile(&self) -> Result<UserProfile> {
-        let mut p = repo::user_profile::get(&self.stores.index())?;
-        if !p.is_me(&self.dig.email) {
-            p.addresses.push(self.dig.email.clone());
-        }
-        Ok(p)
+        Ok(repo::user_profile::get(&self.stores.index())?.with_dig_address(&self.dig.email))
     }
     fn window_start(&self) -> Option<DateTime<Utc>> {
         self.options

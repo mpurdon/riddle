@@ -40,17 +40,9 @@ impl RetryPolicy {
     }
 }
 
-/// A transient failure the policy will retry.
+/// A transient failure the policy will retry (`RiddleError::is_retryable`).
 pub fn is_retryable(e: &RiddleError) -> bool {
-    matches!(
-        e.kind,
-        ErrorKind::ProviderRateLimited | ErrorKind::LlmUnavailable | ErrorKind::Provider
-    ) && e
-        .detail
-        .as_ref()
-        .and_then(|d| d.get("retryable"))
-        .and_then(|v| v.as_bool())
-        != Some(false)
+    e.is_retryable()
 }
 
 /// Run `f` up to `policy.attempts` times, sleeping between attempts, and

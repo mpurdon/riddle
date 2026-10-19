@@ -11,8 +11,8 @@ use riddle_activity::{NoProviderCheck, RuntimeHandle, UndoEngine};
 use riddle_core::*;
 use riddle_errors::Result;
 use riddle_jobs::{
-    DigStatusSource, JobContext, JobHandler, JobOutcome, JobQueue, JobSpec, Resources, Runner,
-    SleepDetector, UsageBudgetGate, WakeHook, WakeReason,
+    DigStatusSource, JobContext, JobHandler, JobOutcome, JobQueue, JobSpec, Runner, SleepDetector,
+    UsageBudgetGate, WakeHook, WakeReason,
 };
 use riddle_observability::{rdebug, rinfo, rwarn, swallowed, Category};
 use riddle_settings::{
@@ -28,19 +28,28 @@ use std::sync::Arc;
 /// an install that had never been given a key (17 Oct 2026).
 pub const NO_JUDGE_KEY: &str = "Sorting by rules until you add a judge key; nothing hidden";
 
-/// What boot is doing, for the Task Centre to show before the core is up.
+/// Where boot is, for the Task Centre before the core answers: the step
+/// under way, done, or why it failed. A failure used to leave the first
+/// step on screen for ever (19 Oct 2026).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum BootState {
+    #[default]
+    NotStarted,
+    At(String),
+    Done,
+    Failed(String),
+}
+
 #[derive(Default)]
-pub struct BootStage(std::sync::Mutex<Option<String>>);
+pub struct BootStage(parking_lot::Mutex<BootState>);
 
 impl BootStage {
-    pub fn set(&self, stage: Option<&str>) {
-        if let Ok(mut g) = self.0.lock() {
-            *g = stage.map(str::to_string);
-        }
+    pub fn set(&self, state: BootState) {
+        *self.0.lock() = state;
     }
 
-    pub fn current(&self) -> Option<String> {
-        self.0.lock().ok().and_then(|g| g.clone())
+    pub fn state(&self) -> BootState {
+        self.0.lock().clone()
     }
 }
 
@@ -537,9 +546,8 @@ impl App {
             s.budgets.daily_judge_usd,
             s.budgets.daily_llm_usd,
         ));
-        let resources = Resources::new();
-        resources.set_budget_gate(budget.clone());
-        let runner = Runner::new(queue.clone(), self.services.clone(), resources);
+        let runner = Runner::new(queue.clone(), self.services.clone());
+        runner.set_budget_gate(budget.clone());
         for kind in [
             JobKind::InitialSync,
             JobKind::CatchUp,
@@ -792,6 +800,8 @@ impl App {
     }
 
     pub fn refresh_dig_status(&self, dig_id: &DigId) {
+        // A sync just ended for this Dig: its mail may now match a pack.
+        crate::packs::forget_offers(&self.services);
         let Some(src) = self.services.get::<AppDigStatus>() else {
             return;
         };
@@ -822,8 +832,17 @@ impl App {
     }
 
     pub fn task_centre(&self) -> Result<TaskCentre> {
+        match self.services.get::<BootStage>().map(|b| b.state()) {
+            Some(BootState::At(what)) => {
+                return Ok(self.booting_task_centre(Some(what), None));
+            }
+            Some(BootState::Failed(why)) => {
+                return Ok(self.booting_task_centre(None, Some(why)));
+            }
+            _ => {}
+        }
         let Some(ops) = self.services.get::<Ops>() else {
-            return Ok(self.booting_task_centre());
+            return Ok(self.booting_task_centre(Some("Starting".into()), None));
         };
         let src = self.services.require::<AppDigStatus>()?;
         let mut tc = riddle_jobs::snapshot(
@@ -838,8 +857,12 @@ impl App {
     }
 
     /// The Task Centre before the core is up: the accounts as last saved,
-    /// no jobs, and what boot is doing right now.
-    fn booting_task_centre(&self) -> TaskCentre {
+    /// no jobs, and what boot is doing right now or why it stopped.
+    fn booting_task_centre(
+        &self,
+        booting: Option<String>,
+        boot_error: Option<String>,
+    ) -> TaskCentre {
         let digs = self
             .list_digs()
             .unwrap_or_default()
@@ -858,12 +881,8 @@ impl App {
             judge: None,
             llm: None,
             as_of: self.services.clock.now(),
-            booting: Some(
-                self.services
-                    .get::<BootStage>()
-                    .and_then(|b| b.current())
-                    .unwrap_or_else(|| "Starting".into()),
-            ),
+            booting,
+            boot_error,
         }
     }
 
@@ -943,7 +962,7 @@ impl App {
         let stage = self.services.get::<BootStage>();
         let at = |what: &str| {
             if let Some(s) = &stage {
-                s.set(Some(what));
+                s.set(BootState::At(what.into()));
             }
         };
         at("Loading settings");
@@ -976,7 +995,7 @@ impl App {
         at("Starting jobs");
         let ops = self.attach_ops(settings.clone())?;
         if let Some(s) = &stage {
-            s.set(None);
+            s.set(BootState::Done);
         }
         self.watch_settings(ops.clone(), settings);
         for d in self.list_digs()? {

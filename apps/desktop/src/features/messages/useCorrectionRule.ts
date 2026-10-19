@@ -27,8 +27,7 @@ export function useCorrectionRule() {
       if (mesh) {
         const text = withCorrection(mesh.sourceText, line)
         if (text === mesh.sourceText) return null
-        // No report is read here, so the save skips the simulation and returns at once.
-        const out = await run('update_mesh', { meshId: mesh.id, text, changeNote: 'Added a correction', simulate: false }, { successToast: false })
+        const out = await run('update_mesh', { meshId: mesh.id, text, changeNote: 'Added a correction' }, { successToast: false })
         return out?.activityId ?? null
       }
       const out = await run('create_mesh', { text: withCorrection(null, line), status: 'active' }, { successToast: false })

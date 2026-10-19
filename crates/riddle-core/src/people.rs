@@ -41,6 +41,34 @@ pub struct Person {
     pub on_schedule: bool,
 }
 
+impl Person {
+    /// A person known only by an address, with nothing counted yet: the
+    /// shape a first sighting and the tests start from.
+    pub fn blank(email: &str, now: DateTime<Utc>) -> Self {
+        Self {
+            id: PersonId::new(),
+            emails: vec![email.into()],
+            name: None,
+            organisation: None,
+            relationship_strength: 0.0,
+            first_contact_at: None,
+            last_contact_at: None,
+            replied_to_by_user: false,
+            messages_from: 0,
+            messages_to: 0,
+            automated: false,
+            mailing_list: false,
+            auth_failures: 0,
+            spam_verdicts: 0,
+            in_contacts: false,
+            dig_ids: vec![],
+            updated_at: now,
+            cadence: None,
+            on_schedule: false,
+        }
+    }
+}
+
 /// How regularly a sender writes, classified from arrival dates by
 /// `riddle_people::cadence_of` in the user's timezone. A fact, not a
 /// judgment: a daily sender is daily whether it sends a journal prompt or a
@@ -171,6 +199,14 @@ impl UserProfile {
             .iter()
             .chain(self.aliases.iter())
             .any(|a| a.eq_ignore_ascii_case(&e))
+    }
+    /// The profile as one account sees it: the account's own address counts
+    /// as the user's. Four places pushed the address by hand (19 Oct 2026).
+    pub fn with_dig_address(mut self, email: &str) -> Self {
+        if !self.is_me(email) {
+            self.addresses.push(email.to_string());
+        }
+        self
     }
     pub fn is_never_hidden(&self, email: &str) -> bool {
         Self::list_matches(&self.never_hidden, email)

@@ -362,3 +362,12 @@ impl DecisionTrace {
 /// (`repo::classifications::stale_unresolved` matches on it), so the
 /// wording lives in one place.
 pub const BUDGET_EXHAUSTED: &str = "escalation budget exhausted for this Dig";
+
+/// The trace strategy of a decision made while the judge could not answer:
+/// no key yet, a blip, an open breaker. Housekeeping sends Unresolved mail
+/// decided under it back to Sift once a judge answers
+/// (`repo::classifications::stale_unresolved`). A judge that failed on the
+/// message itself (`JUDGE_FAILED_STRATEGY`: a state too large to send) is
+/// not asked again, since it would fail the same way (19 Oct 2026).
+pub const JUDGE_UNAVAILABLE_STRATEGY: &str = "deterministic-only (judge unavailable)";
+pub const JUDGE_FAILED_STRATEGY: &str = "deterministic-only (judge failed)";

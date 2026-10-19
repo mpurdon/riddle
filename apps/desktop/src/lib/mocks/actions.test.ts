@@ -93,13 +93,13 @@ describe('the mock Action layer follows the confirmation tiers', () => {
     expect(pending.confirmation).toBe('approval')
   })
 
-  it('updating a Mesh creates a new version, simulates it and starts it in Shadow', async () => {
+  it('updating a Mesh creates a new version and starts it in Shadow, without a simulation', async () => {
     const text = MESH_GITHUB_V7.replace(' v7', ' v8').replace('routine@v1 > .90', 'routine@v1 > .50')
     const out = await invokeAction(state, inv('update_mesh', { meshId: 'mesh_github', text, changeNote: 'lower the bar' }))
-    const r = out.result as { mesh: { version: number; status: string }; report: { historicalMessages: bigint; changed: bigint } }
+    const r = out.result as { mesh: { version: number; status: string }; report?: unknown }
     expect(r.mesh.version).toBe(8)
     expect(r.mesh.status).toBe('shadow')
-    expect(Number(r.report.historicalMessages)).toBeGreaterThan(0)
+    expect(r.report).toBeUndefined()
     await expect(invokeAction(state, inv('update_mesh', { meshId: 'mesh_github', text: 'Mesh: Broken v9\nROUTES\nIF routine > .9\n    → Spoil\n' }))).rejects.toMatchObject({ kind: 'invalid', detail: expect.objectContaining({ line: 3 }) })
   })
 

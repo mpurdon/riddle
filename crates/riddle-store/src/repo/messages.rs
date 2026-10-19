@@ -97,7 +97,7 @@ pub fn get(store: &Store, dig_id: &DigId, id: &MessageId) -> Result<Option<Messa
     })
 }
 
-/// Rows with bodies for a set of ids, one query, in the order asked.
+/// Rows with bodies for a set of ids, one query, in no particular order.
 pub fn get_many(store: &Store, dig_id: &DigId, ids: &[MessageId]) -> Result<Vec<Message>> {
     rows_for_ids(store, dig_id, ids, COLS)
 }
@@ -115,7 +115,7 @@ fn rows_for_ids(
         return Ok(vec![]);
     }
     let json = crate::ids_json(ids.iter().map(|id| id.as_str()));
-    let mut rows: Vec<Message> = store.read(|c| {
+    store.read(|c| {
         let mut st = c.prepare(&format!(
             "SELECT {cols} FROM messages WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?1))"
         ))?;
@@ -123,15 +123,7 @@ fn rows_for_ids(
             .query_map([json], |r| row_to_message(r, dig_id))?
             .collect();
         rows
-    })?;
-    // In the order asked: callers walk their ids.
-    let order: std::collections::HashMap<&str, usize> = ids
-        .iter()
-        .enumerate()
-        .map(|(i, id)| (id.as_str(), i))
-        .collect();
-    rows.sort_by_key(|m| order.get(m.id.as_str()).copied().unwrap_or(usize::MAX));
-    Ok(rows)
+    })
 }
 
 pub fn set_body(
@@ -204,27 +196,26 @@ pub fn thread_messages_bodies_newest(
     thread: &ThreadId,
     newest: usize,
 ) -> Result<Vec<Message>> {
-    let mut rows: Vec<Message> = store.read(|c| {
-        let mut st = c.prepare(&format!(
-            "SELECT {SUMMARY_COLS} FROM messages WHERE thread_id = ?1 AND deleted_at IS NULL ORDER BY date"
+    store.read(|c| {
+        let mut with_bodies = c.prepare(&format!(
+            "SELECT {COLS} FROM messages WHERE thread_id = ?1 AND deleted_at IS NULL ORDER BY date DESC LIMIT ?2"
         ))?;
-        let rows = st
-            .query_map([thread.as_str()], |r| row_to_message(r, dig_id))?
-            .collect();
-        rows
-    })?;
-    let from = rows.len().saturating_sub(newest);
-    let ids: Vec<MessageId> = rows[from..].iter().map(|m| m.id.clone()).collect();
-    let mut bodies: std::collections::HashMap<MessageId, Message> = get_many(store, dig_id, &ids)?
-        .into_iter()
-        .map(|m| (m.id.clone(), m))
-        .collect();
-    for row in &mut rows[from..] {
-        if let Some(full) = bodies.remove(&row.id) {
-            *row = full;
+        let mut rows: Vec<Message> = with_bodies
+            .query_map(params![thread.as_str(), newest as i64], |r| {
+                row_to_message(r, dig_id)
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut older = c.prepare(&format!(
+            "SELECT {SUMMARY_COLS} FROM messages WHERE thread_id = ?1 AND deleted_at IS NULL ORDER BY date DESC LIMIT -1 OFFSET ?2"
+        ))?;
+        for row in older.query_map(params![thread.as_str(), newest as i64], |r| {
+            row_to_message(r, dig_id)
+        })? {
+            rows.push(row?);
         }
-    }
-    Ok(rows)
+        rows.reverse();
+        Ok(rows)
+    })
 }
 
 pub fn count(store: &Store) -> Result<u64> {
@@ -388,11 +379,10 @@ fn or_group(sql: &mut String, args: &mut Vec<Box<dyn rusqlite::ToSql>>, p: &Prio
         // One JSON array parameter, not one `?` per id: SQLite caps
         // bound parameters, and the count query binds the list a
         // second time, so 400 open Finds were 800 parameters a page.
-        let ids: Vec<&str> = p.message_ids.iter().map(|id| id.as_str()).collect();
         parts.push("m.id IN (SELECT value FROM json_each(?))".to_string());
-        args.push(Box::new(
-            serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into()),
-        ));
+        args.push(Box::new(crate::ids_json(
+            p.message_ids.iter().map(|id| id.as_str()),
+        )));
     }
     if let Some(i) = p.min_importance {
         parts.push("coalesce(io.importance, k.importance, 1) >= ?".to_string());
@@ -693,10 +683,9 @@ pub fn page_headers(
     limit: u32,
 ) -> Result<Vec<Message>> {
     store.read(|c| {
-        let mut st = c.prepare(
-            "SELECT id, provider_id, thread_id, subject, from_email, from_name, to_json, cc_json, bcc_json, date, snippet, labels_json, headers_json, attachments_json, size_bytes, is_sent, NULL AS body_text, NULL AS body_html, synced_at
-             FROM messages WHERE deleted_at IS NULL ORDER BY date DESC LIMIT ?1 OFFSET ?2",
-        )?;
+        let mut st = c.prepare(&format!(
+            "SELECT {SUMMARY_COLS} FROM messages WHERE deleted_at IS NULL ORDER BY date DESC LIMIT ?1 OFFSET ?2"
+        ))?;
         let rows = st.query_map(params![limit, offset as i64], |r| row_to_message(r, dig_id))?.collect();
         rows
     })
@@ -930,8 +919,8 @@ pub fn get_by_provider_id(
     })
 }
 
-/// Rows without bodies matching a set of ids, in one query, in the order
-/// asked.
+/// Rows without bodies matching a set of ids, in one query, in no
+/// particular order.
 pub fn summaries_for_ids(store: &Store, dig_id: &DigId, ids: &[MessageId]) -> Result<Vec<Message>> {
     rows_for_ids(store, dig_id, ids, SUMMARY_COLS)
 }

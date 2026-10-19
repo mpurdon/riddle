@@ -50,9 +50,7 @@ impl App {
         let dig = repo::digs::get(&index, dig_id)?;
         let mut profile = repo::user_profile::get(&index)?;
         if let Some(dig) = &dig {
-            if !profile.is_me(&dig.email) {
-                profile.addresses.push(dig.email.clone());
-            }
+            profile = profile.with_dig_address(&dig.email);
         }
         let mut changed = 0;
         for id in repo::facts::ids(&store)? {

@@ -46,7 +46,7 @@ import { MessageList } from './MessageList'
 import { PreviewAside, scrollToPreviewWhy } from './MessagePreview'
 import { SenderList } from './SenderList'
 import { openFromList } from './queue'
-import { runPerDig } from './runPerDig'
+import { runAll, runPerDig } from './runPerDig'
 import { readSpoilView, selectedMessages, senderGroups, senderRows, writeSpoilView, type SenderGroup, type SenderRow, type SpoilView } from './senderGroups'
 import { useCorrectionRule } from './useCorrectionRule'
 import { usePagedMessages } from './usePagedMessages'
@@ -66,7 +66,6 @@ export function ReviewPage({ kind }: { kind: 'spoil' | 'contamination' }) {
   const nav = useNavigate()
   const { digId, digName } = useDigContext()
   const actions = useAction()
-  const { run } = actions
   const { addRule } = useCorrectionRule()
   // Not Spoil and Restore are corrections; at Essentials the fifth earns the one tip that the rest exists.
   const levelTip = useLevelTip()
@@ -166,8 +165,7 @@ export function ReviewPage({ kind }: { kind: 'spoil' | 'contamination' }) {
               label: 'Undo',
               onClick: async () => {
                 // The rule and the restores undo side by side; the lists refresh once after.
-                await Promise.all(undoIds.map((id) => run('undo_activity', { activityId: id }, { successToast: false, skipInvalidate: true })))
-                await actions.invalidateAfter(['undo_activity'])
+                await runAll(actions, ['undo_activity'], ({ run }) => Promise.all(undoIds.map((id) => run('undo_activity', { activityId: id }, { successToast: false }))))
                 useLastUndoable.getState().set(null)
                 toast('Undone', { kind: 'success' })
               },
@@ -202,9 +200,10 @@ export function ReviewPage({ kind }: { kind: 'spoil' | 'contamination' }) {
     }
     setBusy(true)
     try {
-      await Promise.all([...firstBySender].map(([entry, m]) => run('add_never_hidden', { entry, digId: m.digId, messageId: m.id }, { skipInvalidate: true })))
-      await runPerDig(actions, ms, 'restore_messages', {}, { skipInvalidate: true })
-      await actions.invalidateAfter(['add_never_hidden', 'restore_messages'])
+      await runAll(actions, ['add_never_hidden', 'restore_messages'], async (quiet) => {
+        await Promise.all([...firstBySender].map(([entry, m]) => quiet.run('add_never_hidden', { entry, digId: m.digId, messageId: m.id })))
+        await runPerDig(quiet, ms, 'restore_messages')
+      })
       list.clear()
       setSheetOpen(false)
     } finally {

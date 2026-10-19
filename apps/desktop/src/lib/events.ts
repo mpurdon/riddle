@@ -28,29 +28,36 @@ export const COALESCE_MS = 400
 /** A stream that never pauses still refetches this often. */
 export const COALESCE_MAX_MS = 2_000
 
-const waiting = new Map<string, { timer: ReturnType<typeof setTimeout>; since: number }>()
+/** The keys named since the storm began, by hash (the hash is one-way, so the key rides beside it). */
+const pending = new Map<string, QueryKey>()
+let storm: { timer: ReturnType<typeof setTimeout>; since: number } | null = null
 
-/** Refetch `key` once the events naming it pause, or once `COALESCE_MAX_MS` has passed since the first of them. */
+/** Refetch `key` with everything else named in the storm, once it pauses, or once `COALESCE_MAX_MS` has passed since it began. */
 function invalidateLater(qc: QueryClient, key: QueryKey): void {
-  const id = JSON.stringify(key)
+  pending.set(hashKey(key), key)
   const now = Date.now()
-  const w = waiting.get(id)
-  if (w) clearTimeout(w.timer)
-  const since = w?.since ?? now
+  if (storm) clearTimeout(storm.timer)
+  const since = storm?.since ?? now
   const fire = () => {
-    waiting.delete(id)
-    void qc.invalidateQueries({ queryKey: key })
+    storm = null
+    const due = [...pending.values()]
+    pending.clear()
+    for (const k of due) void qc.invalidateQueries({ queryKey: k })
   }
   const delay = Math.min(COALESCE_MS, since + COALESCE_MAX_MS - now)
   if (delay <= 0) return fire()
-  waiting.set(id, { timer: setTimeout(fire, delay), since })
+  storm = { timer: setTimeout(fire, delay), since }
 }
 
 /** Drop every refetch still waiting: the shell unmounting, and a test tearing down. */
 export function clearPendingInvalidations(): void {
-  for (const w of waiting.values()) clearTimeout(w.timer)
-  waiting.clear()
+  if (storm) clearTimeout(storm.timer)
+  storm = null
+  pending.clear()
 }
+
+/** Whether anything on screen is reading `key`; a query nobody watches is not worth a refetch. */
+const observed = (qc: QueryClient, key: QueryKey): boolean => (qc.getQueryCache().find({ queryKey: key })?.getObserversCount() ?? 0) > 0
 
 /**
  * Refetch everything once, the moment the core has booted. The Task Centre
@@ -135,9 +142,8 @@ export function handleEvent(qc: QueryClient, e: RiddleEvent): void {
       later(qk.summary)
       later(qk.recentTraces)
       if (e.type === 'message_classified') {
-        // The one message open, if it is this one, updates at once; nothing is mounted for the rest.
-        inv(qk.explain(e.dig_id, e.message_id))
-        inv(qk.message(e.dig_id, e.message_id))
+        // The one message open, if it is this one, updates at once; the rest are not mounted and are not asked.
+        for (const k of [qk.explain(e.dig_id, e.message_id), qk.message(e.dig_id, e.message_id)]) if (observed(qc, k)) inv(k)
       }
       break
     case 'summary_changed':

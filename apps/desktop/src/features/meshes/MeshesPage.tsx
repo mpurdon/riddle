@@ -47,7 +47,7 @@ import { ArrowDownWideNarrow, History as HistoryIcon, ListPlus, Network, Plus, R
 import type { Mesh } from '@/bindings/Mesh'
 import type { MeshStatus } from '@/bindings/MeshStatus'
 import type { SimulationReport } from '@/bindings/SimulationReport'
-import { getMesh, meshVersions, parseMesh, qk, simulateMesh } from '@/lib/api'
+import { getMesh, meshVersions, parseMesh, qk, SIMULATION_TIMEOUT_MS, simulateMesh } from '@/lib/api'
 import { cx, fmtInt, fmtPct, fmtRelative, plural } from '@/lib/format'
 import { diffLines } from '@/lib/diff'
 import { issuesFrom } from '@/lib/meshIssues'
@@ -244,8 +244,6 @@ function MeshDetail({ meshId, draftText }: { meshId: string; draftText: string |
   const [tab, setTab] = useState('editor')
   /** The window "Apply to past mail" is previewing, while it is. */
   const [checking, setChecking] = useState<number | null>(null)
-  /** The version Apply just saved; its editor previews on mount, since Apply itself no longer simulates. */
-  const [savedVersion, setSavedVersion] = useState<number | null>(null)
   const m = mesh.data
   if (mesh.error) return <ErrorCard error={mesh.error} onRetry={() => mesh.refetch()} />
   if (!m) return <div className="p-6 text-sm text-clay">Loading Mesh…</div>
@@ -260,6 +258,7 @@ function MeshDetail({ meshId, draftText }: { meshId: string; draftText: string |
     setChecking(windowDays)
     try {
       await run('apply_mesh_to_history', { meshId, windowDays }, {
+        timeoutMs: SIMULATION_TIMEOUT_MS,
         confirmWith: (pending) => {
           setChecking(null)
           return useConfirmQueue.getState().ask(pending)
@@ -357,7 +356,7 @@ function MeshDetail({ meshId, draftText }: { meshId: string; draftText: string |
       <Tabs value={tab} onChange={setTab} className="min-h-0 flex-1" tabs={[{ value: 'editor', label: 'Editor' }, { value: 'structure', label: 'Structure' }, { value: 'history', label: `History (${versions.data?.length ?? m.version})` }]}>
         <TabPanel value="editor">
           <MeshEditor
-            key={`${meshId}-${m.version}${draftText ? '-draft' : ''}`}
+            key={draftText ? `${meshId}-draft` : meshId}
             mesh={m}
             initialText={draftText}
             banner={
@@ -371,9 +370,7 @@ function MeshDetail({ meshId, draftText }: { meshId: string; draftText: string |
                 </Note>
               ) : null
             }
-            previewOnMount={m.version === savedVersion}
-            onSaved={(_id, version) => {
-              setSavedVersion(version)
+            onSaved={() => {
               void qc.invalidateQueries({ queryKey: qk.mesh(meshId, null) })
               void qc.invalidateQueries({ queryKey: qk.meshVersions(meshId) })
             }}
@@ -503,7 +500,7 @@ function History({ versions, current }: { versions: Mesh[]; current: Mesh }) {
                 {chosen.changeNote ? <span className="text-ink-2"> · {chosen.changeNote}</span> : null}
               </span>
               {chosen.version !== current.version ? (
-                <Button size="sm" onClick={() => run('update_mesh', { meshId: current.id, text: chosen.sourceText.replace(/ v\d+/, ` v${current.version + 1}`), changeNote: `Restored from v${chosen.version}`, simulate: false })}>
+                <Button size="sm" onClick={() => run('update_mesh', { meshId: current.id, text: chosen.sourceText.replace(/ v\d+/, ` v${current.version + 1}`), changeNote: `Restored from v${chosen.version}` })}>
                   Restore as v{current.version + 1}
                 </Button>
               ) : null}
@@ -558,26 +555,21 @@ Text: = != CONTAINS (any case)
 GUARDS
 NEVER Spoil IF sender IN never_hidden`
 
-export function MeshEditor({
-  mesh,
-  onSaved,
-  initialText = null,
-  banner = null,
-  previewOnMount = false,
-}: {
-  mesh: Mesh | null
-  onSaved: (id: string, version: number) => void
-  initialText?: string | null
-  banner?: ReactNode
-  /** Run Preview impact as soon as the editor opens: the version just saved shows what it does over the window. */
-  previewOnMount?: boolean
-}) {
+export function MeshEditor({ mesh, onSaved, initialText = null, banner = null }: { mesh: Mesh | null; onSaved: (id: string) => void; initialText?: string | null; banner?: ReactNode }) {
   const { run } = useAction()
   const nav = useNavigate()
   const { digName } = useDigContext()
   const signals = useSignals()
   const fromDirector = initialText !== null
   const [text, setText] = useState(initialText ?? mesh?.sourceText ?? NEW_MESH_TEMPLATE)
+  // The editor outlives a save (it is keyed by Mesh, not version): when the
+  // version changes under it the text follows, and `dirty` clears with it.
+  const seenVersion = useRef(mesh?.version ?? null)
+  useEffect(() => {
+    if (!mesh || mesh.version === seenVersion.current) return
+    seenVersion.current = mesh.version
+    setText(mesh.sourceText)
+  }, [mesh])
   const [issues, setIssues] = useState<MeshParseIssue[]>([])
   const [parsed, setParsed] = useState<Mesh | null>(null)
   /** The text the last successful parse was of, so a blur mid-debounce waits for it. */
@@ -674,25 +666,20 @@ export function MeshEditor({
       setSimulating(false)
     }
   }
-  /** Save without the simulation, then preview the saved text in the background; a new Mesh leaves this editor for its page. */
+  /** Save (no simulation), then preview the saved text while `onSaved` refreshes the Mesh; a new Mesh leaves this editor for its page. */
   const apply = async () => {
     if (applying) return
     setApplying(true)
-    let out: { result: { mesh: Mesh } } | null = null
-    try {
-      out = mesh ? await run<{ mesh: Mesh; report: SimulationReport | null }>('update_mesh', { meshId: mesh.id, text, changeNote: note || null, simulate: false }) : await run<{ mesh: Mesh; report: SimulationReport | null }>('create_mesh', { text, status, changeNote: note || null })
-    } catch {
-      // `run` has shown the error; the text stays to try again.
-    } finally {
-      setApplying(false)
-    }
+    const call = mesh ? run<{ mesh: Mesh }>('update_mesh', { meshId: mesh.id, text, changeNote: note || null }) : run<{ mesh: Mesh }>('create_mesh', { text, status, changeNote: note || null })
+    // `run` has shown any error; the text stays to try again.
+    const out = await call.catch(() => null).finally(() => setApplying(false))
     if (!out) return
-    // The editor is keyed by version, so the saved version's editor is a new instance; it runs the preview on mount.
-    onSaved(out.result.mesh.id, out.result.mesh.version)
+    onSaved(out.result.mesh.id)
+    if (mesh) {
+      setReport(null)
+      void preview()
+    }
   }
-  useEffect(() => {
-    if (previewOnMount) void preview()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const insert = (s: Snippet) => {
     const el = ta.current
     const start = el?.selectionStart ?? text.length

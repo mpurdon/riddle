@@ -3,9 +3,9 @@
  * per message, and the Inbox once refetched for each of them.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { QueryClient } from '@tanstack/react-query'
+import { hashKey, QueryClient, QueryObserver } from '@tanstack/react-query'
 import type { RiddleEvent } from '@/bindings/RiddleEvent'
-import type { TaskCentre } from '@/bindings/TaskCentre'
+import { taskCentre } from '@/test/fixtures'
 import { qk } from './api'
 import { clearPendingInvalidations, COALESCE_MAX_MS, COALESCE_MS, handleEvent, watchBoot } from './events'
 
@@ -15,11 +15,9 @@ const classified = (n: number): RiddleEvent => ({ type: 'message_classified', me
 function client() {
   const qc = new QueryClient()
   const spy = vi.spyOn(qc, 'invalidateQueries').mockResolvedValue()
-  const hits = (key: readonly unknown[]) => spy.mock.calls.filter((c) => JSON.stringify(c[0]?.queryKey) === JSON.stringify(key)).length
+  const hits = (key: readonly unknown[]) => spy.mock.calls.filter((c) => c[0]?.queryKey && hashKey(c[0].queryKey) === hashKey(key)).length
   return { qc, hits, spy }
 }
-
-const taskCentre = (over: Partial<TaskCentre> = {}): TaskCentre => ({ overall: 'caught_up', digs: [], jobs: [], storeFault: null, judge: null, llm: null, asOf: '2026-10-19T07:00:00.000Z', ...over })
 
 describe('refetching on events during a pass', () => {
   beforeEach(() => vi.useFakeTimers())
@@ -40,8 +38,19 @@ describe('refetching on events during a pass', () => {
     expect(hits(qk.messages)).toBe(1)
     expect(hits(qk.summary)).toBe(1)
     expect(hits(qk.recentTraces)).toBe(1)
-    // The message named by each event refreshes at once, in case it is the one open.
-    expect(hits(qk.message('dig-1', 'm_7'))).toBe(1)
+    // Nothing on screen reads the messages named, so none of them is asked for.
+    expect(hits(qk.message('dig-1', 'm_7'))).toBe(0)
+  })
+
+  it('refreshes the one message that is open at once', () => {
+    const { qc, hits } = client()
+    const key = qk.message('dig-1', 'm_7')
+    const unsubscribe = new QueryObserver(qc, { queryKey: key, queryFn: () => null, enabled: false }).subscribe(() => {})
+    handleEvent(qc, classified(7))
+    handleEvent(qc, classified(8))
+    expect(hits(key)).toBe(1)
+    expect(hits(qk.message('dig-1', 'm_8'))).toBe(0)
+    unsubscribe()
   })
 
   it('still refetches while a stream never pauses', () => {

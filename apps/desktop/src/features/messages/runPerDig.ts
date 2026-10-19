@@ -27,6 +27,19 @@ export function byDig(messages: MessageSummary[]): [digId: string, ids: string[]
   return [...g.entries()]
 }
 
+/**
+ * Several Actions as one: `work` gets an Action layer whose `run` skips its
+ * own refetch and whose `invalidateAfter` does nothing, and the queries the
+ * named Actions touch refresh once when it is done. The Spoil review's Undo
+ * and its Never Hidden had each written the loop.
+ */
+export async function runAll<T>({ run, invalidateAfter }: Actions, actions: string[], work: (quiet: Actions) => Promise<T>): Promise<T> {
+  const quiet = ((action, args, opts) => run(action, args, { ...opts, skipInvalidate: true })) as Actions['run']
+  const result = await work({ run: quiet, invalidateAfter: async () => {} })
+  await invalidateAfter(actions)
+  return result
+}
+
 /** Runs `action` once per account; returns the activity ids, for an Undo that covers them all. */
 export async function runPerDig({ run, invalidateAfter }: Actions, messages: MessageSummary[], action: string, extra: Record<string, unknown> = {}, opts: Omit<RunOptions, 'digId'> = {}): Promise<string[]> {
   const groups = byDig(messages)

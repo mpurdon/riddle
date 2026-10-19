@@ -41,6 +41,10 @@ struct Draft {
     shadow: bool,
     judge_identity: Option<String>,
     judge_unavailable: bool,
+    /// The judge was asked and failed on this message itself (a state too
+    /// large to send): it would fail the same way again, so housekeeping
+    /// does not ask (`JUDGE_FAILED_STRATEGY`).
+    judge_failed: bool,
     cached: usize,
     fresh: usize,
     truncated: Vec<String>,
@@ -73,6 +77,7 @@ impl Draft {
             shadow,
             judge_identity: None,
             judge_unavailable: false,
+            judge_failed: false,
             cached: 0,
             fresh: 0,
             truncated: vec![],
@@ -405,6 +410,7 @@ pub async fn run(sift: &Sift, input: SiftInput) -> Result<SiftOutcome> {
                         set.as_str(),
                         e.message
                     );
+                    draft.judge_failed = true;
                     judge_reason.get_or_insert_with(|| format!("judge failed: {}", e.message));
                 }
             }
@@ -948,7 +954,11 @@ fn finish(
         dig_id: input.dig.dig_id.clone(),
         objective: sift.opts.objective.clone(),
         strategy: if draft.judge_unavailable {
-            "deterministic-only (judge unavailable)".into()
+            if draft.judge_failed {
+                riddle_core::JUDGE_FAILED_STRATEGY.into()
+            } else {
+                riddle_core::JUDGE_UNAVAILABLE_STRATEGY.into()
+            }
         } else if draft.escalation.is_some() {
             "mesh with LLM escalation".into()
         } else {

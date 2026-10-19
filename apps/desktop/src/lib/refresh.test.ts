@@ -6,28 +6,11 @@ import { describe, expect, it } from 'vitest'
 import { QueryClient, type InfiniteData } from '@tanstack/react-query'
 import type { MessageSummary } from '@/bindings/MessageSummary'
 import type { Page } from '@/bindings/Page'
+import { messageSummary } from '@/test/fixtures'
 import { qk } from './api'
 import { addStrataToRows, dropMessageRows } from './refresh'
 
-const row = (id: string, strata: string[] = []): MessageSummary => ({
-  id,
-  digId: 'dig-1',
-  threadId: `t_${id}`,
-  subject: `Subject ${id}`,
-  from: { email: 'x@example.com', name: null },
-  date: '2026-09-25T09:00:00Z',
-  snippet: '',
-  labels: [],
-  isSent: false,
-  hasAttachments: false,
-  disposition: null,
-  strata,
-  findId: null,
-  shadow: false,
-  shadowReview: null,
-  importance: 'normal',
-  importanceSetByYou: false,
-})
+const row = (id: string, strata: string[] = []) => messageSummary({ id, threadId: `t_${id}`, subject: `Subject ${id}`, strata })
 
 type Pages = InfiniteData<Page<MessageSummary>, string | null>
 const INBOX = [...qk.messages, 'paged', null, { disposition: null }, null]

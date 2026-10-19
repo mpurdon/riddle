@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { MessageSummary } from '@/bindings/MessageSummary'
-import { byDig, runPerDig } from './runPerDig'
+import { byDig, runAll, runPerDig } from './runPerDig'
 
 const row = (id: string, digId: string): MessageSummary => ({
   id,
@@ -55,5 +55,21 @@ describe('a bulk verb under All accounts', () => {
     expect(a.run).toHaveBeenCalledTimes(1)
     expect(a.run).toHaveBeenCalledWith('move_to_spoil', { digId: 'dig-1', messageIds: ['a', 'c'], until: 'x' }, expect.objectContaining({ digId: 'dig-1', skipInvalidate: undefined }))
     expect(a.invalidateAfter).not.toHaveBeenCalled()
+  })
+})
+
+describe('several Actions as one', () => {
+  it('runs the work without a refetch each, refreshes once for the Actions named, and returns what the work returned', async () => {
+    const a = actions()
+    const out = await runAll(a, ['add_never_hidden', 'restore_messages'], async (quiet) => {
+      await quiet.run('add_never_hidden', { entry: 'x@example.com' })
+      await runPerDig(quiet, [row('a', 'dig-1'), row('b', 'dig-2')], 'restore_messages')
+      return 'done'
+    })
+    expect(out).toBe('done')
+    expect(a.run).toHaveBeenCalledTimes(3)
+    for (const call of a.run.mock.calls as unknown[][]) expect(call[2]).toEqual(expect.objectContaining({ skipInvalidate: true }))
+    expect(a.invalidateAfter).toHaveBeenCalledTimes(1)
+    expect(a.invalidateAfter).toHaveBeenCalledWith(['add_never_hidden', 'restore_messages'])
   })
 })

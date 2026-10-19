@@ -133,10 +133,12 @@ async fn a_full_sync_of_the_fixture_lands_every_listed_message_with_thread_state
         .count() as u64;
     assert_eq!(report.added, expected);
     assert_eq!(repo::messages::count(&store).unwrap(), expected);
+    // The first page is headers only, so the list shows at once; every page
+    // after it came with its bodies (19 Oct 2026).
     assert_eq!(
         repo::messages::count_without_body(&store).unwrap(),
-        expected,
-        "metadata first, bodies later"
+        u64::from(options().page_size).min(expected),
+        "headers first for one page, bodies with the rest"
     );
     assert!(
         phases.contains(&SyncPhase::Listing)
@@ -180,17 +182,15 @@ async fn a_full_sync_of_the_fixture_lands_every_listed_message_with_thread_state
         .take()
         .iter()
         .any(|e| matches!(e, RiddleEvent::MessagesChanged { .. })));
-    // Bodies arrive lazily, newest first.
+    // The first page's bodies arrive lazily, newest first; nothing else waits.
+    let first_page = u64::from(options().page_size).min(expected);
     let n = h
         .engine
         .fetch_bodies(30, &mut no_progress(), &cancel)
         .await
         .unwrap();
-    assert_eq!(n, 30);
-    assert_eq!(
-        repo::messages::count_without_body(&store).unwrap(),
-        expected - 30
-    );
+    assert_eq!(n, first_page);
+    assert_eq!(repo::messages::count_without_body(&store).unwrap(), 0);
     let newest = repo::messages::list(
         &store,
         &h.dig.id,
@@ -798,11 +798,12 @@ async fn the_history_backfill_extends_the_window_backwards_and_stops_at_the_sett
         steps.iter().any(|s| s.starts_with("through ")),
         "the step says how far back it has come: {steps:?}"
     );
-    // Newest first, so every backfilled message so far has its body.
+    // Newest first, so every backfilled message so far has its body; of the
+    // window only its first page, headers only, still waits for bodies.
     assert_eq!(
         repo::messages::count_without_body(&store).unwrap(),
-        in_window,
-        "the window's bodies come separately; the backfill's come with the page"
+        u64::from(options().page_size).min(in_window),
+        "the window's first page is headers only; the rest and the backfill's pages came with bodies"
     );
     // The rest, each run from a new engine, as after a restart.
     while !h

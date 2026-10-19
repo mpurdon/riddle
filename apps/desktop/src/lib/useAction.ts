@@ -56,6 +56,8 @@ export interface RunOptions {
   confirmWith?: (pending: PendingAction) => Promise<boolean>
   /** The caller renders the failure inline; skip the error toast so it is not said twice. */
   toastErrors?: boolean
+  /** For an Action that simulates before it acts (`SIMULATION_TIMEOUT_MS`); the default is a minute. */
+  timeoutMs?: number
   /**
    * Skip the query invalidation after success. A bulk loop runs many Actions
    * and invalidates once at the end with `invalidateAfter`, instead of
@@ -162,7 +164,7 @@ export function useAction() {
       const ahead = action === 'save_settings' ? await settingsAhead(qc, args) : null
       let outcome: (ActionOutcome & { result: T }) | null = null
       try {
-        outcome = await invoke<T>(action, args, { digId: opts.digId, idempotencyKey: opts.idempotencyKey, confirmed: opts.confirmed })
+        outcome = await invoke<T>(action, args, { digId: opts.digId, idempotencyKey: opts.idempotencyKey, confirmed: opts.confirmed, timeoutMs: opts.timeoutMs })
       } catch (e) {
         const pending = pendingFrom(e)
         if (!pending) {
@@ -171,12 +173,11 @@ export function useAction() {
           throw toRiddleError(e)
         }
         // A dialog asks beside the stored value; the chosen one returns with the confirmed outcome.
-        const asked = !confirmsImmediately(pending.confirmation)
-        if (asked) ahead?.rollback()
+        if (!confirmsImmediately(pending.confirmation)) ahead?.rollback()
         try {
           outcome = await settle<T>(pending, opts)
         } catch (err) {
-          if (!asked) ahead?.rollback()
+          ahead?.rollback()
           throw err
         }
         // Null is a declined dialog, already rolled back.
@@ -196,7 +197,7 @@ export function useAction() {
         if (!ok) return null
       }
       try {
-        return await confirm<T>(pending, { digId: opts.digId, idempotencyKey: opts.idempotencyKey })
+        return await confirm<T>(pending, { digId: opts.digId, idempotencyKey: opts.idempotencyKey, timeoutMs: opts.timeoutMs })
       } catch (e) {
         if (opts.toastErrors !== false) showError(e)
         throw toRiddleError(e)

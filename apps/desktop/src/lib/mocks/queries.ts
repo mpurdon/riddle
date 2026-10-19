@@ -72,15 +72,20 @@ function importanceOf(d: Disposition | null): Importance {
   return d && (d.kind === 'spoil' || d.kind === 'filed' || d.kind === 'contamination') ? 'low' : 'normal'
 }
 
+/** The decision's reason as the backend writes it: the spec's sentence, else the rule that matched. */
+export function reasonFor(state: MockState, id: string): string {
+  return state.specs.get(id)?.reason ?? state.traces.get(`tr_${id}`)?.matchedRule ?? ''
+}
+
 export function toSummary(state: MockState, m: Message, shadowOnly = false): MessageSummary {
   const raw = state.classifications.get(m.id)
   // The proposal outlives a disagreement, as the backend's shadow row does.
   const proposal = state.shadowProposals.get(m.id) ?? (raw?.shadow ? raw.disposition : undefined)
   const c = shadowOnly ? (proposal ? { ...(raw ?? { strata: [], findId: null, handledByUserAt: null, shadow: true }), disposition: proposal, shadow: true } : undefined) : raw?.shadow ? undefined : raw
   // The decision's reason rides on an Unresolved row, as the backend's summary row carries it; the same sentence `explain` gives.
-  const heldReason = c?.disposition?.kind === 'unresolved' ? (state.specs.get(m.id)?.reason ?? state.traces.get(`tr_${m.id}`)?.matchedRule ?? '') : ''
+  const reason = c?.disposition?.kind === 'unresolved' ? reasonFor(state, m.id) : ''
   return {
-    ...(heldReason ? { heldReason } : {}),
+    heldReason: reason || undefined,
     id: m.id,
     digId: m.digId,
     threadId: m.threadId,
@@ -217,7 +222,6 @@ export function explain(state: MockState, digId: string, messageId: string): Exp
   const c = state.classifications.get(m.id)
   const t = state.traces.get(`tr_${m.id}`)
   if (!c?.disposition || !t) throw err('not_found', 'this message has not been sifted yet; there is nothing to explain')
-  const spec = state.specs.get(m.id)
   return {
     messageId: m.id,
     disposition: c.disposition,
@@ -231,7 +235,7 @@ export function explain(state: MockState, digId: string, messageId: string): Exp
     llmRationale: t.escalation?.rationale ?? null,
     traceId: t.id,
     shadow: c.shadow,
-    reason: spec?.reason ?? t.matchedRule ?? '',
+    reason: reasonFor(state, m.id),
     routes: mockRouteChecks(state, m, t),
     importance: state.importance.get(m.id) ?? importanceOf(c.disposition),
     importanceSetByYou: state.importance.has(m.id),
@@ -248,7 +252,6 @@ function earlierMeshLines(t: DecisionTrace): string[] {
 
 function classificationOf(state: MockState, m: Message, t: DecisionTrace): Classification {
   const c = state.classifications.get(m.id)
-  const spec = state.specs.get(m.id)
   return {
     id: `cls_${m.id}`,
     messageId: m.id,
@@ -261,7 +264,7 @@ function classificationOf(state: MockState, m: Message, t: DecisionTrace): Class
     meshVersion: t.meshVersion,
     matchedRule: t.matchedRule,
     confidence: t.confidence,
-    reason: spec?.reason ?? t.matchedRule ?? '',
+    reason: reasonFor(state, m.id),
     traceId: t.id,
     shadow: !!c?.shadow,
     createdAt: t.createdAt,

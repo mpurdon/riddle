@@ -14,13 +14,13 @@
 //! job otherwise. A panic in a handler fails the job; it never takes the
 //! scheduler down.
 
+use crate::budget::{yields_to_budget, BudgetClass, BudgetGate, UnlimitedBudget};
 use crate::queue::JobQueue;
-use crate::resources::{BudgetClass, Resources};
 use crate::spec::{is_long_running, resource_class, JobEnvelope, ResourceClass};
 use async_trait::async_trait;
 use parking_lot::{Mutex, RwLock};
 use riddle_actions::Services;
-use riddle_core::{DigId, Job, JobId, JobKind, JobStatus, Progress};
+use riddle_core::{DigId, Job, JobId, JobKind, JobStatus, Priority, Progress};
 use riddle_errors::{ErrorKind, Result, RiddleError};
 use riddle_observability::{rdebug, rerror, rinfo, rwarn, Category};
 use serde_json::Value;
@@ -258,7 +258,7 @@ struct RunningEntry {
 pub struct Runner {
     queue: Arc<JobQueue>,
     services: Arc<Services>,
-    resources: Arc<Resources>,
+    budget: RwLock<Arc<dyn BudgetGate>>,
     handlers: RwLock<HashMap<JobKind, Arc<dyn JobHandler>>>,
     notifier: RwLock<Arc<dyn Notifier>>,
     max_concurrent: usize,
@@ -269,15 +269,11 @@ pub struct Runner {
 }
 
 impl Runner {
-    pub fn new(
-        queue: Arc<JobQueue>,
-        services: Arc<Services>,
-        resources: Arc<Resources>,
-    ) -> Arc<Self> {
+    pub fn new(queue: Arc<JobQueue>, services: Arc<Services>) -> Arc<Self> {
         Arc::new(Self {
             queue,
             services,
-            resources,
+            budget: RwLock::new(Arc::new(UnlimitedBudget)),
             handlers: RwLock::new(HashMap::new()),
             notifier: RwLock::new(Arc::new(NullNotifier)),
             max_concurrent: DEFAULT_MAX_CONCURRENT,
@@ -301,7 +297,7 @@ impl Runner {
         Arc::new(Self {
             queue: self.queue.clone(),
             services: self.services.clone(),
-            resources: self.resources.clone(),
+            budget: RwLock::new(self.budget.read().clone()),
             handlers: RwLock::new(self.handlers.read().clone()),
             notifier: RwLock::new(self.notifier.read().clone()),
             max_concurrent,
@@ -321,8 +317,20 @@ impl Runner {
     pub fn queue(&self) -> &Arc<JobQueue> {
         &self.queue
     }
-    pub fn resources(&self) -> &Arc<Resources> {
-        &self.resources
+    pub fn set_budget_gate(&self, gate: Arc<dyn BudgetGate>) {
+        *self.budget.write() = gate;
+    }
+    pub fn budget_gate(&self) -> Arc<dyn BudgetGate> {
+        self.budget.read().clone()
+    }
+    /// Asked before a budgeted job starts.
+    fn budget_exhausted(
+        &self,
+        dig: Option<&DigId>,
+        class: BudgetClass,
+        priority: Priority,
+    ) -> bool {
+        yields_to_budget(priority) && self.budget.read().remaining(dig, class) <= 0.0
     }
     pub fn running_count(&self) -> usize {
         self.running.lock().len()
@@ -392,10 +400,7 @@ impl Runner {
                 _ => None,
             };
             if let Some(bc) = budget_class {
-                if self
-                    .resources
-                    .budget_exhausted(job.dig_id.as_ref(), bc, job.priority)
-                {
+                if self.budget_exhausted(job.dig_id.as_ref(), bc, job.priority) {
                     drop(running);
                     self.queue.hold(&job.id, "budget");
                     continue;

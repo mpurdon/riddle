@@ -126,6 +126,12 @@ describe('the Task Centre indicator', () => {
     expect(i.tone).toBe('busy')
     expect(i.detail).toBe('Resolving the judge key')
   })
+  it('is Start failed, with the error, when the core could not start', () => {
+    const i = taskCentreIndicator(tc({ digs: [], bootError: 'the store could not be opened' }))
+    expect(i.label).toBe('Start failed')
+    expect(i.tone).toBe('bad')
+    expect(i.detail).toBe('the store could not be opened')
+  })
   it('says Nothing connected, in a neutral tone, when there is no account to be caught up with', () => {
     const i = taskCentreIndicator(tc({ digs: [] }))
     expect(i.label).toBe('Nothing connected')
